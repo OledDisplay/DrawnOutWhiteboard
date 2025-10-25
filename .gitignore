@@ -1,0 +1,39 @@
+# Python / Django basics
+__pycache__/
+*.py[cod]
+*.sqlite3
+*.log
+*.pot
+*.pyc
+db.sqlite3
+
+# Virtual environments
+venv/
+env/
+.venv/
+
+# VS Code
+.vscode/
+.idea/
+
+# Django static/media files
+staticfiles/
+media/
+*.bak
+
+# ComfyUI / AI models
+ComfyUI/models/
+ComfyUI/outputs/
+ComfyUI/temp/
+*.safetensors
+*.ckpt
+
+# OS stuff
+.DS_Store
+Thumbs.db
+
+# Cache & compiled junk
+*.egg-info/
+*.egg
+build/
+dist/
