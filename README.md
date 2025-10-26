@@ -14,9 +14,10 @@ download python 3.11 from python.org
 
 py -3.11 -m venv venv
 
-pip install torch==2.5.1+cu124 torchvision==0.20.1+cu124 torchaudio==2.5.1+cu124 \
-  --index-url https://download.pytorch.org/whl/cu124
-pip install xformers==0.0.28.post3
+get requirements.txt from DrawnOut\whiteboard\ComfySetup
+
+pip install torch==2.5.1+cu124 torchvision==0.20.1+cu124 torchaudio==2.5.1+cu124 --index-url https://download.pytorch.org/whl/cu124
+pip install xformers==0.0.29.post1 --extra-index-url https://download.pytorch.org/whl/cu124
 pip install requirements.txt --no-deps
 
 get models:
@@ -27,8 +28,8 @@ custom nodes (clone in ComfyUI/custom_nodes:
 http://github.com/Comfy-Org/ComfyUI-Manager
 https://github.com/chengzeyi/Comfy-WaveSpeed
 
-to run comfy command:
+to run comfy - command:
 python main.py --listen 0.0.0.0 --port 8188 --disable-auto-launch --verbose INFO --use-quad-cross-attention --fast --disable-metadata --dont-upcast-attention --force-channels-last --preview-method none
 
-drop in Model1.json
+get Model1.json from comfy setup and drop it in
 *make sure cfg = 1.4, guidance = 0.9
