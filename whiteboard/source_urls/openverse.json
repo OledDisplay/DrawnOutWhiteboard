@@ -1,0 +1,17 @@
+{
+  "url": "https://api.openverse.org/v1/images",
+  "Hasapi": "Y",
+  "TemplateEquivalent": {
+    "query_field": "q",
+    "limit_field": "page_size",
+    "pagination_field": "page",
+    "format_field": null
+  },
+  "FullTemplate": {
+    "q": "cell structure",
+    "license": "cc0,by,by-sa",
+    "license_type": "all",
+    "page_size": 5,
+    "page": 1
+  }
+}

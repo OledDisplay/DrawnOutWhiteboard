@@ -1,0 +1,11 @@
+{
+  "url": "https://commons.wikimedia.org/w/api.php",
+  "Hasapi": "N",
+  "SubjectUrls":{
+    "Maths" : "",
+    "Physics" : "",
+    "Biology" : "" , 
+    "Chemistry" : "",
+    "Geography" : ""
+  }
+}

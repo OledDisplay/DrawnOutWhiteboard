@@ -1,0 +1,19 @@
+{
+  "url": "https://commons.wikimedia.org/w/api.php",
+  "Hasapi": "Y",
+  "TemplateEquivalent": {
+    "query_field": "gsrsearch",
+    "limit_field": "gsrlimit",
+    "pagination_field": "continue",
+    "format_field": "format"
+  },
+  "FullTemplate": {
+    "action": "query",
+    "generator": "search",
+    "gsrsearch": "pythagorean theorem diagram filetype:svg",
+    "gsrlimit": 5,
+    "prop": "imageinfo|info",
+    "iiprop": "url|mime|extmetadata|size|sha1",
+    "format": "json"
+  }
+}
