@@ -1,2 +1,0 @@
-https://github.com/chengzeyi/Comfy-WaveSpeed
-http://github.com/Comfy-Org/ComfyUI-Manager

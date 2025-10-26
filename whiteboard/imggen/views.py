@@ -123,65 +123,6 @@ def _download_images(images: List[Dict[str, Any]], out_dir: Path) -> List[str]:
         saved.append(str(path))
     return saved
 
-# ── SINGLE IMAGE ENDPOINT ────────────────────────────────────────────────
-@csrf_exempt
-def generate_image(request):
-    """
-    GET  /generate/?prompt=...&path_out=outputs
-    POST /generate/   {"prompt":"...", "path_out":"outputs", "seed":123, "steps":4, "cfg":1.0}
-    """
-    # read inputs
-    if request.method == "POST":
-        try:
-            body = json.loads((request.body or b"{}").decode("utf-8"))
-        except json.JSONDecodeError:
-            return HttpResponseBadRequest("Invalid JSON")
-        prompt   = (body.get("prompt") or "").strip()
-        path_out = (body.get("path_out") or "").strip()
-        seed     = body.get("seed")
-        steps    = body.get("steps")
-        cfg      = body.get("cfg")
-    else:
-        prompt   = (request.GET.get("prompt") or "").strip()
-        path_out = (request.GET.get("path_out") or "").strip()
-        seed     = request.GET.get("seed")
-        steps    = request.GET.get("steps")
-        cfg      = request.GET.get("cfg")
-
-    if not prompt:
-        return HttpResponseBadRequest("Missing 'prompt'")
-
-    # pad to fixed tokens
-    prompt = pad_prompt_fixed_tokens(prompt)
-
-    base = _base_dir()
-    out_dir = Path(path_out) if path_out else (base / "outputs")
-
-    # workflow
-    wf_path = base / "Model_Fasr.json"
-    if not wf_path.exists():
-        return JsonResponse({"ok": False, "error": f"Workflow not found: {wf_path}"}, status=500)
-
-    try:
-        wf = _load_workflow(wf_path)
-        _set_prompt(wf, prompt)
-        # optional sampler tweaks
-        _set_sampler(
-            wf,
-            seed=int(seed) if seed is not None and str(seed).strip() != "" else None,
-            steps=int(steps) if steps is not None and str(steps).strip() != "" else None,
-            cfg=float(cfg)   if cfg   is not None and str(cfg).strip()   != "" else None,
-        )
-        pid = _queue_workflow(wf)
-        images = _wait_for_images(pid)
-        if not images:
-            return JsonResponse({"ok": False, "error": "completed but no images"}, status=502)
-        saved = _download_images(images, out_dir)
-    except Exception as e:
-        return JsonResponse({"ok": False, "error": str(e)}, status=502)
-
-    return JsonResponse({"ok": True, "saved": saved})
-
 # ── MULTI-IMAGE (SEQUENTIAL) ENDPOINT ────────────────────────────────────
 @csrf_exempt
 def generate_images_batch(request):

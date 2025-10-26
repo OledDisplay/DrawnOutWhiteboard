@@ -58,7 +58,7 @@
     "inputs": {
       "seed": 974545028074859,
       "steps": 4,
-      "cfg": 1.6,
+      "cfg": 1.4,
       "sampler_name": "deis",
       "scheduler": "karras",
       "denoise": 0.95,
@@ -86,7 +86,7 @@
   },
   "17": {
     "inputs": {
-      "guidance": 1.6,
+      "guidance": 0.9,
       "conditioning": [
         "8",
         0

@@ -21,12 +21,8 @@ staticfiles/
 media/
 *.bak
 
-# ComfyUI / AI models
-ComfyUI/models/
-ComfyUI/outputs/
-ComfyUI/temp/
-*.safetensors
-*.ckpt
+#temporary
+outputs/
 
 # OS stuff
 .DS_Store
