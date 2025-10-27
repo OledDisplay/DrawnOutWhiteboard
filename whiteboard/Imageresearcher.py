@@ -47,6 +47,8 @@ PARSERS = {
 #  }
 # }
 
+#IF MULTIPLE URLS FOR SCRAPE - CLONE TOPIC, EX: "Biology" : "" , "Biology" : "" , 
+
 class Source():
     def __init__(self, json_obj, name):
         self.name = name
@@ -57,6 +59,7 @@ class Source():
           self.type = "API"
         else:
           self.type = "NORMAL"
+          self.subjurls = json_obj.get("SubjectUrls")
         self.img_paths = None
 
 def read_sources():
@@ -112,18 +115,40 @@ def send_request(source: Source, settings: dict):
         return None, f"REQUEST_ERROR: {e}", built
 
 
-def handle_result(source, data):
+def handle_result_api(source, data):
     parser = PARSERS.get(source.get("name"))
     if not parser:
         print(f"No parser found for {source.get("name")}")
         return []
     return parser(source, data)
 
-if __name__ == "__main__":
+def search_for(url, subj, query): #return paths to locally saved images. Take all the text -> search for hits on phrases first, then trully scrape
+    
+def find_subdomains(url, subj): #go through website and find alll subdomains, look for a direct subj match. Pump some synonyms to subj name
 
+def find_synonym(word, count):
+
+
+def handle_result_no_api(source, query, subj):
+    if source.subjecturls:
+      for current_subj, url in source.subjecturls:
+        if(current_subj == subj and url):
+            search_for(url, query, subj) # append local image paths, so that we can have multiple scrape endpoints for a subj. Finally add the full thing to image paths
+
+    find_subdomains(source.url, subj)
+            
+        
+        
+
+
+
+if __name__ == "__main__":
+    
+    subj = "Biology" #we are getting these with llm
+    query = "Cell structure"
     # Example generic settings you will swap at runtime
     settings = {
-        "query_field": "temp_query_value",
+        "query_field": query,
         "limit_field": "10",
         "pagination_field": "temp_pagination_token",
         "format_field": "ignored_here",   # ignored value; only the field name matters
@@ -137,7 +162,12 @@ if __name__ == "__main__":
         if src.type == "API":
          status, data = send_request(src, settings)
          print(f"sent request, responded {status}")
-         handle_result(src, data)
+         handle_result_api(src, data)
+        else:
+         handle_result_no_api(src, query, subj)
+    
+    #generic web search as a sort of fallback
+         
 
 
 
