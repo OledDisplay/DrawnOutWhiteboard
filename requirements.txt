@@ -1,12 +1,15 @@
 asgiref==3.10.0
 certifi==2025.10.5
 charset-normalizer==3.4.4
+click==8.3.0
 colorama==0.4.6
 Django==5.2.7
 filelock==3.20.0
 fsspec==2025.9.0
 huggingface-hub==0.36.0
 idna==3.11
+joblib==1.5.2
+nltk==3.9.2
 numpy==2.3.4
 packaging==25.0
 PyYAML==6.0.3
