@@ -1,4 +1,4 @@
-Get the wordnet:
+Get the wordnet (python shell):
 import nltk
 nltk.download('wordnet')
 nltk.download('omw-1.4')  # optional, adds multilingual data
