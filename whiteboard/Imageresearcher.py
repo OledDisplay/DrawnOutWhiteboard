@@ -1,5 +1,9 @@
 import os, json, copy, requests, re
-from urllib.parse import urlparse, unquote
+from urllib.parse import urlparse, unquote, urljoin
+from nltk.corpus import wordnet as wn
+from bs4 import BeautifulSoup
+import tldextract
+from collections import deque
 
 def parse_wikimedia(): pass
 def parse_openverse(): pass
@@ -124,9 +128,79 @@ def handle_result_api(source, data):
 
 def search_for(url, subj, query): #return paths to locally saved images. Take all the text -> search for hits on phrases first, then trully scrape
     
-def find_subdomains(url, subj): #go through website and find alll subdomains, look for a direct subj match. Pump some synonyms to subj name
+def find_filtered_subdomains(base_url, lemma_obj, max_pages=120, timeout=8):
+    ext = tldextract.extract(urlparse(base_url).hostname or "")
+    registrable = f"{ext.domain}.{ext.suffix}" if ext.suffix else ext.domain
+    if not registrable: return [], set()
 
-def find_synonym(word, count):
+    phrases = {s.strip().lower() for v in lemma_obj.values() for s in v.get("lemmas", []) if len(s.strip())>1}
+    clean = lambda u: unquote(re.sub(r"[#].*$", "", re.sub(r"[?&](utm_[^=&]+|fbclid|gclid)=[^&]*", "", u)))
+    same_reg = lambda h: (lambda e: f"{e.domain}.{e.suffix}" if e.suffix else e.domain)(tldextract.extract(h)) == registrable
+
+    visited, q = set(), deque([clean(base_url)])
+    same_site, subs, valid = set(), set(), set()
+    headers = {"User-Agent": "subfinder/1.0"}
+
+    while q and len(visited) < max_pages:
+        cur = q.popleft()
+        if cur in visited: continue
+        visited.add(cur)
+        try:
+            r = requests.get(cur, headers=headers, timeout=timeout)
+            if not r.ok or "text/html" not in (r.headers.get("Content-Type","")): continue
+        except requests.RequestException:
+            continue
+
+        soup = BeautifulSoup(r.text, "html.parser")
+        for a in soup.find_all("a", href=True):
+            href = clean(urljoin(cur, a["href"]))
+            host = urlparse(href).hostname or ""
+            if not host or not same_reg(host): continue
+            same_site.add(href)
+            sub = tldextract.extract(host).subdomain
+            if sub: subs.add(f"{sub}.{registrable}")
+            if href not in visited: q.append(href)
+
+    for u in same_site:
+        if any(p in u.lower() for p in phrases):
+            valid.add(u)
+
+    return sorted(valid), subs
+
+
+def get_limited_lemmas(word, per_synset_limit=4, pos_filter=None):
+    """
+    Get all lemma names (synonyms) for a given word,
+    limiting the number of lemmas per synset.
+
+    Args:
+        word (str): the word to search
+        per_synset_limit (int): how many lemmas to take from each synset
+        pos_filter (str or list): optional, restrict by part of speech ('n', 'v', 'a', 'r')
+
+    Returns:
+        dict: mapping from synset name -> list of lemma names
+    """
+    # Normalize POS filter
+    if isinstance(pos_filter, str):
+        pos_filter = [pos_filter]
+
+    synsets = wn.synsets(word)
+    if pos_filter:
+        synsets = [s for s in synsets if s.pos() in pos_filter]
+
+    results = {}
+
+    for syn in synsets:
+        lemmas = syn.lemmas()
+        limited = [lemma.name().replace('_', ' ') for lemma in lemmas[:per_synset_limit]]
+        results[syn.name()] = {
+            "definition": syn.definition(),
+            "lemmas": limited
+        }
+
+    return results
+
 
 
 def handle_result_no_api(source, query, subj):
@@ -135,7 +209,7 @@ def handle_result_no_api(source, query, subj):
         if(current_subj == subj and url):
             search_for(url, query, subj) # append local image paths, so that we can have multiple scrape endpoints for a subj. Finally add the full thing to image paths
 
-    find_subdomains(source.url, subj)
+    find_filtered_subdomains(source.url,get_limited_lemmas(subj, 4), 60, 8)
             
         
         
@@ -533,3 +607,4 @@ def parse_usgs(src, data):
 
     src.img_paths = saved_paths
     return saved_paths
+
