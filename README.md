@@ -1,3 +1,7 @@
+Get the wordnet:
+import nltk
+nltk.download('wordnet')
+nltk.download('omw-1.4')  # optional, adds multilingual data
 
 SETTING UP COMFY UI:
 *make sure you have the vram
