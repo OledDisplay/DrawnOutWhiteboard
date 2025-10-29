@@ -23,6 +23,7 @@ media/
 
 #temporary
 outputs/
+ResearchImages/
 
 # OS stuff
 .DS_Store

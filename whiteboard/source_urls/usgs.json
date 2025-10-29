@@ -1,6 +1,6 @@
 {
   "url": "https://www.sciencebase.gov/catalog/items",
-  "Hasapi": "Y",
+  "HasApi": "Y",
   "TemplateEquivalent": {
     "query_field": "q",
     "limit_field": "max",

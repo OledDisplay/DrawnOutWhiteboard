@@ -1,6 +1,6 @@
 {
   "url": "https://commons.wikimedia.org/w/api.php",
-  "Hasapi": "Y",
+  "HasApi": "Y",
   "TemplateEquivalent": {
     "query_field": "gsrsearch",
     "limit_field": "gsrlimit",

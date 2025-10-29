@@ -1,6 +1,6 @@
 {
-  "url": "https://commons.wikimedia.org/w/api.php",
-  "Hasapi": "N",
+  "url": "https://openstax.org/",
+  "HasApi": "N",
   "SubjectUrls":{
     "Maths" : "",
     "Physics" : "",

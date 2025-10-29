@@ -1,6 +1,6 @@
 {
   "url": "https://api.plos.org/search",
-  "Hasapi": "Y",
+  "HasApi": "Y",
   "TemplateEquivalent": {
     "query_field": "q",
     "limit_field": "rows",
