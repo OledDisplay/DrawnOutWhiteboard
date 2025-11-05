@@ -10,11 +10,10 @@
   },
   "SubjectUrlsFound": {
     "Biology": [
-      "https://openstax.org/details/books/concepts-biology",
-      "https://openstax.org/k12/biology",
       "https://openstax.org/details/books/biology-2e",
-      "https://openstax.org/details/books/microbiology",
-      "https://openstax.org/details/books/biology"
+      "https://openstax.org/details/books/biology-ap-courses",
+      "https://openstax.org/details/books/concepts-biology",
+      "https://openstax.org/details/books/microbiology"
     ]
   }
 }

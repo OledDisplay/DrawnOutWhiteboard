@@ -9,6 +9,10 @@ from pathlib import Path
 
 from duckduckgo_search import DDGS  # (left intact for API section)
 
+from smart_hits import smart_find_hits_in_soup
+
+
+
 # ========= CONFIG & DEBUG =========
 DEBUG = True
 def dbg(*args):
@@ -542,16 +546,56 @@ def js_capable_fetch(
     url: str,
     timeout_ms: int = 15000,
     wait_selector: str | None = "a[href]",
-    expand: bool = True,
-    max_modal_clicks: int = 6,
+    js_mode: str = "full",          # NEW: "full" | "light" | "none"
+    max_modal_clicks: int = 3,
 ) -> Tuple[str | None, List[str], str]:
-    if url.lower().endswith((".pdf", ".docx", ".zip", ".pptx", ".xls", ".xlsx", ".png", ".jpg", ".jpeg")):
+    """
+    Fetch a page and return (html, anchors, via).
+
+    js_mode:
+      - "full": Playwright render + DOM expansion + modal/shadow/data-* harvesting.
+      - "light": Playwright render only; NO expansion/modals/shadow scan (visible anchors fast path).
+      - "none": Plain requests + BeautifulSoup; no JS, no expansion.
+
+    Notes:
+      - Non-HTML resources and blocklisted URLs are skipped early.
+      - Anchors are absolutized against the input URL.
+      - 'via' indicates which path was used: "playwright:full", "playwright:light", or "requests".
+    """
+    # quick skips
+    low = (url or "").lower()
+    if low.endswith((".pdf", ".docx", ".zip", ".pptx", ".xls", ".xlsx",
+                     ".png", ".jpg", ".jpeg", ".gif", ".webp", ".svg")):
         dbg(f"[SKIP] non-HTML resource: {url}")
         return None, [], "none"
-    if any(bad in url.lower() for bad in BLOCKED_URL_WORDS):
+    if any(bad in low for bad in BLOCKED_URL_WORDS):
         dbg(f"[SKIP][BLOCKLIST] {url}")
         return None, [], "blocked"
 
+    # ---- js_mode: none (requests + BS4) ----
+    if js_mode == "none":
+        try:
+            r = requests.get(url, headers=UA, timeout=timeout_ms / 1000)
+            r.raise_for_status()
+            ct = (r.headers.get("Content-Type") or "").lower()
+            if "html" not in ct:
+                return None, [], "requests"
+            html = r.text
+            soup = BeautifulSoup(html, "html.parser")
+            anchors = []
+            for a in soup.find_all("a", href=True):
+                try:
+                    anchors.append(urljoin(url, a.get("href")))
+                except Exception:
+                    continue
+            dbg(f"[JSFETCH][requests] {url} ok anchors={len(anchors)} html_len={len(html)}")
+            return html, anchors, "requests"
+        except Exception as e:
+            dbg(f"[JSFETCH][requests] failed for {url}: {e}")
+            return None, [], "requests"
+
+    # ---- js_mode: full/light (Playwright) ----
+    expand = (js_mode == "full")
     try:
         from playwright.sync_api import sync_playwright
         with sync_playwright() as p:
@@ -559,20 +603,19 @@ def js_capable_fetch(
             ctx = browser.new_context()
             page = ctx.new_page()
             page.set_default_timeout(timeout_ms)
-            page.goto(url, wait_until="domcontentloaded")
 
+            page.goto(url, wait_until="domcontentloaded")
             try:
                 page.wait_for_load_state("networkidle", timeout=timeout_ms // 2)
             except Exception:
                 pass
-
             if wait_selector:
                 try:
                     page.wait_for_selector(wait_selector, state="attached", timeout=timeout_ms // 2)
                 except Exception:
                     pass
 
-            # IMPORTANT: pass expand flag; if False, also zero out modal clicks
+            # IMPORTANT: in light mode we pass expand=False and zero modal clicks.
             anchors = collect_links_with_modals_sync(
                 page,
                 expand=expand,
@@ -587,14 +630,17 @@ def js_capable_fetch(
                 pass
             browser.close()
 
-            dbg(f"[JSFETCH][playwright] {url} ok anchors={len(anchors)} html_len={len(html)} expand={expand}")
-            return html, anchors, "playwright"
+            mode_tag = f"playwright:{'full' if expand else 'light'}"
+            dbg(f"[JSFETCH][{mode_tag}] {url} ok anchors={len(anchors)} html_len={len(html)}")
+            return html, anchors, mode_tag
+
     except ImportError:
-        dbg("[JSFETCH] Playwright not installed (required).")
+        dbg("[JSFETCH] Playwright not installed.")
     except Exception as e:
         dbg(f"[JSFETCH][playwright] failed for {url}: {e}")
 
     return None, [], "none"
+
 
 
 
@@ -1148,10 +1194,11 @@ def stage2_drill_search_and_images(
     roots: list[str],
     base_query: str,
     lemma_obj: dict,
-    hard_image_cap: int,
+    hard_image_cap: int,                 # e.g. 5  (per-root)
     session: requests.Session,
     html_cache: dict,
     anchors_cache: dict,
+    global_image_cap: int | None = None  # e.g. 20 total; or None to disable
 ) -> list[str]:
     phrase_rxs, proximity_tokens = _compile_phrase_regexes_adapter(base_query, lemma_obj)
 
@@ -1162,7 +1209,7 @@ def stage2_drill_search_and_images(
             dbg(f"[S2][cache] url={url} anchors={len(a)} soup_ok={bool(html_cache[url])}")
             return soup, a, False
 
-        html, anchors, via = js_capable_fetch(url, expand=expand)
+        html, anchors, via = js_capable_fetch(url, js_mode=("full" if expand else "light"))
         if not html and not anchors:
             html_cache[url] = None
             anchors_cache[url] = []
@@ -1177,23 +1224,17 @@ def stage2_drill_search_and_images(
 
     def _parent_part(u: str) -> str:
         p = urlparse(u)
-        path = p.path or "/"
-        if path.endswith("/") and len(path) > 1:
-            path = path[:-1]
-        if "/" in path:
-            path = path.rsplit("/", 1)[0]
-        else:
-            path = "/"
+        path = (p.path or "/").rstrip("/")
+        if path and path != "/":
+            path = path.rsplit("/", 1)[0] or "/"
         return urlunparse((p.scheme or "https", (p.hostname or "").lower(), path, "", "", ""))
 
     def partition_anchors(cur: str, anchors: list[str], allowed_fn) -> tuple[list[str], list[str]]:
         cur_parent = _parent_part(cur)
         terms, deeper = [], []
         for a in anchors:
-            if not a or a == cur:
-                continue
-            if not allowed_fn(a):
-                continue
+            if not a or a == cur:           continue
+            if not allowed_fn(a):           continue
             if _parent_part(a) == cur_parent:
                 terms.append(a)
             else:
@@ -1203,8 +1244,21 @@ def stage2_drill_search_and_images(
     saved_paths: list[str] = []
     seen_urls: set[str] = set()
 
+    def cap_reached(per_root_saved: int) -> bool:
+        if per_root_saved >= hard_image_cap:
+            return True
+        if global_image_cap is not None and len(saved_paths) >= global_image_cap:
+            return True
+        return False
+
     for rdx, root in enumerate(roots, start=1):
+        if global_image_cap is not None and len(saved_paths) >= global_image_cap:
+            dbg(f"[S2] GLOBAL CAP reached ({global_image_cap}) — stopping.")
+            break
+
         dbg(f"[S2] ROOT[{rdx}/{len(roots)}]: {root}")
+        per_root_saved = 0
+        goto_next_root = False
 
         def _allowed(child_url: str) -> bool:
             try:
@@ -1212,10 +1266,14 @@ def stage2_drill_search_and_images(
             except Exception:
                 return False
 
+        if cap_reached(per_root_saved):
+            dbg(f"[S2] cap already reached before root work; skipping {root}")
+            continue
+
         # ROOT: expand to expose TOC / nested links
         soup0, anchors0, _ = render(root, expand=True)
         if not anchors0:
-            dbg(f"[S2] ROOT DONE {root} images_so_far={len(saved_paths)}"); 
+            dbg(f"[S2] ROOT DONE {root} images_so_far={len(saved_paths)}")
             continue
 
         term0, deeper0 = partition_anchors(root, anchors0, _allowed)
@@ -1223,20 +1281,27 @@ def stage2_drill_search_and_images(
 
         # TERMINALS: fetch FAST (expand=False)
         for tu in term0:
+            if cap_reached(per_root_saved):
+                goto_next_root = True
+                break
             if tu in seen_urls:
                 continue
             seen_urls.add(tu)
-            tsoup, _, _ = render(tu, expand=False)      # ← no expand on terminals
+
+            tsoup, _, _ = render(tu, expand=False)
             if not tsoup:
-                dbg(f"[S2][TERM] url={tu} soup=None"); 
+                dbg(f"[S2][TERM] url={tu} soup=None")
                 continue
-            hits = find_hits_in_soup(tsoup, phrase_rxs=phrase_rxs)
+
+            ranked = smart_find_hits_in_soup(tsoup, base_query, lemma_obj, min_score=0.60, top_k=None)
+            hits = [node for (node, score, _) in ranked]
             dbg(f"[S2][TERM] url={tu} hits={len(hits)}")
+
             for node in hits:
+                if cap_reached(per_root_saved):
+                    goto_next_root = True
+                    break
                 _dbg_hit_reason(tu, node, phrase_rxs[0])
-                if len(saved_paths) >= hard_image_cap:
-                    dbg(f"[S2] HARD CAP reached ({hard_image_cap})"); 
-                    return saved_paths
                 candidate = nearest_image_src_for_hit(node, tsoup, tu)
                 if not candidate:
                     continue
@@ -1252,153 +1317,306 @@ def stage2_drill_search_and_images(
                 if dest:
                     dbg(f"[IMG] saved {dest} (from {tu})")
                     saved_paths.append(dest)
-                    if len(saved_paths) >= hard_image_cap:
-                        dbg(f"[S2] HARD CAP reached ({hard_image_cap})"); return saved_paths
+                    per_root_saved += 1
+                    if cap_reached(per_root_saved):
+                        goto_next_root = True
+                        break
+            if goto_next_root:
+                break
 
+        if goto_next_root:
+            dbg(f"[S2] PER-ROOT CAP reached ({hard_image_cap}) at root={root}")
+            continue
 
-        # DEEPER: expand to harvest more children
-        queue = deque(deeper0)
-        visited_parents = set()
-        while queue and len(saved_paths) < hard_image_cap:
-            cur = queue.popleft()
-            if cur in seen_urls:
-                continue
-            seen_urls.add(cur)
-
-            csoup, canchors, _ = render(cur, expand=True)   # ← expand on deeper pages
-            if not canchors:
-                dbg(f"[S2] cur={cur} terminal=0 deeper=0 queue_left={len(queue)}"); 
-                continue
-
-            term, deeper = partition_anchors(cur, canchors, _allowed)
-            dbg(f"[S2] cur={cur} terminal={len(term)} deeper={len(deeper)} queue_left={len(queue)}")
-
-            for tu in term:
-                if tu in seen_urls:
+        # DEEPER: only if still under cap for this root
+        if not cap_reached(per_root_saved):
+            queue = deque(deeper0)
+            while queue and not cap_reached(per_root_saved):
+                cur = queue.popleft()
+                if cur in seen_urls:
                     continue
-                seen_urls.add(tu)
-                tsoup, _, _ = render(tu, expand=False)      # ← no expand on terminals
-                if not tsoup:
-                    dbg(f"[S2][TERM] url={tu} soup=None"); 
+                seen_urls.add(cur)
+
+                csoup, canchors, _ = render(cur, expand=True)
+                if not canchors:
+                    dbg(f"[S2] cur={cur} terminal=0 deeper=0 queue_left={len(queue)}")
                     continue
-                hits = find_hits_in_soup(tsoup, phrase_rxs=phrase_rxs,)
-                dbg(f"[S2][TERM] url={tu} hits={len(hits)}")
-                for node in hits:
-                    _dbg_hit_reason(tu, node, phrase_rxs[0])
-                    if len(saved_paths) >= hard_image_cap:
-                        dbg(f"[S2] HARD CAP reached ({hard_image_cap})"); 
-                        return saved_paths
-                    candidate = nearest_image_src_for_hit(node, tsoup, tu)
-                    if not candidate:
+
+                term, deeper = partition_anchors(cur, canchors, _allowed)
+                dbg(f"[S2] cur={cur} terminal={len(term)} deeper={len(deeper)} queue_left={len(queue)}")
+
+                for tu in term:
+                    if cap_reached(per_root_saved):
+                        goto_next_root = True
+                        break
+                    if tu in seen_urls:
                         continue
-                    dest = save_image_candidate(
-                        session=session,
-                        candidate=candidate,
-                        soup_for_inline=tsoup,
-                        page_url=tu,
-                        dest_dir=os.path.join(IMAGES_PATH, "domain_search"),
-                        referer=tu,
-                        dedupe_set=globals().setdefault("_saved_img_urls", set()),
-                    )
-                    if dest:
-                        dbg(f"[IMG] saved {dest} (from {tu})")
-                        saved_paths.append(dest)
-                        if len(saved_paths) >= hard_image_cap:
-                            dbg(f"[S2] HARD CAP reached ({hard_image_cap})"); return saved_paths
+                    seen_urls.add(tu)
 
+                    tsoup, _, _ = render(tu, expand=False)
+                    if not tsoup:
+                        dbg(f"[S2][TERM] url={tu} soup=None")
+                        continue
 
-            visited_parents.add(_parent_part(cur))
-            for du in deeper:
-                if du not in seen_urls:
-                    queue.append(du)
+                    ranked = smart_find_hits_in_soup(tsoup, base_query, lemma_obj, min_score=0.60, top_k=None)
+                    hits = [node for (node, score, _) in ranked]
+                    dbg(f"[S2][TERM] url={tu} hits={len(hits)}")
 
-        dbg(f"[S2] ROOT DONE {root} images_so_far={len(saved_paths)}")
+                    for node in hits:
+                        if cap_reached(per_root_saved):
+                            goto_next_root = True
+                            break
+                        _dbg_hit_reason(tu, node, phrase_rxs[0])
+                        candidate = nearest_image_src_for_hit(node, tsoup, tu)
+                        if not candidate:
+                            continue
+                        dest = save_image_candidate(
+                            session=session,
+                            candidate=candidate,
+                            soup_for_inline=tsoup,
+                            page_url=tu,
+                            dest_dir=os.path.join(IMAGES_PATH, "domain_search"),
+                            referer=tu,
+                            dedupe_set=globals().setdefault("_saved_img_urls", set()),
+                        )
+                        if dest:
+                            dbg(f"[IMG] saved {dest} (from {tu})")
+                            saved_paths.append(dest)
+                            per_root_saved += 1
+                            if cap_reached(per_root_saved):
+                                goto_next_root = True
+                                break
+                if goto_next_root:
+                    break
+
+                # enqueue deeper only if still under cap
+                if not cap_reached(per_root_saved):
+                    for du in deeper:
+                        if du not in seen_urls:
+                            queue.append(du)
+
+        dbg(f"[S2] ROOT DONE {root} images_for_root={per_root_saved} total_images={len(saved_paths)}")
+
+        if global_image_cap is not None and len(saved_paths) >= global_image_cap:
+            dbg(f"[S2] GLOBAL CAP reached ({global_image_cap}) — stopping.")
+            break
 
     return saved_paths
 
 
 
 
-# =========================
-# STAGE 1 (kept as-is; returns roots)
-# =========================
+
+
+
 def find_valid_roots(
     base_url: str,
     lemma_obj: dict,
-    max_pages_stage1: int = 80,
+    max_pages_stage1: int = 100000,          # large ceiling; stopping is layer-based now
+    max_pages_stage2_per_root: int = 220,    # untouched (Stage 2)
     timeout: int = 8,
-    known_roots: List[str] | None = None,
-) -> List[str]:
+    known_roots: list[str] | None = None,
+    js_mode: str = "light",
+):
     """
-    Stage 1 (light): Use JS fetch on base_url; collect same-site anchors.
-    Pick URLs whose string contains any lemma-phrase (subject synonyms).
-    If known_roots are provided, just normalize and return them.
+    Stage 1: strict BFS with 'scan then expand'.
+    If ANY roots are found in a layer, finish that whole layer, then STOP
+    (do NOT expand to the next layer).
+
+    Per layer:
+      1) SCAN: check all URLs in the current frontier against lemma phrases → collect roots.
+      2) EXPAND: fetch each frontier URL (JS-light), gather anchors → next_frontier (but ONLY
+                 if no roots were found this layer).
+    - Global 'visited' prevents loops.
+    - Non-HTML / scheme-block filters on both frontier URLs and extracted anchors.
+    - known_roots passthrough preserved and normalized; returns {root: []}.
     """
+    import re
+    from collections import deque
+    from urllib.parse import urlparse, urlunparse, unquote
+
+    def dbg(*a, **k): print(*a, **k)
+
+    NON_HTML_EXT = (
+        ".pdf", ".doc", ".docx", ".zip", ".rar", ".7z",
+        ".ppt", ".pptx", ".xls", ".xlsx",
+        ".png", ".jpg", ".jpeg", ".gif", ".webp", ".svg", ".ico",
+        ".mp3", ".wav", ".mp4", ".webm", ".avi"
+    )
+    SCHEME_BLOCK = ("mailto:", "javascript:", "data:")
+
+    # --- registrable helper (tldextract preferred, safe fallback) ---
     try:
+        import tldextract
         def registrable(host: str) -> str:
-            if not host:
-                return ""
-            t = tldextract.extract(host)
-            return ".".join([t.domain, t.suffix]) if t.suffix else t.domain
+            t = tldextract.extract(host or "")
+            return ".".join([t.domain, t.suffix]) if t.suffix else (t.domain or "")
     except Exception:
         def registrable(host: str) -> str:
-            if not host:
-                return ""
-            parts = host.split(".")
-            return ".".join(parts[-2:]) if len(parts) >= 2 else host
+            parts = (host or "").split(".")
+            return ".".join(parts[-2:]) if len(parts) >= 2 else (host or "")
 
-    parsed_base = urlparse(base_url)
-    base_host = (parsed_base.hostname or "").lower()
-    base_reg = registrable(base_host)
+    # --- URL utils ---
+    def clean_url(u: str) -> str:
+        if not u:
+            return ""
+        u = unquote(u)
+        if u.lower().startswith(SCHEME_BLOCK):
+            return ""
+        u = re.sub(r"#.*$", "", u)
+        u = re.sub(r"[?&](utm_[^=&]+|fbclid|gclid)=[^&]*", "", u)
+        p = urlparse(u)
+        scheme = p.scheme or "https"
+        host = (p.hostname or "").lower()
+        path = p.path or "/"
+        if len(path) > 1 and path.endswith("/"):
+            path = path[:-1]
+        return urlunparse((scheme, host, path, "", p.query, ""))
 
+    def same_reg(u: str, base_reg: str) -> bool:
+        return registrable((urlparse(u).hostname or "").lower()) == base_reg
+
+    def is_non_html(u: str) -> bool:
+        lu = (u or "").lower()
+        return any(lu.endswith(ext) for ext in NON_HTML_EXT)
+
+    def path_segments(u: str):
+        p = urlparse(u)
+        return [s for s in (p.path or "/").split("/") if s]
+
+    # Bucket by (host, last path segment); preserve first-seen order,
+    # but if a *shorter* path for same bucket appears in the same pass, prefer that.
+    def prefer_shortest_by_bucket_preserve(urls_iterable):
+        best = {}        # bucket -> (url, seg_count, first_index)
+        ordered = []
+        for idx, u in enumerate(urls_iterable):
+            p = urlparse(u)
+            host = (p.hostname or "").lower()
+            segs = path_segments(u)
+            primary = segs[-1] if segs else ""
+            bucket = (host, primary)
+            seg_count = len(segs)
+            if bucket not in best:
+                best[bucket] = (u, seg_count, idx)
+                ordered.append(bucket)
+            else:
+                cur_u, cur_seg_count, cur_idx = best[bucket]
+                if seg_count < cur_seg_count:
+                    best[bucket] = (u, seg_count, cur_idx)  # keep original first_idx
+        return [best[b][0] for b in ordered]
+
+    # Use ONLY provided lemma_obj
     lemma_phrases = {
         (w or "").strip().lower()
         for entry in (lemma_obj or {}).values()
         for w in entry.get("lemmas", [])
-        if isinstance(w, str) and len(w.strip()) > 1
+        if isinstance(w, str) and w.strip()
     }
 
-    def url_matches_any_phrase(u: str) -> bool:
+    def matches_phrase(u: str) -> bool:
+        if not lemma_phrases:
+            return True
         lu = (u or "").lower()
-        return any(p in lu for p in lemma_phrases) if lemma_phrases else True
+        return any(p in lu for p in lemma_phrases)
 
+    # --- Normalize inputs ---
+    base_c = clean_url(base_url)
+    base_host = (urlparse(base_c).hostname or "").lower()
+    base_reg = registrable(base_host)
+
+    # known_roots passthrough
     if known_roots:
-        roots = []
-        for u in known_roots:
-            cu = clean_url(u)
-            if not cu:
-                continue
-            h = (urlparse(cu).hostname or "").lower()
-            if not same_registrable(base_host, h):
-                continue
-            if cu.lower().endswith(NON_HTML_EXT):
-                continue
-            roots.append(cu)
-        dbg(f"[FIND][S1] skipping discovery via known_roots count={len(roots)}")
-        return sorted(set(roots))
+        roots = [clean_url(r) for r in known_roots if r]
+        roots = [r for r in roots if r and same_reg(r, base_reg) and not is_non_html(r)]
+        roots = prefer_shortest_by_bucket_preserve(roots)
+        dbg(f"[FIND][S1] skipping Stage 1 via known_roots count={len(roots)}")
+        return {r: [] for r in roots}
 
-    # Discovery from base
-    html0, anchors0, via0 = js_capable_fetch(clean_url(base_url))
-    same_site = set()
-    if not anchors0 and not html0:
-        dbg(f"[FIND][S1] base fetch failed: {base_url}")
-        return []
+    if not base_host:
+        dbg("[FIND][S1] no base_host")
+        return {}
 
-    for a in anchors0:
-        cu = clean_url(urljoin(base_url, a))
-        if not cu:
-            continue
-        lcu = cu.lower()
-        if lcu.endswith(NON_HTML_EXT) or any(b in lcu for b in BLOCKED_URL_WORDS):
-            continue
-        if not same_registrable((urlparse(base_url).hostname or "").lower(), (urlparse(cu).hostname or "").lower()):
-            continue
-        if url_matches_any_phrase(cu):
-            same_site.add(cu)
+    # --- BFS state ---
+    visited = set([base_c])
+    frontier = deque([base_c])
+    roots = []
+    breaths = 0
+    total_fetches = 0
 
-    roots = list(same_site)[:max_pages_stage1]  # mild cap
-    dbg(f"[FIND][S1] roots_found={len(roots)} via={via0}")
-    return roots
+    while frontier and total_fetches < max_pages_stage1:
+        breaths += 1
+        layer = list(frontier)
+        frontier.clear()
+        dbg(f"[FIND][S1][LAYER {breaths} START] frontier={len(layer)} visited={len(visited)} roots={len(roots)}")
+
+        # 1) SCAN: check this layer's URLs for matches (no fetching)
+        layer_scan = [u for u in layer if same_reg(u, base_reg) and not is_non_html(u)]
+        layer_matches = [u for u in layer_scan if matches_phrase(u)]
+        layer_found_any = False
+
+        if layer_matches:
+            for m in prefer_shortest_by_bucket_preserve(layer_matches):
+                if m not in roots:
+                    roots.append(m)
+                    layer_found_any = True
+                    dbg(f"[FIND][S1][ROOT] {m}")
+
+        # If we found any roots in this layer, STOP after finishing the layer (no next expansion)
+        if layer_found_any:
+            dbg(f"[FIND][S1][LAYER {breaths} STOP] roots_found={len(roots)} — not expanding further")
+            break
+
+        # 2) EXPAND: fetch to collect anchors for NEXT layer
+        next_candidates = []
+        for u in layer_scan:
+            try:
+                html, anchors, via = js_capable_fetch(u, js_mode=js_mode)
+            except Exception as e:
+                dbg(f"[JSFETCH][ERR] {u} -> {e}")
+                anchors, via = [], "error"
+
+            total_fetches += 1
+            dbg(f"[JSFETCH][{via}] {u} ok anchors={len(anchors) if anchors else 0}")
+
+            if not anchors:
+                continue
+
+            for a in anchors:
+                cu = clean_url(a)
+                if not cu:
+                    continue
+                if cu in visited:
+                    continue
+                if not same_reg(cu, base_reg):
+                    continue
+                if is_non_html(cu):
+                    continue
+                visited.add(cu)
+                next_candidates.append(cu)
+
+        # Keep order; bucket-dedupe while preserving first-seen
+        next_frontier = prefer_shortest_by_bucket_preserve(next_candidates)
+        for cu in next_frontier:
+            frontier.append(cu)
+
+        dbg(f"[FIND][S1][LAYER {breaths} END] next_frontier={len(next_frontier)} roots={len(roots)}")
+
+    # Final normalized roots map
+    return {r: [] for r in prefer_shortest_by_bucket_preserve(roots)}
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 
 # =========================
 # Sources / API (kept)
@@ -1845,7 +2063,7 @@ PARSERS = {
 # =========================
 # HANDLE NON-API (NEW PIPELINE)
 # =========================
-def handle_result_no_api(source: Source, query: str, subj: str, hard_image_cap: int = 20):
+def handle_result_no_api(source: Source, query: str, subj: str, hard_image_cap: int = 30):
     def uniq_keep_order(items):
         seen = set()
         out = []
@@ -1892,29 +2110,13 @@ def handle_result_no_api(source: Source, query: str, subj: str, hard_image_cap: 
         roots = find_valid_roots(base_url=source.url, lemma_obj=lemma_obj_subj, known_roots=valid_endpoints)
     else:
         dbg("[NOAPI] no valid endpoints; starting Stage 1 discovery")
-        roots = find_valid_roots(base_url=source.url, lemma_obj=lemma_obj_subj, max_pages_stage1=80)
+        roots = find_valid_roots(base_url=source.url, lemma_obj=lemma_obj_subj,)
 
     if not roots:
         dbg(f"[NOAPI] no roots after Stage 1 for {source.name}")
         source.img_paths = []
         return []
-
-    session = requests.Session()
-    session.headers.update({"User-Agent": "diag-scrape/0.1"})
-    html_cache = {}
-    anchors_cache = {}
-
-    # NEW STAGE 2 (drill + text search + image download) — pass the *roots* actually selected
-    dbg(f"[NOAPI] Stage 2 starting with roots={len(roots)} hard_image_cap={hard_image_cap}")
-    saved = stage2_drill_search_and_images(
-        roots=roots,                      # ← FIX: use roots, not valid_endpoints
-        base_query=query,
-        lemma_obj=lemma_obj_query,        # ← FIX: use query lemmas for text matching
-        hard_image_cap=hard_image_cap,    # ← honor caller's cap
-        session=session,
-        html_cache=html_cache,
-        anchors_cache=anchors_cache,
-    )
+    
 
     # Persist roots we used (so next run can reuse)
     try:
@@ -1951,6 +2153,27 @@ def handle_result_no_api(source: Source, query: str, subj: str, hard_image_cap: 
                 dbg(f"[NOAPI] persisted {len(new_roots)} roots under SubjectUrlsFound[{subj}]")
     except Exception as e:
         dbg(f"[NOAPI] persist warning: {e}")
+
+
+    #ALL STAGE 2
+
+    session = requests.Session()
+    session.headers.update({"User-Agent": "diag-scrape/0.1"})
+    html_cache = {}
+    anchors_cache = {}
+
+    # NEW STAGE 2 (drill + text search + image download) — pass the *roots* actually selected
+    dbg(f"[NOAPI] Stage 2 starting with roots={len(roots)} hard_image_cap={hard_image_cap}")
+    saved = stage2_drill_search_and_images(
+        roots=roots,                      # ← FIX: use roots, not valid_endpoints
+        base_query=query,
+        lemma_obj=lemma_obj_query,        # ← FIX: use query lemmas for text matching
+        hard_image_cap=hard_image_cap,    # ← honor caller's cap
+        session=session,
+        html_cache=html_cache,
+        anchors_cache=anchors_cache,
+    )
+
 
     source.img_paths = saved
     return saved
@@ -1990,7 +2213,7 @@ if __name__ == "__main__":
                     parse_fn(src, data)
         else:
             dbg(f"opened source {src.name}, has no api, starting process..")
-            handle_result_no_api(src, query, subj, hard_image_cap=20)
+            handle_result_no_api(src, query, subj, hard_image_cap=30)
 
     # (Optional) DDG kept as-is but may rate-limit; you can comment out if not needed now
     # try:
