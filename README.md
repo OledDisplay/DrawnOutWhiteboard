@@ -1,8 +1,17 @@
-Get the wordnet (python shell):
-import nltk
-nltk.download('wordnet')
-nltk.download('omw-1.4')  # optional, adds multilingual data
 
+
+Setting up enviorment(s):
+1.For researcher:
+  pip install -r requirements.txt
+  
+  Get the wordnet (python shell):
+  import nltk
+  nltk.download('wordnet')
+  nltk.download('omw-1.4')  # optional, adds multilingual data
+
+
+2. For ImageGen
+--
 SETTING UP COMFY UI:
 *make sure you have the vram
 get ComfyUI from:
