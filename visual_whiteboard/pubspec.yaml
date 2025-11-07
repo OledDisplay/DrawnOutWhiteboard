@@ -1,0 +1,17 @@
+name: two_pane_draw
+description: Two-pane draw scaffold with server/local preprocessing
+environment:
+  sdk: ">=3.4.0 <4.0.0"
+
+dependencies:
+  flutter:
+    sdk: flutter
+  http: ^1.2.2
+  file_picker: ^8.0.3
+  image: ^4.2.0
+
+dev_dependencies:
+  flutter_test:
+    sdk: flutter
+flutter:
+  uses-material-design: true
