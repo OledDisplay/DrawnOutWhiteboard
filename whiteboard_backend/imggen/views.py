@@ -5,6 +5,7 @@ from pathlib import Path
 import json, time, uuid, requests
 from typing import List, Dict, Any, Optional
 from Imageresearcher import research
+from ImagePreproccessor import process_images
 
 # ── CONFIG ───────────────────────────────────────────────────────────────
 COMFY_SERVER = "http://127.0.0.1:8188"
@@ -229,6 +230,12 @@ def generate_images_batch(request):
 
 @csrf_exempt
 def research_images(request):
+    """
+    {
+      "query": eukaryotic cell,
+      "subject": Biology
+    }
+    """
     if request.method != "POST":
         return HttpResponseBadRequest("POST JSON only")
 
@@ -262,5 +269,51 @@ def research_images(request):
         return JsonResponse({"error": str(e)}, status=500)
 
     return JsonResponse({"ok": True, "results": results})
+
+@csrf_exempt
+def process_images(request):
+    """
+    {
+    "inputdir": "ResearchImages/ddg",
+    "outputdir": "WhiteboardProccessedImages"
+    }
+    """
+    if request.method != "POST":
+        return HttpResponseBadRequest("POST JSON only")
+    
+    ct = request.META.get("CONTENT_TYPE")
+    raw = request.body or b""
+
+    try:
+        body = json.loads(raw.decode("utf-8"))
+    except json.JSONDecodeError as e:
+        return JsonResponse({
+            "error": "Invalid JSON",
+            "where": {"lineno": e.lineno, "colno": e.colno, "msg": e.msg},
+            "debug": {
+                "content_type": ct,
+                "len": len(raw),
+                "preview": raw[:200].decode("utf-8", errors="replace")
+            }
+        }, status=400)
+
+    inpt = (body.get("inputdir") or "").strip()
+    output   = (body.get("outputdir") or "").strip()
+    if not inpt or not output:
+        return HttpResponseBadRequest("Missing 'inpt' or 'output'")
+    
+    base = Path(__file__).resolve().parent.parent
+    i_dir  = base / inpt
+    out_dir = base / output
+    
+    out_dir.mkdir(exist_ok=True)
+    imgs = [p for p in i_dir.glob("*") if p.suffix.lower() in [".png",".jpg",".jpeg",".bmp",".tif",".tiff"]]
+    if not imgs:
+        print(f"[!] No images found in {inpt}")
+        return
+
+    process_images(imgs,out_dir)
+
+    return JsonResponse({"ok": True})
 
 

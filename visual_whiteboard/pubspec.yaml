@@ -10,6 +10,7 @@ dependencies:
   file_picker: ^8.0.3
   image: ^4.2.0
 
+
 dev_dependencies:
   flutter_test:
     sdk: flutter
