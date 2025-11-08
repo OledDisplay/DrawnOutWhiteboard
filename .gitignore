@@ -24,6 +24,8 @@ media/
 #temporary
 outputs/
 ResearchImages/
+ProccessedImages/
+StrokeVectors/
 
 # OS stuff
 .DS_Store
