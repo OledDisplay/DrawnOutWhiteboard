@@ -5,7 +5,7 @@ from pathlib import Path
 import json, time, uuid, requests
 from typing import List, Dict, Any, Optional
 from Imageresearcher import research
-from ImagePreproccessor import process_images
+from ImagePreproccessor import process_paths
 
 # ── CONFIG ───────────────────────────────────────────────────────────────
 COMFY_SERVER = "http://127.0.0.1:8188"
