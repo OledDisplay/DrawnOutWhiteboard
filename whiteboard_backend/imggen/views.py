@@ -6,6 +6,7 @@ import json, time, uuid, requests
 from typing import List, Dict, Any, Optional
 from Imageresearcher import research
 from ImagePreproccessor import process_paths
+from whiteboard_backend.vector_db_for_whiteboard import add_image_to_pinecone
 
 # ── CONFIG ───────────────────────────────────────────────────────────────
 COMFY_SERVER = "http://127.0.0.1:8188"
@@ -146,6 +147,8 @@ class ComfyClient:
             path = out_dir / name
             path.write_bytes(v.content)
             saved.append(str(path))
+            
+            add_image_to_pinecone(str(path))
         return saved
 
     # ── end-to-end (one prompt) ──
@@ -313,6 +316,10 @@ def process_images(request):
         return
 
     process_images(imgs,out_dir)
+    
+    for img_path in out_dir.glob("*"):
+        if img_path.suffix.lower() in [".png",".jpg",".jpeg",".bmp",".tif",".tiff"]:
+            add_image_to_pinecone(str(img_path))
 
     return JsonResponse({"ok": True})
 

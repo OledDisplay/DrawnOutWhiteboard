@@ -8,6 +8,7 @@ __pycache__/
 db.sqlite3
 
 # Virtual environments
+
 venv/
 env/
 .venv/
@@ -37,3 +38,4 @@ Thumbs.db
 *.egg
 build/
 dist/
+.env
