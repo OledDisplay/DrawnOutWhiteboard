@@ -191,55 +191,56 @@ class WhiteboardPainter extends CustomPainter {
   final List<StrokeCubic> cubics;
   const WhiteboardPainter(this.polylines, this.cubics);
 
-  @override
+ @override
   void paint(Canvas canvas, Size size) {
     if (polylines.isEmpty && cubics.isEmpty) return;
 
-    // Thin black strokes
-    final paint = Paint()
-      ..color = Colors.black
-      ..strokeWidth = 1.0
-      ..style = PaintingStyle.stroke
-      ..strokeCap = StrokeCap.round
-      ..strokeJoin = StrokeJoin.round;
-
-    // Compute bounds from both kinds of strokes
     final bounds = _computeBounds(polylines, cubics);
     final scale = _computeUniformScale(bounds, size, padding: 20);
-    final offset = Offset(
-      (size.width - bounds.width * scale) / 2 - bounds.left * scale,
-      (size.height - bounds.height * scale) / 2 - bounds.top * scale,
-    );
+    final tx = (size.width  - bounds.width  * scale) / 2 - bounds.left * scale;
+    final ty = (size.height - bounds.height * scale) / 2 - bounds.top  * scale;
 
-    // Draw cubics first (or swap order if you prefer)
+    canvas.save();
+    canvas.translate(tx, ty);
+    canvas.scale(scale);
+
+    final paint = Paint()
+      ..color = Colors.black
+      ..style = PaintingStyle.stroke
+      ..strokeCap = StrokeCap.round
+      ..strokeJoin = StrokeJoin.round
+      // keep ~1px in image space (don’t fatten when scaled up)
+      ..strokeWidth = 1.0 / scale.clamp(1.0, double.infinity);
+
+    // Cubics
     for (final s in cubics) {
       if (s.segments.isEmpty) continue;
       final path = Path();
-      // Use the first segment's p0 to moveTo
-      final first = s.segments.first.p0;
-      path.moveTo(first.dx * scale + offset.dx, first.dy * scale + offset.dy);
+      Offset? last;
       for (final seg in s.segments) {
-        final c1 = Offset(seg.c1.dx * scale + offset.dx, seg.c1.dy * scale + offset.dy);
-        final c2 = Offset(seg.c2.dx * scale + offset.dx, seg.c2.dy * scale + offset.dy);
-        final p1 = Offset(seg.p1.dx * scale + offset.dx, seg.p1.dy * scale + offset.dy);
-        path.cubicTo(c1.dx, c1.dy, c2.dx, c2.dy, p1.dx, p1.dy);
+        // ensure continuity if a segment starts away from the previous end
+        if (last == null || (last! - seg.p0).distance > 1e-3) {
+          path.moveTo(seg.p0.dx, seg.p0.dy);
+        }
+        path.cubicTo(seg.c1.dx, seg.c1.dy, seg.c2.dx, seg.c2.dy, seg.p1.dx, seg.p1.dy);
+        last = seg.p1;
       }
       canvas.drawPath(path, paint);
     }
 
-    // Draw polylines (fallback format)
+    // Polylines (fallback)
     for (final s in polylines) {
       if (s.points.length < 2) continue;
-      final path = Path();
-      final p0 = s.points.first;
-      path.moveTo(p0.dx * scale + offset.dx, p0.dy * scale + offset.dy);
+      final path = Path()..moveTo(s.points.first.dx, s.points.first.dy);
       for (int i = 1; i < s.points.length; i++) {
-        final p = s.points[i];
-        path.lineTo(p.dx * scale + offset.dx, p.dy * scale + offset.dy);
+        path.lineTo(s.points[i].dx, s.points[i].dy);
       }
       canvas.drawPath(path, paint);
     }
+
+    canvas.restore();
   }
+
 
   Rect _computeBounds(List<StrokePolyline> polys, List<StrokeCubic> cubics) {
     double minX = double.infinity, minY = double.infinity;
