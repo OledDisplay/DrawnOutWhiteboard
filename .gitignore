@@ -8,9 +8,11 @@ __pycache__/
 db.sqlite3
 
 # Virtual environments
+
 venv/
 env/
 .venv/
+vnev/
 
 # VS Code
 .vscode/
@@ -36,3 +38,4 @@ Thumbs.db
 *.egg
 build/
 dist/
+.env
