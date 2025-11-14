@@ -28,13 +28,50 @@ class VectorViewerScreen extends StatefulWidget {
   State<VectorViewerScreen> createState() => _VectorViewerScreenState();
 }
 
-class _VectorViewerScreenState extends State<VectorViewerScreen> {
-  // Hardcoded path to vectors JSON
-  static const String vectorsJsonPath = r'C:\Users\marti\Code\DrawnOutWhiteboard\whiteboard_backend\StrokeVectors\edges_0.json';
+class _VectorViewerScreenState extends State<VectorViewerScreen>
+    with SingleTickerProviderStateMixin {
+  static const String vectorsJsonPath =
+      r'C:\Users\marti\Code\DrawnOutWhiteboard\whiteboard_backend\StrokeVectors\edges_0.json';
 
   List<StrokePolyline> _polyStrokes = const [];
   List<StrokeCubic> _cubicStrokes = const [];
+  List<DrawableStroke> _drawableStrokes = const [];
+
+  double? _srcWidth;
+  double? _srcHeight;
+
   String _status = 'Idle';
+
+  late final AnimationController _controller;
+  double _animValue = 0.0;
+
+  // step mode
+  bool _stepMode = false;
+  int _stepStrokeCount = 0; // how many strokes are fully visible in step mode
+
+  static const double _targetResolution = 2000.0; // target max side
+  static const double _basePenWidthPx = 3.0; // logical image px
+
+  @override
+  void initState() {
+    super.initState();
+    _controller = AnimationController(
+      vsync: this,
+      duration: const Duration(milliseconds: 20000),
+    )..addListener(() {
+        if (!_stepMode) {
+          setState(() {
+            _animValue = _controller.value;
+          });
+        }
+      });
+  }
+
+  @override
+  void dispose() {
+    _controller.dispose();
+    super.dispose();
+  }
 
   Future<void> _loadAndRender() async {
     setState(() => _status = 'Loading vectors…');
@@ -53,11 +90,15 @@ class _VectorViewerScreenState extends State<VectorViewerScreen> {
         return;
       }
 
-      final format = (decoded['vector_format'] as String?)?.toLowerCase() ?? 'polyline';
+      final format =
+          (decoded['vector_format'] as String?)?.toLowerCase() ?? 'polyline';
       final List strokesJson = decoded['strokes'] as List;
 
       final poly = <StrokePolyline>[];
       final cubics = <StrokeCubic>[];
+
+      _srcWidth = (decoded['width'] as num?)?.toDouble();
+      _srcHeight = (decoded['height'] as num?)?.toDouble();
 
       if (format == 'bezier_cubic') {
         for (final s in strokesJson) {
@@ -65,41 +106,79 @@ class _VectorViewerScreenState extends State<VectorViewerScreen> {
           final List segsJson = s['segments'] as List;
           final segs = <CubicSegment>[];
           for (final seg in segsJson) {
-            // Expect [x0,y0, cx1,cy1, cx2,cy2, x1,y1]
             if (seg is List && seg.length >= 8) {
-              final p0 = Offset((seg[0] as num).toDouble(), (seg[1] as num).toDouble());
-              final c1 = Offset((seg[2] as num).toDouble(), (seg[3] as num).toDouble());
-              final c2 = Offset((seg[4] as num).toDouble(), (seg[5] as num).toDouble());
-              final p1 = Offset((seg[6] as num).toDouble(), (seg[7] as num).toDouble());
+              final p0 = Offset(
+                  (seg[0] as num).toDouble(), (seg[1] as num).toDouble());
+              final c1 = Offset(
+                  (seg[2] as num).toDouble(), (seg[3] as num).toDouble());
+              final c2 = Offset(
+                  (seg[4] as num).toDouble(), (seg[5] as num).toDouble());
+              final p1 = Offset(
+                  (seg[6] as num).toDouble(), (seg[7] as num).toDouble());
               segs.add(CubicSegment(p0: p0, c1: c1, c2: c2, p1: p1));
             }
           }
           if (segs.isNotEmpty) cubics.add(StrokeCubic(segs));
         }
       } else {
-        // Fallback for old polyline JSONs: { points: [[x,y], ...] }
         for (final s in strokesJson) {
           if (s is! Map || s['points'] is! List) continue;
           final List pts = s['points'] as List;
           final points = <Offset>[];
           for (final p in pts) {
             if (p is List && p.length >= 2) {
-              points.add(Offset((p[0] as num).toDouble(), (p[1] as num).toDouble()));
+              points.add(
+                  Offset((p[0] as num).toDouble(), (p[1] as num).toDouble()));
             }
           }
           if (points.length >= 2) poly.add(StrokePolyline(points));
         }
       }
 
+      _polyStrokes = poly;
+      _cubicStrokes = cubics;
+
+      if ((_srcWidth == null || _srcHeight == null) &&
+          (poly.isNotEmpty || cubics.isNotEmpty)) {
+        final bounds = _computeRawBounds(poly, cubics);
+        _srcWidth = bounds.width;
+        _srcHeight = bounds.height;
+      }
+
+      final drawable = _buildDrawableStrokes(
+        polylines: poly,
+        cubics: cubics,
+        srcWidth: _srcWidth ?? 1000.0,
+        srcHeight: _srcHeight ?? 1000.0,
+        targetResolution: _targetResolution,
+        basePenWidth: _basePenWidthPx,
+      );
+
+      final totalCost =
+          drawable.fold<double>(0.0, (sum, d) => sum + d.timeWeight);
+
+      // duration logic: half the previous draw time
+      final baseMs = totalCost.isFinite && totalCost > 0
+          ? (totalCost / 12.0).clamp(15000.0, 60000.0).toInt()
+          : 20000;
+      final ms = math.max(2000, baseMs ~/ 2); // hard lower guard
+
+      _controller.duration = Duration(milliseconds: ms);
+      _controller
+        ..reset()
+        ..forward();
+
       setState(() {
-        _polyStrokes = poly;
-        _cubicStrokes = cubics;
+        _drawableStrokes = drawable;
+        _animValue = 0.0;
+        _stepMode = false;
+        _stepStrokeCount = 0;
 
         final polyPts = poly.fold<int>(0, (s, e) => s + e.points.length);
         final cubicSegs = cubics.fold<int>(0, (s, e) => s + e.segments.length);
         _status = (format == 'bezier_cubic')
-            ? 'Loaded cubic. Strokes: ${cubics.length}, cubic segments: $cubicSegs'
-            : 'Loaded polylines. Strokes: ${poly.length}, points: $polyPts';
+            ? 'Loaded cubic. Strokes: ${cubics.length}, segments: $cubicSegs\nDrawable strokes: ${drawable.length}, anim: ${ms}ms'
+            : 'Loaded polylines. Strokes: ${poly.length}, points: $polyPts\nDrawable strokes: ${drawable.length}, anim: ${ms}ms';
       });
     } catch (e, st) {
       setState(() => _status = 'Error: $e');
@@ -108,23 +187,50 @@ class _VectorViewerScreenState extends State<VectorViewerScreen> {
     }
   }
 
+  void _restartAnimationMode() {
+    if (_drawableStrokes.isEmpty) return;
+    setState(() {
+      _stepMode = false;
+      _animValue = 0.0;
+    });
+    _controller
+      ..reset()
+      ..forward();
+  }
+
+  void _stepNextStroke() {
+    if (_drawableStrokes.isEmpty) return;
+    setState(() {
+      _stepMode = true;
+      _controller.stop();
+      if (_stepStrokeCount < _drawableStrokes.length) {
+        _stepStrokeCount += 1;
+      }
+    });
+  }
+
   @override
   Widget build(BuildContext context) {
     return Scaffold(
       body: Row(
         children: [
-          // LEFT: Whiteboard display
+          // LEFT: drawing surface
           Expanded(
             flex: 3,
             child: Container(
               color: Colors.white,
               child: CustomPaint(
-                painter: WhiteboardPainter(_polyStrokes, _cubicStrokes),
-                child: Container(),
+                painter: WhiteboardPainter(
+                  strokes: _drawableStrokes,
+                  animationT: _animValue,
+                  basePenWidth: _basePenWidthPx,
+                  stepMode: _stepMode,
+                  stepStrokeCount: _stepStrokeCount,
+                ),
               ),
             ),
           ),
-          // RIGHT: Control panel
+          // RIGHT: control panel
           Container(
             width: 280,
             color: const Color(0xFF111111),
@@ -143,12 +249,29 @@ class _VectorViewerScreenState extends State<VectorViewerScreen> {
                 const SizedBox(height: 12),
                 ElevatedButton(
                   onPressed: _loadAndRender,
-                  child: const Text('Load & Render vectors'),
+                  child: const Text('Load & Render (auto anim)'),
+                ),
+                const SizedBox(height: 8),
+                ElevatedButton(
+                  onPressed: _restartAnimationMode,
+                  child: const Text('Replay animation'),
+                ),
+                const SizedBox(height: 8),
+                ElevatedButton(
+                  onPressed: _stepNextStroke,
+                  child: const Text('Step: next stroke'),
                 ),
                 const SizedBox(height: 12),
                 Text(
                   _status,
                   style: const TextStyle(color: Colors.white70),
+                ),
+                const SizedBox(height: 12),
+                Text(
+                  _stepMode
+                      ? 'Mode: STEP  | shown: $_stepStrokeCount'
+                      : 'Mode: ANIM | t=${_animValue.toStringAsFixed(2)}',
+                  style: const TextStyle(color: Colors.white54, fontSize: 12),
                 ),
                 const SizedBox(height: 12),
                 const Text(
@@ -162,87 +285,9 @@ class _VectorViewerScreenState extends State<VectorViewerScreen> {
       ),
     );
   }
-}
 
-/* ---------- Data types ---------- */
-
-class StrokePolyline {
-  final List<Offset> points;
-  const StrokePolyline(this.points);
-}
-
-class CubicSegment {
-  final Offset p0; // segment start (redundant across segments, but present in JSON)
-  final Offset c1;
-  final Offset c2;
-  final Offset p1; // segment end
-  const CubicSegment({required this.p0, required this.c1, required this.c2, required this.p1});
-}
-
-class StrokeCubic {
-  final List<CubicSegment> segments; // consecutive cubic segments
-  const StrokeCubic(this.segments);
-}
-
-/* ---------- Painter ---------- */
-
-class WhiteboardPainter extends CustomPainter {
-  final List<StrokePolyline> polylines;
-  final List<StrokeCubic> cubics;
-  const WhiteboardPainter(this.polylines, this.cubics);
-
- @override
-  void paint(Canvas canvas, Size size) {
-    if (polylines.isEmpty && cubics.isEmpty) return;
-
-    final bounds = _computeBounds(polylines, cubics);
-    final scale = _computeUniformScale(bounds, size, padding: 20);
-    final tx = (size.width  - bounds.width  * scale) / 2 - bounds.left * scale;
-    final ty = (size.height - bounds.height * scale) / 2 - bounds.top  * scale;
-
-    canvas.save();
-    canvas.translate(tx, ty);
-    canvas.scale(scale);
-
-    final paint = Paint()
-      ..color = Colors.black
-      ..style = PaintingStyle.stroke
-      ..strokeCap = StrokeCap.round
-      ..strokeJoin = StrokeJoin.round
-      // keep ~1px in image space (don’t fatten when scaled up)
-      ..strokeWidth = 1.0 / scale.clamp(1.0, double.infinity);
-
-    // Cubics
-    for (final s in cubics) {
-      if (s.segments.isEmpty) continue;
-      final path = Path();
-      Offset? last;
-      for (final seg in s.segments) {
-        // ensure continuity if a segment starts away from the previous end
-        if (last == null || (last! - seg.p0).distance > 1e-3) {
-          path.moveTo(seg.p0.dx, seg.p0.dy);
-        }
-        path.cubicTo(seg.c1.dx, seg.c1.dy, seg.c2.dx, seg.c2.dy, seg.p1.dx, seg.p1.dy);
-        last = seg.p1;
-      }
-      canvas.drawPath(path, paint);
-    }
-
-    // Polylines (fallback)
-    for (final s in polylines) {
-      if (s.points.length < 2) continue;
-      final path = Path()..moveTo(s.points.first.dx, s.points.first.dy);
-      for (int i = 1; i < s.points.length; i++) {
-        path.lineTo(s.points[i].dx, s.points[i].dy);
-      }
-      canvas.drawPath(path, paint);
-    }
-
-    canvas.restore();
-  }
-
-
-  Rect _computeBounds(List<StrokePolyline> polys, List<StrokeCubic> cubics) {
+  Rect _computeRawBounds(
+      List<StrokePolyline> polys, List<StrokeCubic> cubics) {
     double minX = double.infinity, minY = double.infinity;
     double maxX = -double.infinity, maxY = -double.infinity;
 
@@ -254,9 +299,9 @@ class WhiteboardPainter extends CustomPainter {
         if (p.dy > maxY) maxY = p.dy;
       }
     }
+
     for (final s in cubics) {
       for (final seg in s.segments) {
-        // include all control points and end points in bounds
         for (final p in [seg.p0, seg.c1, seg.c2, seg.p1]) {
           if (p.dx < minX) minX = p.dx;
           if (p.dy < minY) minY = p.dy;
@@ -266,21 +311,679 @@ class WhiteboardPainter extends CustomPainter {
       }
     }
 
-    if (minX == double.infinity) return const Rect.fromLTWH(0, 0, 1, 1);
-    // avoid zero width/height
+    if (minX == double.infinity) {
+      return const Rect.fromLTWH(0, 0, 1, 1);
+    }
     final w = math.max(1e-3, maxX - minX);
     final h = math.max(1e-3, maxY - minY);
     return Rect.fromLTWH(minX, minY, w, h);
   }
 
-  double _computeUniformScale(Rect bounds, Size size, {double padding = 10}) {
+  // ---------- BUILD DRAWABLE STROKES ----------
+
+  List<DrawableStroke> _buildDrawableStrokes({
+    required List<StrokePolyline> polylines,
+    required List<StrokeCubic> cubics,
+    required double srcWidth,
+    required double srcHeight,
+    required double targetResolution,
+    required double basePenWidth,
+  }) {
+    final strokes = <DrawableStroke>[];
+
+    final srcMax = math.max(srcWidth, srcHeight);
+    final upscale = srcMax > 0 ? targetResolution / srcMax : 1.0;
+    final diag = math.sqrt(
+      math.pow(srcWidth * upscale, 2) + math.pow(srcHeight * upscale, 2),
+    );
+
+    for (final s in polylines) {
+      final pts = s.points
+          .map((p) => Offset(p.dx * upscale, p.dy * upscale))
+          .toList(growable: false);
+      if (pts.length < 2) continue;
+      strokes.add(_makeDrawableFromPoints(
+        pts: pts,
+        basePenWidth: basePenWidth,
+        diag: diag,
+      ));
+    }
+
+    for (final c in cubics) {
+      final pts = _sampleCubicStroke(c, upscale: upscale);
+      if (pts.length < 2) continue;
+      strokes.add(_makeDrawableFromPoints(
+        pts: pts,
+        basePenWidth: basePenWidth,
+        diag: diag,
+      ));
+    }
+
+    if (strokes.isEmpty) return strokes;
+
+    final allBounds = _boundsFromDrawable(strokes);
+    final imageCenter = allBounds.center;
+
+    _assignGroups(
+      strokes,
+      proximity: 0.06 * srcMax * upscale,
+    );
+
+    final ordered = _orderStrokesByGroups(
+      strokes,
+      imageCenter: imageCenter,
+    );
+
+    for (final s in ordered) {
+      s.timeWeight =
+          s.drawCostTotal <= 0.0 ? s.lengthPx : s.drawCostTotal;
+    }
+
+    return ordered;
+  }
+
+  DrawableStroke _makeDrawableFromPoints({
+    required List<Offset> pts,
+    required double basePenWidth,
+    required double diag,
+  }) {
+    final n = pts.length;
+
+    final cumGeom = List<double>.filled(n, 0.0);
+    final cumCost = List<double>.filled(n, 0.0);
+
+    double length = 0.0;
+    double cost = 0.0;
+
+    for (int i = 1; i < n; i++) {
+      final v = pts[i] - pts[i - 1];
+      final segLen = v.distance;
+      if (segLen < 1e-6) {
+        cumGeom[i] = length;
+        cumCost[i] = cost;
+        continue;
+      }
+
+      length += segLen;
+
+      double angDeg = 0.0;
+      if (i > 1) {
+        final vPrev = pts[i - 1] - pts[i - 2];
+        final lenPrev = vPrev.distance;
+        if (lenPrev >= 1e-6) {
+          final dot =
+              (vPrev.dx * v.dx + vPrev.dy * v.dy) / (lenPrev * segLen);
+          final clamped = dot.clamp(-1.0, 1.0);
+          angDeg = math.acos(clamped) * 180.0 / math.pi;
+        }
+      }
+
+      final sharpNorm = (angDeg / 80.0).clamp(0.0, 1.5);
+      final speedFactor = 1.0 + 1.2 * sharpNorm; // curves slower
+      final segCost = segLen * speedFactor;
+
+      cost += segCost;
+      cumGeom[i] = length;
+      cumCost[i] = cost;
+    }
+
+    if (cost <= 0.0) {
+      cost = length <= 0.0 ? 1.0 : length;
+    }
+
+    final centroid = _centroid(pts);
+    final curvature = _estimateCurvatureDeg(pts);
+    final bounds = _boundsOfPoints(pts);
+
+    double amp = 0.0;
+    if (length > 0.02 * diag) {
+      final lenNorm = (length / diag).clamp(0.0, 1.0);
+      final curvNorm = (curvature / 70.0).clamp(0.0, 1.0);
+      final baseAmp = basePenWidth * 0.9;
+      amp = baseAmp *
+          (0.5 + 0.8 * math.pow(lenNorm, 0.7)) *
+          (0.6 + 0.4 * (1.0 - curvNorm));
+      amp = amp.clamp(0.5, basePenWidth * 2.0);
+    }
+
+    final displayPts = amp > 0.0 ? _applyWobble(pts, amp) : pts;
+
+    return DrawableStroke(
+      points: displayPts,
+      originalPoints: pts,
+      lengthPx: length,
+      centroid: centroid,
+      bounds: bounds,
+      curvatureMetricDeg: curvature,
+      cumGeomLen: cumGeom,
+      cumDrawCost: cumCost,
+      drawCostTotal: cost,
+    );
+  }
+
+  Offset _centroid(List<Offset> pts) {
+    if (pts.isEmpty) return Offset.zero;
+    double sx = 0.0, sy = 0.0;
+    for (final p in pts) {
+      sx += p.dx;
+      sy += p.dy;
+    }
+    final n = pts.length.toDouble();
+    return Offset(sx / n, sy / n);
+  }
+
+  double _estimateCurvatureDeg(List<Offset> pts) {
+    if (pts.length < 3) return 0.0;
+    double sumAng = 0.0;
+    int cnt = 0;
+    for (int i = 1; i < pts.length - 1; i++) {
+      final a = pts[i - 1];
+      final b = pts[i];
+      final c = pts[i + 1];
+      final v1 = b - a;
+      final v2 = c - b;
+      final len1 = v1.distance;
+      final len2 = v2.distance;
+      if (len1 < 1e-3 || len2 < 1e-3) continue;
+      final dot = (v1.dx * v2.dx + v1.dy * v2.dy) / (len1 * len2);
+      final clamped = dot.clamp(-1.0, 1.0);
+      final ang = math.acos(clamped) * 180.0 / math.pi;
+      sumAng += ang.abs();
+      cnt++;
+    }
+    if (cnt == 0) return 0.0;
+    return sumAng / cnt;
+  }
+
+  List<Offset> _applyWobble(List<Offset> pts, double amp) {
+    final n = pts.length;
+    if (n < 3) return pts;
+
+    final out = <Offset>[];
+    for (int i = 0; i < n; i++) {
+      final pPrev = pts[i == 0 ? 0 : i - 1];
+      final pNext = pts[i == n - 1 ? n - 1 : i + 1];
+      final dir = pNext - pPrev;
+      final len = dir.distance;
+      if (len < 1e-6) {
+        out.add(pts[i]);
+        continue;
+      }
+      final nx = -dir.dy / len;
+      final ny = dir.dx / len;
+
+      final t = i / (n - 1);
+      final fade = math.sin(t * math.pi);
+
+      final waveFast = math.sin(t * 5.0 * math.pi);
+      final waveSlow = math.sin(t * 2.0 * math.pi);
+      final combined = 0.6 * waveFast + 0.4 * waveSlow;
+
+      final w = combined * amp * fade;
+
+      final dx = nx * w;
+      final dy = ny * w;
+      out.add(Offset(pts[i].dx + dx, pts[i].dy + dy));
+    }
+    return out;
+  }
+
+  Rect _boundsFromDrawable(List<DrawableStroke> strokes) {
+    double minX = double.infinity, minY = double.infinity;
+    double maxX = -double.infinity, maxY = -double.infinity;
+    for (final s in strokes) {
+      final b = s.bounds;
+      if (b.left < minX) minX = b.left;
+      if (b.top < minY) minY = b.top;
+      if (b.right > maxX) maxX = b.right;
+      if (b.bottom > maxY) maxY = b.bottom;
+    }
+    if (minX == double.infinity) {
+      return const Rect.fromLTWH(0, 0, 1, 1);
+    }
+    return Rect.fromLTRB(minX, minY, maxX, maxY);
+  }
+
+  Rect _boundsOfPoints(List<Offset> pts) {
+    double minX = double.infinity, minY = double.infinity;
+    double maxX = -double.infinity, maxY = -double.infinity;
+    for (final p in pts) {
+      if (p.dx < minX) minX = p.dx;
+      if (p.dy < minY) minY = p.dy;
+      if (p.dx > maxX) maxX = p.dx;
+      if (p.dy > maxY) maxY = p.dy;
+    }
+    if (minX == double.infinity) {
+      return const Rect.fromLTWH(0, 0, 1, 1);
+    }
+    return Rect.fromLTRB(minX, minY, maxX, maxY);
+  }
+
+  List<Offset> _sampleCubicStroke(StrokeCubic s, {required double upscale}) {
+    const int stepsPerSegment = 18;
+    final pts = <Offset>[];
+    bool first = true;
+
+    for (final seg in s.segments) {
+      for (int i = 0; i <= stepsPerSegment; i++) {
+        final t = i / stepsPerSegment;
+        final p = _evalCubic(seg, t);
+        final q = Offset(p.dx * upscale, p.dy * upscale);
+        if (!first) {
+          if ((q - pts.last).distance < 0.05) continue;
+        }
+        pts.add(q);
+        first = false;
+      }
+    }
+    return pts;
+  }
+
+  Offset _evalCubic(CubicSegment seg, double t) {
+    final mt = 1.0 - t;
+    final mt2 = mt * mt;
+    final t2 = t * t;
+    final x = mt2 * mt * seg.p0.dx +
+        3 * mt2 * t * seg.c1.dx +
+        3 * mt * t2 * seg.c2.dx +
+        t2 * t * seg.p1.dx;
+    final y = mt2 * mt * seg.p0.dy +
+        3 * mt2 * t * seg.c1.dy +
+        3 * mt * t2 * seg.c2.dy +
+        t2 * t * seg.p1.dy;
+    return Offset(x, y);
+  }
+
+  // ---------- GROUPING ----------
+
+  void _assignGroups(List<DrawableStroke> strokes,
+      {required double proximity}) {
+    if (strokes.isEmpty) return;
+    final n = strokes.length;
+    final visited = List<bool>.filled(n, false);
+    int groupId = 0;
+
+    final centroids = strokes.map((s) => s.centroid).toList(growable: false);
+
+    for (int i = 0; i < n; i++) {
+      if (visited[i]) continue;
+      final stack = <int>[i];
+      visited[i] = true;
+      int groupSize = 0;
+      while (stack.isNotEmpty) {
+        final idx = stack.removeLast();
+        strokes[idx].groupId = groupId;
+        groupSize++;
+        final ci = centroids[idx];
+        for (int j = 0; j < n; j++) {
+          if (visited[j]) continue;
+          final cj = centroids[j];
+          if ((ci - cj).distance <= proximity) {
+            visited[j] = true;
+            stack.add(j);
+          }
+        }
+      }
+      for (int k = 0; k < n; k++) {
+        if (strokes[k].groupId == groupId) {
+          strokes[k].groupSize = groupSize;
+        }
+      }
+      groupId++;
+    }
+  }
+
+  List<DrawableStroke> _orderStrokesByGroups(
+    List<DrawableStroke> strokes, {
+    required Offset imageCenter,
+  }) {
+    if (strokes.isEmpty) return strokes;
+
+    final groups = <int, List<DrawableStroke>>{};
+    for (final s in strokes) {
+      groups.putIfAbsent(s.groupId, () => <DrawableStroke>[]).add(s);
+    }
+
+    final groupIds = groups.keys.toList();
+
+    double maxGroupSize = 0.0;
+    double maxGroupLen = 0.0;
+    double maxGroupTotalLen = 0.0;
+    double maxCenterDist = 0.0;
+
+    final groupCenters = <int, Offset>{};
+    final groupAvgLen = <int, double>{};
+    final groupSizes = <int, int>{};
+    final groupCenterDist = <int, double>{};
+    final groupTotalLen = <int, double>{};
+
+    for (final gid in groupIds) {
+      final gList = groups[gid]!;
+      final size = gList.length;
+      groupSizes[gid] = size;
+      if (size > maxGroupSize) maxGroupSize = size.toDouble();
+
+      double sx = 0.0, sy = 0.0, totalLen = 0.0, sumLen = 0.0;
+      for (final s in gList) {
+        sx += s.centroid.dx;
+        sy += s.centroid.dy;
+        sumLen += s.lengthPx;
+        totalLen += s.lengthPx;
+      }
+      final center =
+          Offset(sx / size.toDouble(), sy / size.toDouble());
+      groupCenters[gid] = center;
+
+      final avgLen = size > 0 ? totalLen / size.toDouble() : 0.0;
+      groupAvgLen[gid] = avgLen;
+      if (avgLen > maxGroupLen) maxGroupLen = avgLen;
+
+      groupTotalLen[gid] = sumLen;
+      if (sumLen > maxGroupTotalLen) maxGroupTotalLen = sumLen;
+
+      final dist = (center - imageCenter).distance;
+      groupCenterDist[gid] = dist;
+      if (dist > maxCenterDist) maxCenterDist = dist;
+    }
+
+    if (maxGroupSize <= 0) maxGroupSize = 1.0;
+    if (maxGroupLen <= 0) maxGroupLen = 1.0;
+    if (maxGroupTotalLen <= 0) maxGroupTotalLen = 1.0;
+    if (maxCenterDist <= 0) maxCenterDist = 1.0;
+
+    final groupScores = <int, double>{};
+    for (final gid in groupIds) {
+      final sizeNorm =
+          (groupSizes[gid]!.toDouble() / maxGroupSize).clamp(0.0, 1.0);
+      final avgLenNorm =
+          (groupAvgLen[gid]! / maxGroupLen).clamp(0.0, 1.0);
+      final totalLenNorm =
+          (groupTotalLen[gid]! / maxGroupTotalLen).clamp(0.0, 1.0);
+      final centerNorm =
+          (1.0 - groupCenterDist[gid]! / maxCenterDist).clamp(0.0, 1.0);
+
+      final score = 0.45 * totalLenNorm +
+          0.35 * sizeNorm +
+          0.15 * avgLenNorm +
+          0.05 * centerNorm;
+      groupScores[gid] = score;
+    }
+
+    groupIds.sort((a, b) =>
+        (groupScores[b] ?? 0.0).compareTo(groupScores[a] ?? 0.0));
+
+    final ordered = <DrawableStroke>[];
+
+    for (final gid in groupIds) {
+      final gList = groups[gid]!;
+      final gCenter = groupCenters[gid]!;
+
+      double maxLen = 0.0;
+      double maxRad = 0.0;
+      for (final s in gList) {
+        if (s.lengthPx > maxLen) maxLen = s.lengthPx;
+        final d = (s.centroid - gCenter).distance;
+        if (d > maxRad) maxRad = d;
+      }
+      if (maxLen <= 0) maxLen = 1.0;
+      if (maxRad <= 0) maxRad = 1.0;
+
+      for (final s in gList) {
+        final lenNorm = (s.lengthPx / maxLen).clamp(0.0, 1.0);
+        final centerDist = (s.centroid - gCenter).distance;
+        final centerNorm =
+            (1.0 - centerDist / maxRad).clamp(0.0, 1.0);
+        final score = 0.8 * lenNorm + 0.2 * centerNorm;
+        s.importanceScore = score;
+      }
+
+      gList.sort((a, b) =>
+          b.importanceScore.compareTo(a.importanceScore));
+
+      ordered.addAll(gList);
+    }
+
+    return ordered;
+  }
+}
+
+/* ---------- Raw data types ---------- */
+
+class StrokePolyline {
+  final List<Offset> points;
+  const StrokePolyline(this.points);
+}
+
+class CubicSegment {
+  final Offset p0;
+  final Offset c1;
+  final Offset c2;
+  final Offset p1;
+  const CubicSegment({
+    required this.p0,
+    required this.c1,
+    required this.c2,
+    required this.p1,
+  });
+}
+
+class StrokeCubic {
+  final List<CubicSegment> segments;
+  const StrokeCubic(this.segments);
+}
+
+/* ---------- Drawable stroke ---------- */
+
+class DrawableStroke {
+  final List<Offset> points; // upscaled + wobble
+  final List<Offset> originalPoints; // pre-wobble
+  final double lengthPx;
+  final Offset centroid;
+  final Rect bounds;
+  final double curvatureMetricDeg;
+
+  final List<double> cumGeomLen; // cumulative geometric length
+  final List<double> cumDrawCost; // cumulative time-cost (length * curveFactor)
+  final double drawCostTotal; // total cost for this stroke
+
+  int groupId = -1;
+  int groupSize = 1;
+  double importanceScore = 0.0;
+  double timeWeight = 0.0; // used by global animator
+
+  DrawableStroke({
+    required this.points,
+    required this.originalPoints,
+    required this.lengthPx,
+    required this.centroid,
+    required this.bounds,
+    required this.curvatureMetricDeg,
+    required this.cumGeomLen,
+    required this.cumDrawCost,
+    required this.drawCostTotal,
+  });
+}
+
+/* ---------- Painter ---------- */
+
+class WhiteboardPainter extends CustomPainter {
+  final List<DrawableStroke> strokes;
+  final double animationT;
+  final double basePenWidth;
+
+  final bool stepMode;
+  final int stepStrokeCount;
+
+  const WhiteboardPainter({
+    required this.strokes,
+    required this.animationT,
+    required this.basePenWidth,
+    required this.stepMode,
+    required this.stepStrokeCount,
+  });
+
+  @override
+  void paint(Canvas canvas, Size size) {
+    if (strokes.isEmpty) return;
+
+    final bounds = _computeBounds(strokes);
+    final scale = _computeUniformScale(bounds, size, padding: 80);
+    final tx =
+        (size.width - bounds.width * scale) / 2 - bounds.left * scale;
+    final ty =
+        (size.height - bounds.height * scale) / 2 - bounds.top * scale;
+
+    canvas.save();
+    canvas.translate(tx, ty);
+    canvas.scale(scale);
+
+    if (stepMode) {
+      // STEP MODE: draw first N strokes fully
+      final count = stepStrokeCount.clamp(0, strokes.length);
+      for (int i = 0; i < count; i++) {
+        _drawStroke(canvas, strokes[i], 1.0, scale);
+      }
+    } else {
+      // ANIMATION MODE: global time across all strokes
+      final totalWeight =
+          strokes.fold<double>(0.0, (s, d) => s + d.timeWeight);
+      final clampedT = animationT.clamp(0.0, 1.0);
+      final target = totalWeight > 0 ? totalWeight * clampedT : 0.0;
+
+      double acc = 0.0;
+      for (final stroke in strokes) {
+        final w = stroke.timeWeight;
+        if (w <= 0) continue;
+        final start = acc;
+        final end = acc + w;
+        acc = end;
+
+        double phase;
+        if (target >= end) {
+          phase = 1.0;
+        } else if (target <= start) {
+          phase = 0.0;
+        } else {
+          phase = (target - start) / w;
+        }
+
+        if (phase <= 0.0) continue;
+
+        _drawStroke(canvas, stroke, phase, scale);
+
+        if (target < end) {
+          break;
+        }
+      }
+    }
+
+    canvas.restore();
+  }
+
+  void _drawStroke(
+      Canvas canvas, DrawableStroke stroke, double phase, double viewScale) {
+    final pts = stroke.points;
+    if (pts.length < 2) return;
+
+    // per-stroke draw vs pause (used only in anim mode, harmless in step mode)
+    const double drawFrac = 0.8;
+    final local = phase.clamp(0.0, 1.0);
+    if (local <= 0.0) return;
+
+    double drawPhase;
+    if (local >= drawFrac) {
+      drawPhase = 1.0; // pause segment: stroke fully drawn
+    } else {
+      drawPhase = local / drawFrac;
+    }
+
+    if (drawPhase <= 0.0) return;
+
+    final n = pts.length;
+    final totalCost = stroke.drawCostTotal;
+
+    int idxMax;
+    if (drawPhase >= 1.0 || totalCost <= 0.0) {
+      idxMax = n - 1;
+    } else {
+      final targetCost = drawPhase * totalCost;
+      idxMax = _findIndexForCost(stroke.cumDrawCost, targetCost);
+      if (idxMax < 1) idxMax = 1;
+      if (idxMax >= n) idxMax = n - 1;
+    }
+
+    if (idxMax < 1) return;
+
+    final path = Path()..moveTo(pts[0].dx, pts[0].dy);
+    for (int i = 1; i <= idxMax; i++) {
+      path.lineTo(pts[i].dx, pts[i].dy);
+    }
+
+    final penW = (basePenWidth / viewScale).clamp(0.5, 10.0);
+
+    final paintLine = Paint()
+      ..color = Colors.black
+      ..style = PaintingStyle.stroke
+      ..strokeCap = StrokeCap.round
+      ..strokeJoin = StrokeJoin.round
+      ..strokeWidth = penW;
+
+    canvas.drawPath(path, paintLine);
+  }
+
+  int _findIndexForCost(List<double> cumCost, double target) {
+    final last = cumCost.length - 1;
+    if (last <= 0) return 0;
+    if (target >= cumCost[last]) return last;
+
+    int lo = 1;
+    int hi = last;
+    int ans = 1;
+    while (lo <= hi) {
+      final mid = (lo + hi) >> 1;
+      if (cumCost[mid] <= target) {
+        ans = mid;
+        lo = mid + 1;
+      } else {
+        hi = mid - 1;
+      }
+    }
+    return ans;
+  }
+
+  Rect _computeBounds(List<DrawableStroke> strokes) {
+    double minX = double.infinity, minY = double.infinity;
+    double maxX = -double.infinity, maxY = -double.infinity;
+    for (final s in strokes) {
+      final b = s.bounds;
+      if (b.left < minX) minX = b.left;
+      if (b.top < minY) minY = b.top;
+      if (b.right > maxX) maxX = b.right;
+      if (b.bottom > maxY) maxY = b.bottom;
+    }
+    if (minX == double.infinity) {
+      return const Rect.fromLTWH(0, 0, 1, 1);
+    }
+    final w = math.max(1e-3, maxX - minX);
+    final h = math.max(1e-3, maxY - minY);
+    return Rect.fromLTWH(minX, minY, w, h);
+  }
+
+  double _computeUniformScale(Rect bounds, Size size,
+      {double padding = 10}) {
     final sx = (size.width - 2 * padding) / bounds.width;
     final sy = (size.height - 2 * padding) / bounds.height;
     final v = math.min(sx, sy);
-    return (v.isFinite && v > 0) ? v : 1.0;
+    final fit = (v.isFinite && v > 0) ? v : 1.0;
+    const shrinkFactor = 0.45; // smaller than full screen
+    return fit * shrinkFactor;
   }
 
   @override
   bool shouldRepaint(covariant WhiteboardPainter old) =>
-      old.polylines != polylines || old.cubics != cubics;
+      old.strokes != strokes ||
+      old.animationT != animationT ||
+      old.basePenWidth != basePenWidth ||
+      old.stepMode != stepMode ||
+      old.stepStrokeCount != stepStrokeCount;
 }

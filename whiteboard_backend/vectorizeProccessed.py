@@ -12,30 +12,26 @@ import numpy as np
 
 # ------------------- PATHS -------------------
 BASE = Path(__file__).resolve().parent
-IN_DIR = BASE / "ProccessedImages"
+IN_DIR  = BASE / "Skeletonized"   # skeleton PNGs from previous step
 OUT_DIR = BASE / "StrokeVectors"
 OUT_DIR.mkdir(parents=True, exist_ok=True)
 
 # ------------------- GLOBAL KNOBS -------------------
-MIN_COMPONENT_AREA = 9         # remove tiny specks
-BLUR_BEFORE_BIN = 0            # 0 off, else odd (e.g., 3)
 
-USE_SKIMAGE = True             # skeletonize speed
+# RDP simplification strength (fraction of image diagonal)
+RDP_EPS_FRAC = 0.003
 
-RDP_EPS_FRAC = 0.003           # simplification strength
-CHAIKIN_ITERS = 1              # 0..2
+# Chaikin smoothing iterations (0..2 is reasonable)
+CHAIKIN_ITERS = 1
 
-LINK_DIST_FRAC = 0.004         # endpoint gap (fraction of diagonal)
-LINK_ANG_DEG   = 25.0          # tangent mismatch
-MAX_LINK_PASSES = 6
+# Minimum stroke length (fraction of diagonal) – drop super tiny crap
+MIN_STROKE_LEN_FRAC = 0.01
 
-MIN_STROKE_LEN_FRAC = 0.01     # drop short strokes (< this * diag)
+# Angle logic
+ANGLE_BREAK_DEG   = 30.0   # sharp turn above this → break stroke
+DIR_WINDOW_BACK   = 3      # how many pixels back to estimate direction
 
-CATMULL_ALPHA = 0.5            # centripetal Catmull–Rom
-SEG_STRIDE = 1                 # subsample before fitting
-
-# ------------------- FINITE CHECKS -------------------
-
+# Safe checks
 def finite2(x: float) -> bool:
     return math.isfinite(x)
 
@@ -48,96 +44,218 @@ def finite_nd(a: np.ndarray) -> bool:
 def nan_to_num_nd(a: np.ndarray) -> np.ndarray:
     return np.nan_to_num(a, copy=False)
 
-# ------------------- IO / BINARIZE -------------------
+# ------------------- LOAD SKELETON -------------------
 
-def _load_edges_binary(path: Path) -> np.ndarray:
+def _load_skeleton_binary(path: Path) -> np.ndarray:
+    """
+    Read skeleton PNG, return mask 0/1 (1 = skeleton pixel).
+    Assumes skeleton is white-ish on black background.
+    """
     img = cv2.imread(str(path), cv2.IMREAD_GRAYSCALE)
     if img is None:
         raise FileNotFoundError(str(path))
-
-    if BLUR_BEFORE_BIN and BLUR_BEFORE_BIN % 2 == 1:
-        img = cv2.GaussianBlur(img, (BLUR_BEFORE_BIN, BLUR_BEFORE_BIN), 0)
-
+    # Just threshold near mid
     _, bw = cv2.threshold(img, 0, 255, cv2.THRESH_BINARY + cv2.THRESH_OTSU)
-    white_ratio = (bw == 255).mean()
-    fg = (bw == 0).astype(np.uint8) if white_ratio > 0.5 else (bw == 255).astype(np.uint8)
+    skel = (bw > 0).astype(np.uint8)
+    return skel
 
-    num, lab, stats, _ = cv2.connectedComponentsWithStats(fg, connectivity=8)
-    out = np.zeros_like(fg)
-    for i in range(1, num):
-        if stats[i, cv2.CC_STAT_AREA] >= MIN_COMPONENT_AREA:
-            out[lab == i] = 1
+# ------------------- GRAPH / STROKE TRACING -------------------
+
+# 8-neighbourhood offsets
+NEIGH_OFFS = [
+    (-1, -1), (-1, 0), (-1, 1),
+    ( 0, -1),          ( 0, 1),
+    ( 1, -1), ( 1, 0), ( 1, 1),
+]
+
+def _neighbors(mask: np.ndarray, y: int, x: int) -> List[Tuple[int, int]]:
+    h, w = mask.shape
+    out = []
+    for dy, dx in NEIGH_OFFS:
+        ny, nx = y + dy, x + dx
+        if 0 <= ny < h and 0 <= nx < w and mask[ny, nx]:
+            out.append((ny, nx))
     return out
 
-# ------------------- SKELETON -------------------
+def _angle_between(u: np.ndarray, v: np.ndarray) -> float:
+    # u, v: 2D vectors
+    u = np.asarray(u, dtype=np.float32)
+    v = np.asarray(v, dtype=np.float32)
+    nu = float(np.linalg.norm(u))
+    nv = float(np.linalg.norm(v))
+    if nu < 1e-12 or nv < 1e-12:
+        return 0.0
+    u /= nu
+    v /= nv
+    c = float(np.dot(u, v))
+    c = max(-1.0, min(1.0, c))
+    return math.degrees(math.acos(c))
 
-def _skeletonize(mask01: np.ndarray) -> np.ndarray:
-    if USE_SKIMAGE:
-        try:
-            from skimage.morphology import skeletonize
-            sk = skeletonize(mask01 > 0).astype(np.uint8)
-            return sk
-        except Exception:
-            pass
-    # Zhang–Suen fallback
-    img = (mask01 > 0).astype(np.uint8).copy()
-    h, w = img.shape
+def _trace_stroke_from(
+    start_y: int,
+    start_x: int,
+    skel: np.ndarray,
+    deg: np.ndarray,
+    visited_edges: set,
+    w: int,
+) -> List[Tuple[float, float]]:
+    """
+    Walk along skeleton edges, starting at (start_y, start_x),
+    using an angular continuity criterion and visited_edges to avoid loops.
+    Returns list of (x, y) floats forming one stroke.
+    """
+    path: List[Tuple[float, float]] = []
+    h, _ = skel.shape
 
-    def nbrs(y, x):
-        return [img[y-1, x], img[y-1, x+1], img[y, x+1], img[y+1, x+1],
-                img[y+1, x], img[y+1, x-1], img[y, x-1], img[y-1, x-1]]
+    curr_y, curr_x = start_y, start_x
+    prev_y, prev_x = None, None
+    prev_dir = None  # direction vector
 
-    def trans(seq):
-        c = 0
-        for i in range(8):
-            if seq[i] == 0 and seq[(i+1) % 8] == 1:
-                c += 1
-        return c
+    # helper: edge id
+    def edge_id(y1, x1, y2, x2):
+        a = y1 * w + x1
+        b = y2 * w + x2
+        return (a, b) if a < b else (b, a)
 
-    changed = True
-    while changed:
-        changed = False
-        rem = []
-        for y in range(1, h-1):
-            for x in range(1, w-1):
-                if img[y, x] != 1: continue
-                p = nbrs(y, x); bp = sum(p)
-                if bp < 2 or bp > 6: continue
-                if trans(p) != 1: continue
-                if p[0]*p[2]*p[4] != 0: continue
-                if p[2]*p[4]*p[6] != 0: continue
-                rem.append((y, x))
-        for y, x in rem: img[y, x] = 0
-        changed = changed or bool(rem)
+    while True:
+        path.append((float(curr_x), float(curr_y)))
 
-        rem = []
-        for y in range(1, h-1):
-            for x in range(1, w-1):
-                if img[y, x] != 1: continue
-                p = nbrs(y, x); bp = sum(p)
-                if bp < 2 or bp > 6: continue
-                if trans(p) != 1: continue
-                if p[0]*p[2]*p[6] != 0: continue
-                if p[0]*p[4]*p[6] != 0: continue
-                rem.append((y, x))
-        for y, x in rem: img[y, x] = 0
-        changed = changed or bool(rem)
-    return img.astype(np.uint8)
+        # Collect candidates (neighbors with unused edges)
+        neighs = _neighbors(skel, curr_y, curr_x)
+        candidates = []
+        for ny, nx in neighs:
+            eid = edge_id(curr_y, curr_x, ny, nx)
+            if eid in visited_edges:
+                continue
+            # don't immediately backtrack if we have alternatives
+            if prev_y is not None and ny == prev_y and nx == prev_x and len(neighs) > 1:
+                continue
+            candidates.append((ny, nx))
 
-# ------------------- POLYLINES -------------------
+        if not candidates:
+            break
 
-def _trace_polylines_from_skeleton(skel01: np.ndarray) -> List[np.ndarray]:
-    sk255 = (skel01 * 255).astype(np.uint8)
-    contours, _ = cv2.findContours(sk255, cv2.RETR_LIST, cv2.CHAIN_APPROX_NONE)
-    polys = []
-    for c in contours:
-        if c is None or len(c) < 3:
+        # For the first step, we don't have a direction yet
+        if prev_dir is None:
+            # At junction, prefer direction that leads out (lower degree), but it's not critical
+            candidates.sort(key=lambda p: deg[p[0], p[1]])
+            next_y, next_x = candidates[0]
+            dvec = np.array([next_x - curr_x, next_y - curr_y], dtype=np.float32)
+            prev_dir = dvec
+        else:
+            # choose candidate with smallest angle to prev_dir
+            best = None
+            best_ang = 1e9
+            base_dir = prev_dir
+
+            # Optionally use multiple previous points to smooth direction
+            if len(path) > DIR_WINDOW_BACK:
+                x0, y0 = path[max(0, len(path)-1-DIR_WINDOW_BACK)]
+                base_dir = np.array([curr_x - x0, curr_y - y0], dtype=np.float32)
+
+            for ny, nx in candidates:
+                dvec = np.array([nx - curr_x, ny - curr_y], dtype=np.float32)
+                ang = _angle_between(base_dir, dvec)
+                if ang < best_ang:
+                    best_ang = ang
+                    best = (ny, nx, dvec)
+
+            if best is None:
+                break
+
+            # sharp corner → break stroke here, don't consume edge
+            if best_ang > ANGLE_BREAK_DEG:
+                break
+
+            next_y, next_x, dvec = best
+            prev_dir = dvec
+
+        # mark edge as used
+        eid = edge_id(curr_y, curr_x, next_y, next_x)
+        visited_edges.add(eid)
+
+        # move
+        prev_y, prev_x = curr_y, curr_x
+        curr_y, curr_x = next_y, next_x
+
+    # make sure it's not degenerate
+    if len(path) < 2:
+        return []
+    return path
+
+def _extract_strokes_from_skeleton(skel01: np.ndarray) -> List[np.ndarray]:
+    """
+    Main stroke extraction:
+      - compute degree for each skeleton pixel
+      - trace from endpoints first (deg == 1)
+      - then trace from any remaining unused edges
+    Returns list of polylines as N×2 float arrays (x,y).
+    """
+    skel = (skel01 > 0).astype(np.uint8)
+    h, w = skel.shape
+    if skel.max() == 0:
+        return []
+
+    # degree map
+    deg = np.zeros_like(skel, dtype=np.uint8)
+    ys, xs = np.where(skel > 0)
+    for y, x in zip(ys, xs):
+        deg[y, x] = len(_neighbors(skel, y, x))
+
+    # set of used edges (by id)
+    visited_edges = set()
+
+    strokes: List[np.ndarray] = []
+
+    # Endpoint seeds first (deg == 1)
+    endpoints = [(int(y), int(x)) for y, x in zip(ys, xs) if deg[y, x] == 1]
+
+    for sy, sx in endpoints:
+        # Check if there is any unused edge from here
+        neighs = _neighbors(skel, sy, sx)
+        has_free_edge = False
+        for ny, nx in neighs:
+            a = sy * w + sx
+            b = ny * w + nx
+            eid = (a, b) if a < b else (b, a)
+            if eid not in visited_edges:
+                has_free_edge = True
+                break
+        if not has_free_edge:
             continue
-        p = c.reshape(-1, 2).astype(np.float32)
-        nan_to_num_nd(p)
-        if p.shape[0] >= 2 and finite_nd(p):
-            polys.append(p)
-    return polys
+
+        path = _trace_stroke_from(sy, sx, skel, deg, visited_edges, w)
+        if path:
+            arr = np.asarray(path, dtype=np.float32)
+            nan_to_num_nd(arr)
+            if finite_nd(arr) and arr.shape[0] >= 2:
+                strokes.append(arr)
+
+    # Now any remaining unused edges (loops / junction leftovers)
+    for sy, sx in zip(ys, xs):
+        # for each pixel, see if it has an unused edge
+        neighs = _neighbors(skel, sy, sx)
+        start_needed = False
+        for ny, nx in neighs:
+            a = sy * w + sx
+            b = ny * w + nx
+            eid = (a, b) if a < b else (b, a)
+            if eid not in visited_edges:
+                start_needed = True
+                break
+        if not start_needed:
+            continue
+
+        path = _trace_stroke_from(sy, sx, skel, deg, visited_edges, w)
+        if path:
+            arr = np.asarray(path, dtype=np.float32)
+            nan_to_num_nd(arr)
+            if finite_nd(arr) and arr.shape[0] >= 2:
+                strokes.append(arr)
+
+    return strokes
+
+# ------------------- RDP / CHAIKIN / BÉZIER -------------------
 
 def _rdp(points: np.ndarray, eps: float) -> np.ndarray:
     points = np.asarray(points, dtype=np.float32)
@@ -175,8 +293,9 @@ def _chaikin(points: np.ndarray, iters: int) -> np.ndarray:
     P = points.astype(np.float32, copy=True)
     for _ in range(iters):
         Q = [P[0]]
-        for i in range(P.shape[0]-1):
-            p = P[i]; r = P[i+1]
+        for i in range(P.shape[0] - 1):
+            p = P[i]
+            r = P[i+1]
             q = 0.75 * p + 0.25 * r
             s = 0.25 * p + 0.75 * r
             Q.extend([q, s])
@@ -185,118 +304,10 @@ def _chaikin(points: np.ndarray, iters: int) -> np.ndarray:
         nan_to_num_nd(P)
     return P
 
-def _unit(v: np.ndarray) -> np.ndarray:
-    n = float(np.linalg.norm(v))
-    if n < 1e-12:
-        return np.array([1.0, 0.0], dtype=np.float32)
-    return (v / n).astype(np.float32)
-
-def _end_tangent(poly: np.ndarray, at_start: bool) -> np.ndarray:
-    if poly.shape[0] < 2:
-        return np.array([1.0, 0.0], dtype=np.float32)
-    if at_start:
-        a, b = poly[0], poly[min(1, poly.shape[0]-1)]
-    else:
-        a, b = poly[-1], poly[max(poly.shape[0]-2, 0)]
-    t = _unit((b - a).astype(np.float32))
-    nan_to_num_nd(t)
-    return t
-
-def _angle_between(u: np.ndarray, v: np.ndarray) -> float:
-    cu = _unit(u); cv = _unit(v)
-    c = float(np.dot(cu, cv))
-    c = max(-1.0, min(1.0, c))
-    return math.degrees(math.acos(c))
-
-def _link_fragments(polys: List[np.ndarray], diag: float, max_passes: int) -> List[np.ndarray]:
-    if not polys:
-        return polys
-
-    max_dist = LINK_DIST_FRAC * diag
-    max_ang = LINK_ANG_DEG
-
-    work = [p.astype(np.float32) for p in polys]
-    for p in work:
-        nan_to_num_nd(p)
-
-    changed = True
-    passes = 0
-
-    while changed and passes < max_passes:
-        passes += 1
-        changed = False
-
-        endpoints = []
-        for idx, p in enumerate(work):
-            if p.shape[0] == 0: continue
-            s, e = p[0], p[-1]
-            endpoints.append((idx, True,  s.copy()))
-            endpoints.append((idx, False, e.copy()))
-
-        used = set()
-        for i in range(len(endpoints)):
-            if i in used: continue
-            idx_i, is_start_i, pt_i = endpoints[i]
-            tan_i = _end_tangent(work[idx_i], at_start=is_start_i)
-
-            best = (-1, 1e18, 1e9)
-            for j in range(len(endpoints)):
-                if j == i or j in used: continue
-                idx_j, is_start_j, pt_j = endpoints[j]
-                if idx_i == idx_j: continue
-                d = float(np.linalg.norm(pt_j - pt_i))
-                if not math.isfinite(d) or d > max_dist: continue
-
-                tan_j = _end_tangent(work[idx_j], at_start=is_start_j)
-                tj = -tan_j if is_start_j else tan_j
-                ti = tan_i if is_start_i else -tan_i
-
-                ang = _angle_between(ti, tj)
-                if not math.isfinite(ang) or ang > max_ang: continue
-
-                if d < best[1] or (abs(d - best[1]) < 1e-6 and ang < best[2]):
-                    best = (j, d, ang)
-
-            j = best[0]
-            if j == -1:
-                continue
-
-            used.add(i); used.add(j)
-            idx_j, is_start_j, _ = endpoints[j]
-
-            A = work[idx_i]
-            B = work[idx_j]
-
-            if is_start_i and is_start_j:
-                A = A[::-1]
-                merged = np.vstack((A, B))
-            elif is_start_i and not is_start_j:
-                merged = np.vstack((B, A))
-            elif not is_start_i and is_start_j:
-                merged = np.vstack((A, B))
-            else:
-                B = B[::-1]
-                merged = np.vstack((A, B))
-
-            nan_to_num_nd(merged)
-            if not finite_nd(merged) or merged.shape[0] < 2:
-                continue
-
-            work[idx_i] = merged
-            work[idx_j] = np.zeros((0, 2), dtype=np.float32)
-            changed = True
-
-        work = [p for p in work if p.shape[0] > 0]
-
-    return work
-
-# ------------------- CURVES (Catmull–Rom → Bézier) -------------------
-
-def _catmull_rom_to_beziers(pts: np.ndarray, alpha=0.5) -> List[List[float]]:
+def _catmull_rom_to_beziers(pts: np.ndarray, alpha: float = 0.5) -> List[List[float]]:
     """
-    Convert open polyline to list of cubic Beziers:
-    [x0,y0, cx1,cy1, cx2,cy2, x1,y1]
-    All numbers guaranteed finite.
+    Convert open polyline to list of cubic Béziers:
+      [x0,y0, cx1,cy1, cx2,cy2, x1,y1]
     """
     P = pts.astype(np.float32)
     nan_to_num_nd(P)
@@ -306,7 +317,8 @@ def _catmull_rom_to_beziers(pts: np.ndarray, alpha=0.5) -> List[List[float]]:
 
     def tj(ti, Pi, Pj):
         d = float(np.linalg.norm(Pj - Pi))
-        if not math.isfinite(d): d = 0.0
+        if not math.isfinite(d):
+            d = 0.0
         return ti + (d ** alpha)
 
     beziers: List[List[float]] = []
@@ -318,7 +330,8 @@ def _catmull_rom_to_beziers(pts: np.ndarray, alpha=0.5) -> List[List[float]]:
 
     for k in range(1, n+0):
         i1 = k
-        if i1 >= n: break
+        if i1 >= n:
+            break
 
         Pm = P_ext[k-1].astype(np.float32)
         P0 = P_ext[k].astype(np.float32)
@@ -326,9 +339,9 @@ def _catmull_rom_to_beziers(pts: np.ndarray, alpha=0.5) -> List[List[float]]:
         Pp = P_ext[k+2].astype(np.float32)
 
         tm, t0, t1, tp = t[k-1], t[k], t[k+1], t[k+2]
-        dt0 = (t1 - tm); dt1 = (tp - t0)
+        dt0 = (t1 - tm)
+        dt1 = (tp - t0)
         if abs(dt0) < 1e-12 or abs(dt1) < 1e-12:
-            # fallback straight tangent
             m0 = (P1 - P0)
             m1 = (P1 - P0)
         else:
@@ -338,10 +351,12 @@ def _catmull_rom_to_beziers(pts: np.ndarray, alpha=0.5) -> List[List[float]]:
         c1 = P0 + m0 / 3.0
         c2 = P1 - m1 / 3.0
 
-        seg = [float(P0[0]), float(P0[1]),
-               float(c1[0]), float(c1[1]),
-               float(c2[0]), float(c2[1]),
-               float(P1[0]), float(P1[1])]
+        seg = [
+            float(P0[0]), float(P0[1]),
+            float(c1[0]), float(c1[1]),
+            float(c2[0]), float(c2[1]),
+            float(P1[0]), float(P1[1]),
+        ]
         if finite_seq(seg):
             beziers.append(seg)
 
@@ -349,56 +364,56 @@ def _catmull_rom_to_beziers(pts: np.ndarray, alpha=0.5) -> List[List[float]]:
 
 # ------------------- PROCESS SINGLE -------------------
 
+def _poly_length(pp: np.ndarray) -> float:
+    if pp.shape[0] < 2:
+        return 0.0
+    d = np.linalg.norm(np.diff(pp, axis=0), axis=1).sum()
+    if not math.isfinite(d):
+        return 0.0
+    return float(d)
+
 def _process_single(path: Path) -> Tuple[str, dict]:
-    fg = _load_edges_binary(path)
-    H, W = fg.shape
+    skel = _load_skeleton_binary(path)
+    H, W = skel.shape
     diag = math.hypot(W, H)
 
     t0 = time.time()
 
-    sk = _skeletonize(fg)
+    # 1) extract raw polylines from skeleton
+    polys = _extract_strokes_from_skeleton(skel)
 
-    polys = _trace_polylines_from_skeleton(sk)
-
+    # 2) simplify + smooth (light)
     rdp_eps = RDP_EPS_FRAC * diag
-    polys = [ _rdp(p, rdp_eps) for p in polys if p.shape[0] >= 2 ]
-    polys = [ _chaikin(p, CHAIKIN_ITERS) for p in polys if p.shape[0] >= 2 ]
-    # --- FIXED: sanitize arrays without boolean 'or' on ndarray ---
-    polys = [ nan_to_num_nd(p) for p in polys ]
-    polys = [ p for p in polys if finite_nd(p) and p.shape[0] >= 2 ]
+    polys = [_rdp(p, rdp_eps) for p in polys if p.shape[0] >= 2]
+    polys = [_chaikin(p, CHAIKIN_ITERS) for p in polys if p.shape[0] >= 2]
+    polys = [nan_to_num_nd(p) for p in polys]
+    polys = [p for p in polys if finite_nd(p) and p.shape[0] >= 2]
 
-    polys = _link_fragments(polys, diag, max_passes=MAX_LINK_PASSES)
-    polys = [ p for p in polys if finite_nd(p) and p.shape[0] >= 2 ]
-
-    # remove tiny strokes
+    # 3) drop very tiny strokes
     min_len = MIN_STROKE_LEN_FRAC * diag
-    def plen(pp: np.ndarray) -> float:
-        if pp.shape[0] < 2: return 0.0
-        d = np.linalg.norm(np.diff(pp, axis=0), axis=1).sum()
-        if not math.isfinite(d): return 0.0
-        return float(d)
-    polys = [ p for p in polys if plen(p) >= min_len ]
+    polys = [p for p in polys if _poly_length(p) >= min_len]
 
-    if SEG_STRIDE > 1:
-        polys = [ p[::SEG_STRIDE] if p.shape[0] > SEG_STRIDE else p for p in polys ]
-
+    # 4) convert to cubic Béziers
     strokes = []
     for p in polys:
         if p.shape[0] < 2:
             continue
-        beziers = _catmull_rom_to_beziers(p, alpha=CATMULL_ALPHA)
+        beziers = _catmull_rom_to_beziers(p, alpha=0.5)
         if not beziers:
-            # fallback straight pieces with safe controls
+            # fallback: straight segments
             q = p.astype(float)
             segs = []
             for i in range(q.shape[0]-1):
-                a = q[i]; b = q[i+1]
+                a = q[i]
+                b = q[i+1]
                 c1 = a + (b - a) / 3.0
                 c2 = a + 2.0 * (b - a) / 3.0
-                seg = [float(a[0]), float(a[1]),
-                       float(c1[0]), float(c1[1]),
-                       float(c2[0]), float(c2[1]),
-                       float(b[0]), float(b[1])]
+                seg = [
+                    float(a[0]), float(a[1]),
+                    float(c1[0]), float(c1[1]),
+                    float(c2[0]), float(c2[1]),
+                    float(b[0]), float(b[1]),
+                ]
                 if finite_seq(seg):
                     segs.append(seg)
             beziers = segs
@@ -418,10 +433,11 @@ def _process_single(path: Path) -> Tuple[str, dict]:
             "curves": len(strokes),
             "time_sec": round(t1 - t0, 3),
             "rdp_eps": round(rdp_eps, 4),
-            "linked_passes": MAX_LINK_PASSES,
             "chaikin_iters": CHAIKIN_ITERS,
-        }
+            "angle_break_deg": ANGLE_BREAK_DEG,
+        },
     }
+
     out_json = OUT_DIR / f"{path.stem}.json"
     out_json.write_text(json.dumps(data, indent=2), encoding="utf-8")
     return str(path), data
@@ -429,14 +445,21 @@ def _process_single(path: Path) -> Tuple[str, dict]:
 # ------------------- MAIN -------------------
 
 def main():
-    imgs = sorted([p for p in IN_DIR.glob("*")
-                   if p.suffix.lower() in (".png", ".jpg", ".jpeg", ".bmp", ".tif", ".tiff")])
+    imgs = sorted(
+        [
+            p for p in IN_DIR.glob("*")
+            if p.suffix.lower() in (".png", ".jpg", ".jpeg", ".bmp", ".tif", ".tiff")
+        ],
+        key=lambda p: p.name.lower(),
+    )
     print(f"[INFO] IN={IN_DIR}  OUT={OUT_DIR}  found={len(imgs)} image(s)")
     if not imgs:
         return
+
     for p in imgs:
         src, meta = _process_single(p)
-        print(f"[OK] {Path(src).name}: strokes={len(meta['strokes'])}, time={meta['stats']['time_sec']}s")
+        print(f"[OK] {Path(src).name}: strokes={len(meta['strokes'])}, "
+              f"time={meta['stats']['time_sec']}s")
 
 if __name__ == "__main__":
     main()

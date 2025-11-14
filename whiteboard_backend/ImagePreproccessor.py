@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-# preprocess_and_edges.py
+# preprocess_and_edges.pY
 
 import json
 import cv2
@@ -11,6 +11,19 @@ import os
 from pathlib import Path
 import pytesseract
 from pytesseract import Output
+
+
+
+#Takes ready images of diagrams from research. 
+#We first find all "text lables" in diagrams and extract and save them with ocr, then paint them over so they dont get ruined in all the proccessing.
+#After that we run grayscale and canny
+#We want to represent thin lines with actual thin lines when drawing on the board, but canny outlines everythin -> we get two lines for one is in some cases
+#To combat this we merge close lines under a threshhold of 2.4 pixels (we do float operations, and in a lot of diagrams you have curved / not straight stuff -> 2.4 is valid)
+#To get clean result we do our calculations in small 32 x 32 grids in the image. In this area we find the "mean gap" between two lines
+#We only merge the lines that are very close to the mean gap -> that way we preserve fine small detail, but dont have false positives on big gaps
+#To calculate our gaps we go in between two lines and "cast rays" (explore in directions) from a single point with (0, 45, 90, 135) for the direction to find the true width
+#The true results are in the fine canny and other settings tweaks!
+
 
 # ---------- Tesseract path (Windows) ----------
 pytesseract.pytesseract.tesseract_cmd = r"C:\\Program Files\\Tesseract-OCR\\tesseract.exe"
@@ -27,7 +40,7 @@ CLAHE_CLIP = 2.5
 MIN_SIZE = 5
 SHOW_PROGRESS = True
 
-# Preprocess tweaks
+# Preprocess tweaks (basic)
 BORDER_PAD = 3
 UPSCALE_TRIGGER = 600
 UPSCALE_FACTOR = 1.3
@@ -44,10 +57,10 @@ CANNY_K_HIGH = 1.5
 CLOSE_R = 1
 SAVE_DEBUG_GRAY = False
 
-# ===== FILL TUNING (tile-based gap logic) =====
+# ===== FILL TUNING (For accepting and merging gaps in tiles) =====
 MERGE_LEVEL = ""  # "", "light", "medium", "aggressive"
 
-FILL_HALF_WIDTH = 2.4          # <— allow non-integer half-width for decisions
+FILL_HALF_WIDTH = 2.4         # <— allow non-integer half-width for decisions
 FILL_BRIDGE_ITERS = 1
 FILL_MIN_CC_AREA = 6
 FILL_DISTANCE_GATE = True
@@ -56,10 +69,10 @@ FILL_DIST_MULT = 1.0
 
 # --- box-based merge knobs ---
 TILE_SIZE         = 32
-MAX_GAP           = 15
+MAX_GAP           = 15     
 GAP_TOLERANCE     = 15.0   # percent ± around center (median after IQR), keep float
-MIN_CANDIDATES    = 2
-MIN_EDGES_IN_TILE = 3
+MIN_CANDIDATES    = 2  #at least two gaps between lines in a box to be valid
+MIN_EDGES_IN_TILE = 3  #at least 3 lines in total in a box 
 
 # Ridge gating knobs
 BAND_MAX_PIX         = 2
