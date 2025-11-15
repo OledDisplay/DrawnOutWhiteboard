@@ -8,10 +8,12 @@ import numpy as np
 
 #Currently pushing pen width above 3 breaks stuff, but im happy to work with it as "pen width" only really matters for customization of the output, not the core functionality.
 
+#Step 2 of printing - thin images to simple 1px wide lines, so they are easier to split up in strokes
+
 #Input - edge canny images that have had some filling between edges
 
 #This is the second step of our image preproccess / vector conversion - Here we turn the images big filled lines and objects into small thin ones that are easier to proccess.
-#Its like using zhang suen (and we do) but we need some extra help to get good result
+#We are using guo hall style thinning but we need some extra help to get good results
 #The problem is we want both single lines, when proccessing just a filled straight line AND outlines on big filled objects
 #We solve this by taking the width with which our future drawing pen is going to pad thin vectors -> and applying it to mapping here
 #When meeting a filled area of pixels instead of mapping the edge we go inside from each pixel, by "pen width" pixels (pad pixel size)
@@ -38,7 +40,7 @@ OUT_DIR.mkdir(parents=True, exist_ok=True)
 PEN_WIDTH = 3.0              # try 2.0 or 3.0 like you said
 
 # Small noise kill before everything
-MIN_COMPONENT_AREA = 9       # drop tiny blobs before skeletonizing
+MIN_COMPONENT_AREA = 5      # drop tiny blobs before skeletonizing
 
 # Half-width classification tolerance:
 # if max distance in a component <= PEN_WIDTH + WIDTH_EPS → treat as thin stroke
@@ -94,87 +96,25 @@ def load_foreground(path: Path) -> np.ndarray:
 def thin_mask(mask01: np.ndarray) -> np.ndarray:
     """
     0/1 mask → 0/1 mask, thinned to ~1px while preserving topology.
-    Uses skimage.morphology.thin if available, else Zhang–Suen.
+    MUST use skimage.morphology.thin. If not available → hard error.
     """
     m = (mask01 > 0).astype(np.uint8)
 
     if USE_SKIMAGE:
         try:
             from skimage.morphology import thin
+        except Exception as e:
+            raise RuntimeError("ERROR: skimage.morphology.thin is required but not available.") from e
+
+        try:
             th = thin(m > 0, max_num_iter=MAX_THIN_PASSES).astype(np.uint8)
             return th
-        except Exception:
-            pass
+        except Exception as e:
+            raise RuntimeError("ERROR: skimage thinning failed during execution.") from e
 
-    # Zhang–Suen thinning (standard)
-    img = m.copy()
-    h, w = img.shape
+    # If USE_SKIMAGE is False, stop immediately.
+    raise RuntimeError("ERROR: USE_SKIMAGE is False but no fallback thinning is allowed.")
 
-    def neighbors(y, x):
-        return [
-            img[y-1, x],   img[y-1, x+1], img[y, x+1],   img[y+1, x+1],
-            img[y+1, x],   img[y+1, x-1], img[y, x-1],   img[y-1, x-1]
-        ]
-
-    def transitions(p):
-        c = 0
-        for k in range(8):
-            if p[k] == 0 and p[(k + 1) % 8] == 1:
-                c += 1
-        return c
-
-    changed = True
-    while changed:
-        changed = False
-        to_clear = []
-
-        # step 1
-        for y in range(1, h - 1):
-            for x in range(1, w - 1):
-                if img[y, x] != 1:
-                    continue
-                p = neighbors(y, x)
-                bp = sum(p)
-                if bp < 2 or bp > 6:
-                    continue
-                if transitions(p) != 1:
-                    continue
-                if p[0] * p[2] * p[4] != 0:
-                    continue
-                if p[2] * p[4] * p[6] != 0:
-                    continue
-                to_clear.append((y, x))
-
-        if to_clear:
-            changed = True
-            for y, x in to_clear:
-                img[y, x] = 0
-
-        to_clear = []
-
-        # step 2
-        for y in range(1, h - 1):
-            for x in range(1, w - 1):
-                if img[y, x] != 1:
-                    continue
-                p = neighbors(y, x)
-                bp = sum(p)
-                if bp < 2 or bp > 6:
-                    continue
-                if transitions(p) != 1:
-                    continue
-                if p[0] * p[2] * p[6] != 0:
-                    continue
-                if p[0] * p[4] * p[6] != 0:
-                    continue
-                to_clear.append((y, x))
-
-        if to_clear:
-            changed = True
-            for y, x in to_clear:
-                img[y, x] = 0
-
-    return img.astype(np.uint8)
 
 
 # ===================== PEN-WIDTH LOGIC =====================

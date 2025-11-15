@@ -10,16 +10,78 @@ from typing import List, Tuple
 import cv2
 import numpy as np
 
+
+#Step 3 of printing - take our skeletonized image and split it into vectors to draw
+
+#Input  - 1px skeleton PNGs (0 / 255) coming out of our pen-width-aware skeletonizer
+#Output - JSON files with clean, cubic Bezier strokes, ready for drawing / printing
+
+#This is the main image → vector step. Here we take the thin skeleton lines and turn them into strokes that actually make sense to draw
+
+#Step 1 – load + binarize
+#We treat the skeleton PNG as a simple 0/1 mask, and dont do any extra thinning -> thats been pushed out to the skeletonizer :
+
+#Step 2 – graph-based stroke tracing
+#We see the skeleton as a graph:
+#- every foreground pixel is a node,
+#- 8-connected neighbors are edges,
+#- degree map tells us if a pixel is an endpoint of a line, a plain interior point - 2 node, or a junction (intersecting point of lines)
+
+#Tracing logic:
+#As a baseline we  want to break off at SHARP turns to have simpler strokes. But when 2 lines intersect we dont want a false breakoff -> we wanna keep going
+#So we start strokes from all non-degree-2 nodes first (endpoints / junctions),
+#- follow chains of degree-2 pixels straight through (simple interior lines) -> simply walking a line,
+#- at junctions (intersections) we simulate short “look-ahead” walks on all branches and scores them by:
+#   * how straight they are (deflection angle),
+#   * how smooth they are (local curvature),
+#   * how long they run.
+#This allows us to continue on a valid path, and leave the other sharp degreee breakoffs behind, not causing trouble
+
+#Second pass:
+#- after endpoints/junctions, we run again starting from pure degree-2 loops to pick up closed shapes like circles that never hit an endpoint.
+
+#Step 3 – corner-aware segmentation 
+#Here we have ready traced lines and we ACTUALLY start splitting their inner sharp turns into seperate strokes
+#We do this by:
+#- computing a smoothed direction angle along the polyline in a small window,
+#- measuring how much the direction changes between samples (curvature),
+#- scanning forward and grouping “turn regions” over several indices.
+
+#Step 4 – conservative simplification
+#Now each stroke is still a polyline with potentially too many points ->
+#We want to give more opurtunity to the rendering engine, and not just have many pixels to draw
+#We run a very conservative simplifier
+#We never touch indices where the direction changes, so curves stay intact;
+
+#Step 5 – merge small strokes into neighbours
+#The vectorizer tends to create lots of tiny strokes around bigger ones and we end up with a crazy amount of strokes
+#*optimizing the walk and breakoff logic to prevent this is just not worth it, considering how difficult i'd be 
+#To make drawing cleaner and reduce overhead we try to merge small strokes together, and with their natural bigger neighbors
+
+#Step 5b – coverage safety pass
+#All of the earlier logic sometimes drops some strokes, so we keep a hard pixel record.
+#If any of the pixels have been left unasigned we walk them to turn them into strokes
+
+#Step 6 – Catmull–Rom → cubic Bezier conversion
+#At this point we have clean polylines (list of [x, y] points). We convert them into
+#cubic Bezier segments, which are nicer to render and animate:
+#- use centripetal Catmull–Rom splines (alpha = 0.5) to estimate a smooth curve
+#  passing through the sample points,
+#- for each segment between Pi and Pi+1 we compute control points from local tangents
+#  and emit [x0, y0, cx1, cy1, cx2, cy2, x1, y1].
+
+
+
 # ------------------- PATHS -------------------
 BASE = Path(__file__).resolve().parent
 
-# skeleton PNGs (0/255) from your skeletonizer
+# skeleton PNGs (0/255) from skeletonizer
 IN_DIR = BASE / "Skeletonized"
 OUT_DIR = BASE / "StrokeVectors"
 OUT_DIR.mkdir(parents=True, exist_ok=True)
 
 # ------------------- GLOBAL KNOBS -------------------
-MIN_COMPONENT_AREA = 9         # kept for possible later use
+LEFTOVER_MIN_CC_PIXELS = 0   
 BLUR_BEFORE_BIN = 0            # 0 off, else odd (e.g., 3)
 
 CATMULL_ALPHA = 0.5            # centripetal Catmull–Rom
@@ -35,7 +97,7 @@ BRANCH_W_CURV              = 0.2  # weight for max local curvature
 BRANCH_W_LEN               = 0.5  # weight for length (subtracted)
 
 # junction continuation gating:
-# now ONLY angle is used to decide if we stop at a junction;
+#ONLY angle is used to decide if we stop at a junction;
 # curvature is NOT a hard gate here (corner splitting happens later).
 JUNC_CONTINUE_ANG_MAX      = 45.0   # deg – how much deflection we still accept
 
@@ -50,6 +112,16 @@ CURV_MIN_SEG_POINTS        = 2      # minimum points in a segment to keep
 
 # stroke extraction generic knobs
 MIN_STROKE_POINTS          = 2      # drop only single-pixel "strokes"
+
+#SET MERGE ANGLE < 90 FOR ACTUAL ACCURATE STROKE SPLITS - RIGHT NOW I HAVE IT SET MORE AGGRESIVE FOR MORE RENDER ENGINE WORK
+
+# merge-small-strokes knobs
+MERGE_SMALL_LEN_PERCENTILE = 75.0   # strokes below this length percentile are "small"
+MERGE_SMALL_LEN_MIN        = 65.0    # absolute minimum length (px) to consider "not tiny"
+MERGE_DIST_FRAC_DIAG       = 0.004  # relative distance gate vs image diagonal
+MERGE_DIST_MIN             = 2.0    # px
+MERGE_DIST_MAX             = 10.0    # px
+MERGE_ANGLE_MAX            = 110.0   # deg – max angle at join to allow merge
 
 # 8-connected neighbor offsets
 NEIGHBORS_8 = [
@@ -126,6 +198,16 @@ def _angle_diff_deg(a: float, b: float) -> float:
     while d < -math.pi:
         d += 2.0 * math.pi
     return abs(d) * 180.0 / math.pi
+
+def _stroke_length(poly: np.ndarray) -> float:
+    """
+    Arc-length of a polyline in pixels.
+    """
+    if poly is None or poly.shape[0] < 2:
+        return 0.0
+    diff = np.diff(poly.astype(np.float32), axis=0)
+    seg_len = np.linalg.norm(diff, axis=1)
+    return float(np.sum(seg_len))
 
 # ------------------- GRAPH-BASED STROKE TRACER -------------------
 
@@ -593,6 +675,239 @@ def _simplify_poly_conservative(poly: np.ndarray) -> np.ndarray:
         return pts
     return np.asarray(out, dtype=np.float32)
 
+# ------------------- MERGE SMALL STROKES -------------------
+
+def _merge_small_strokes(polys: List[np.ndarray], diag: float) -> List[np.ndarray]:
+    """
+    Post-pass: merge small strokes into neighboring strokes to reduce stroke count.
+
+    - define "small" strokes by length percentile (lower 25%) with an absolute floor;
+    - only those small strokes try to merge into others;
+    - require:
+        * endpoints very close in Euclidean distance,
+        * direction at the join compatible (angle <= MERGE_ANGLE_MAX);
+    - non-merged strokes remain unchanged.
+    """
+    n = len(polys)
+    if n == 0:
+        return polys
+
+    # copy to avoid aliasing
+    merged = [p.astype(np.float32, copy=True) for p in polys]
+    for p in merged:
+        nan_to_num_nd(p)
+
+    lengths = [_stroke_length(p) for p in merged]
+    len_arr = np.array(lengths, dtype=np.float32)
+    if not np.any(len_arr > 0):
+        return merged
+
+    # define "small" threshold from distribution
+    if n >= 10:
+        perc = float(np.percentile(len_arr, MERGE_SMALL_LEN_PERCENTILE))
+        small_len_thresh = max(MERGE_SMALL_LEN_MIN, perc)
+    else:
+        small_len_thresh = max(MERGE_SMALL_LEN_MIN, float(np.min(len_arr)))
+
+    # which indices are small
+    small_indices = [i for i, L in enumerate(lengths) if 0.0 < L <= small_len_thresh]
+    if not small_indices:
+        return merged
+
+    # tight distance gate
+    base = MERGE_DIST_FRAC_DIAG * float(diag)
+    dist_thresh = max(MERGE_DIST_MIN, min(MERGE_DIST_MAX, base))
+    angle_thresh = MERGE_ANGLE_MAX
+
+    active = [True] * n
+
+    # process small strokes from shortest to longest
+    small_indices_sorted = sorted(small_indices, key=lambda i: lengths[i])
+
+    for si in small_indices_sorted:
+        if not active[si]:
+            continue
+        p_small = merged[si]
+        if p_small is None or p_small.shape[0] < 2:
+            active[si] = False
+            continue
+
+        # endpoints and tangents for small
+        s_start = p_small[0]
+        s_end = p_small[-1]
+        if p_small.shape[0] >= 2:
+            s_tan_start = _unit_vec(p_small[1] - p_small[0])
+            s_tan_end = _unit_vec(p_small[-1] - p_small[-2])
+        else:
+            s_tan_start = np.array([1.0, 0.0], dtype=np.float32)
+            s_tan_end = np.array([1.0, 0.0], dtype=np.float32)
+
+        best_target_j = None
+        best_new_poly = None
+        best_score = None
+
+        # search all other active strokes as potential targets
+        for j in range(n):
+            if j == si or not active[j]:
+                continue
+            p_big = merged[j]
+            if p_big is None or p_big.shape[0] < 2:
+                continue
+
+            b_start = p_big[0]
+            b_end = p_big[-1]
+            b_tan_start = _unit_vec(p_big[1] - p_big[0])
+            b_tan_end = _unit_vec(p_big[-1] - p_big[-2])
+
+            combos = []
+
+            # 1) attach small at end of big: big_end -> small_start
+            d = float(np.linalg.norm(b_end - s_start))
+            if d <= dist_thresh:
+                ang = _angle_between_vecs(b_tan_end, s_tan_start)
+                combos.append(("b_end_s_start", d, ang))
+
+            # 2) big_end -> small_end (reverse small)
+            d = float(np.linalg.norm(b_end - s_end))
+            if d <= dist_thresh:
+                ang = _angle_between_vecs(b_tan_end, -s_tan_end)
+                combos.append(("b_end_s_end", d, ang))
+
+            # 3) attach small at start of big: small_end -> big_start
+            d = float(np.linalg.norm(s_end - b_start))
+            if d <= dist_thresh:
+                ang = _angle_between_vecs(s_tan_end, b_tan_start)
+                combos.append(("s_end_b_start", d, ang))
+
+            # 4) small_start -> big_start (reverse small)
+            d = float(np.linalg.norm(s_start - b_start))
+            if d <= dist_thresh:
+                ang = _angle_between_vecs(-s_tan_start, b_tan_start)
+                combos.append(("s_start_b_start", d, ang))
+
+            for tag, d, ang in combos:
+                if ang > angle_thresh:
+                    continue
+                # score: prioritize close and reasonably aligned
+                score = float(d + 0.1 * ang)
+
+                if best_score is not None and score >= best_score:
+                    continue
+
+                # build candidate merged polyline for this combo
+                if tag == "b_end_s_start":
+                    if d < 1e-3:
+                        new = np.vstack([p_big, p_small[1:]])
+                    else:
+                        new = np.vstack([p_big, p_small])
+                elif tag == "b_end_s_end":
+                    s_rev = p_small[::-1]
+                    if d < 1e-3:
+                        new = np.vstack([p_big, s_rev[1:]])
+                    else:
+                        new = np.vstack([p_big, s_rev])
+                elif tag == "s_end_b_start":
+                    if d < 1e-3:
+                        new = np.vstack([p_small, p_big[1:]])
+                    else:
+                        new = np.vstack([p_small, p_big])
+                elif tag == "s_start_b_start":
+                    s_rev = p_small[::-1]
+                    if d < 1e-3:
+                        new = np.vstack([s_rev, p_big[1:]])
+                    else:
+                        new = np.vstack([s_rev, p_big])
+                else:
+                    continue
+
+                nan_to_num_nd(new)
+                if not finite_nd(new) or new.shape[0] < 2:
+                    continue
+
+                best_score = score
+                best_target_j = j
+                best_new_poly = new
+
+        # merge small stroke into best target if found
+        if best_target_j is not None and best_new_poly is not None:
+            merged[best_target_j] = best_new_poly
+            lengths[best_target_j] = _stroke_length(best_new_poly)
+            active[si] = False
+
+    # keep only active, non-degenerate polylines
+    out = [
+        merged[i]
+        for i in range(n)
+        if active[i] and merged[i] is not None and merged[i].shape[0] >= 2
+    ]
+    return out
+
+def _coverage_safety_pass(skel01: np.ndarray,
+                          polys: List[np.ndarray]) -> List[np.ndarray]:
+    """
+    Final safety pass:
+
+    We rasterize all current polylines into a coverage mask and compare
+    that to the original skeleton. Any skeleton pixels that are still
+    uncovered and form a connected component with >= LEFTOVER_MIN_CC_PIXELS
+    pixels are turned into simple polylines and appended.
+
+    This catches cases where a branch was visited by the smart logic,
+    but the corresponding stroke got thrown away later.
+    """
+    sk = (skel01 > 0).astype(np.uint8)
+    h, w = sk.shape
+
+    # draw all existing strokes into a mask
+    coverage = np.zeros_like(sk, dtype=np.uint8)
+    for p in polys:
+        if p is None or p.shape[0] < 2:
+            continue
+        pts = np.round(p).astype(np.int32)
+        # clip to image bounds to be safe
+        pts[:, 0] = np.clip(pts[:, 0], 0, w - 1)
+        pts[:, 1] = np.clip(pts[:, 1], 0, h - 1)
+        cv2.polylines(
+            coverage,
+            [pts.reshape(-1, 1, 2)],
+            isClosed=False,
+            color=255,
+            thickness=1,
+        )
+
+    # skeleton pixels not covered by any current stroke
+    uncovered = (sk > 0) & (coverage == 0)
+    if not np.any(uncovered):
+        return polys
+
+    num, labels, stats, _ = cv2.connectedComponentsWithStats(
+        uncovered.astype(np.uint8), connectivity=8
+    )
+
+    extra: List[np.ndarray] = []
+
+    for i in range(1, num):
+        area = int(stats[i, cv2.CC_STAT_AREA])
+        if area < LEFTOVER_MIN_CC_PIXELS:
+            continue
+
+        comp_mask = (labels == i).astype(np.uint8) * 255
+        contours, _ = cv2.findContours(
+            comp_mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_NONE
+        )
+        for c in contours:
+            if c is None or len(c) < 2:
+                continue
+            pts = c.reshape(-1, 2).astype(np.float32)  # (x,y)
+            nan_to_num_nd(pts)
+            if pts.shape[0] >= 2 and finite_nd(pts):
+                extra.append(pts)
+
+    if extra:
+        polys = polys + extra
+    return polys
+
+
 # ------------------- CURVES (Catmull–Rom → Bézier) -------------------
 
 def _catmull_rom_to_beziers(pts: np.ndarray, alpha=0.5) -> List[List[float]]:
@@ -659,6 +974,7 @@ def _catmull_rom_to_beziers(pts: np.ndarray, alpha=0.5) -> List[List[float]]:
 def _process_single(path: Path) -> Tuple[str, dict]:
     fg = _load_edges_binary(path)
     H, W = fg.shape
+    diag = math.hypot(W, H)
 
     t0 = time.time()
 
@@ -688,16 +1004,25 @@ def _process_single(path: Path) -> Tuple[str, dict]:
         else:
             polys_simpl.append(p)
 
-    # 4) optional stride
-    if SEG_STRIDE > 1:
-        polys_simpl = [
-            p[::SEG_STRIDE] if p.shape[0] > SEG_STRIDE else p
-            for p in polys_simpl
-        ]
+    # 4) merge small strokes into neighbours (big merge wave)
+    polys_merged = _merge_small_strokes(polys_simpl, diag)
 
-    # 5) Catmull–Rom → cubic Beziers
+    # 5) optional stride
+    if SEG_STRIDE > 1:
+        polys_final = [
+            p[::SEG_STRIDE] if p.shape[0] > SEG_STRIDE else p
+            for p in polys_merged
+        ]
+    else:
+        polys_final = polys_merged
+
+     # 5b) coverage-based safety pass: ensure every skeleton pixel
+    #      is represented by at least one stroke
+    polys_final = _coverage_safety_pass(sk, polys_final)
+
+    # 6) Catmull–Rom → cubic Beziers
     strokes = []
-    for p in polys_simpl:
+    for p in polys_final:
         if p.shape[0] < 2:
             continue
         beziers = _catmull_rom_to_beziers(p, alpha=CATMULL_ALPHA)
@@ -724,7 +1049,7 @@ def _process_single(path: Path) -> Tuple[str, dict]:
     t1 = time.time()
 
     data = {
-        "version": 13,
+        "version": 14,
         "source_image": str(path),
         "width": W,
         "height": H,
@@ -741,6 +1066,7 @@ def _process_single(path: Path) -> Tuple[str, dict]:
             "curv_corner_max_min": CURV_CORNER_MAX_MIN,
             "curv_lookahead_max": CURV_LOOKAHEAD_MAX,
             "junc_continue_ang_max": JUNC_CONTINUE_ANG_MAX,
+            "merge_small_len_percentile": MERGE_SMALL_LEN_PERCENTILE,
         },
     }
     out_json = OUT_DIR / f"{path.stem}.json"

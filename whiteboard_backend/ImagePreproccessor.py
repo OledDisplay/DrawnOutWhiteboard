@@ -13,6 +13,7 @@ import pytesseract
 from pytesseract import Output
 
 
+#Step 1 of printing - prepare the images
 
 #Takes ready images of diagrams from research. 
 #We first find all "text lables" in diagrams and extract and save them with ocr, then paint them over so they dont get ruined in all the proccessing.
