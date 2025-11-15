@@ -28,6 +28,7 @@ outputs/
 ResearchImages/
 ProccessedImages/
 StrokeVectors/
+Skeletonized/
 
 # OS stuff
 .DS_Store

@@ -30,11 +30,19 @@ class VectorViewerScreen extends StatefulWidget {
 
 class _VectorViewerScreenState extends State<VectorViewerScreen>
     with SingleTickerProviderStateMixin {
-  static const String vectorsJsonPath =
-      r'C:\Users\marti\Code\DrawnOutWhiteboard\whiteboard_backend\StrokeVectors\edges_0.json';
+  // === BASE FOLDER FOR JSONS ===
+  static const String _vectorsFolder =
+      r'C:\Users\marti\allFolder\code\DRAWNOUT\whiteboard_backend\StrokeVectors';
 
+  // single file path (legacy text, not used for loading anymore)
+  static const String _legacyJsonPath =
+      r'C:\Users\marti\allFolder\code\DRAWNOUT\whiteboard_backend\StrokeVectors\edges_0_skeleton.json';
+
+  // RAW strokes (kept, but not used for multi-object logic anymore)
   List<StrokePolyline> _polyStrokes = const [];
   List<StrokeCubic> _cubicStrokes = const [];
+
+  // DRAWABLE strokes on the board (all objects merged)
   List<DrawableStroke> _drawableStrokes = const [];
 
   double? _srcWidth;
@@ -51,6 +59,47 @@ class _VectorViewerScreenState extends State<VectorViewerScreen>
 
   static const double _targetResolution = 2000.0; // target max side
   static const double _basePenWidthPx = 3.0; // logical image px
+
+  // ------------------- CORE TIMING PARAMETERS -------------------
+
+  // Stroke draw timing (seconds)
+  double _minStrokeTimeSec = 0.14;        // base minimum per stroke
+  double _maxStrokeTimeSec = 0.32;        // max per stroke
+
+  // Extra time from length: seconds per 1000px of stroke length
+  double _lengthTimePerKPxSec = 0.08;     // e.g. 0.08s per 1000px
+
+  // Extra time from curvature: max seconds added at "full" curvature
+  double _curvatureExtraMaxSec = 0.08;    // e.g. up to +0.08s for very curly strokes
+
+  // Curvature profile along the stroke (local slowdowns)
+  double _curvatureProfileFactor = 1.5;   // how strongly bends slow local movement
+  double _curvatureAngleScale = 80.0;     // degrees / 1 unit sharpness (bigger = less sensitive)
+
+  // Travel / pause between strokes (seconds)
+  double _baseTravelTimeSec = 0.20;       // base wait between strokes
+  double _travelTimePerKPxSec = 0.12;     // seconds per 1000px of distance
+  double _minTravelTimeSec = 0.20;        // clamp min travel
+  double _maxTravelTimeSec = 0.30;        // clamp max travel
+
+  // Global animation timing
+  double _globalSpeedMultiplier = 1.0;    // >1 = faster, <1 = slower
+
+  // --------------- MULTI-OBJECT SUPPORT ---------------
+
+  // UI controllers for loading JSONs
+  final TextEditingController _fileNameController =
+      TextEditingController(text: 'edges_0_skeleton.json');
+  final TextEditingController _posXController =
+      TextEditingController(text: '0');
+  final TextEditingController _posYController =
+      TextEditingController(text: '0');
+  final TextEditingController _scaleController =
+      TextEditingController(text: '1.0');
+
+  // list of distinct json names currently on board
+  final List<String> _drawnJsonNames = [];
+  String? _selectedEraseName;
 
   @override
   void initState() {
@@ -73,16 +122,47 @@ class _VectorViewerScreenState extends State<VectorViewerScreen>
     super.dispose();
   }
 
+  // ------------------- LOADING & BUILDING -------------------
+
+  /// Legacy button handler – now just reads from the UI fields
+  /// and delegates to _addObjectFromJson.
   Future<void> _loadAndRender() async {
-    setState(() => _status = 'Loading vectors…');
+    final fileName = _fileNameController.text.trim();
+    if (fileName.isEmpty) {
+      setState(() {
+        _status = 'No file name specified.';
+      });
+      return;
+    }
+
+    final x = double.tryParse(_posXController.text.trim()) ?? 0.0;
+    final y = double.tryParse(_posYController.text.trim()) ?? 0.0;
+    final scale = double.tryParse(_scaleController.text.trim()) ?? 1.0;
+
+    await _addObjectFromJson(
+      fileName: fileName,
+      origin: Offset(x, y),
+      objectScale: scale,
+    );
+  }
+
+  /// Core: load a JSON by name from _vectorsFolder and append its strokes
+  /// onto the current board, positioned at [origin] and scaled by [objectScale].
+  Future<void> _addObjectFromJson({
+    required String fileName,
+    required Offset origin,
+    required double objectScale,
+  }) async {
+    final path = '$_vectorsFolder\\$fileName';
+    setState(() => _status = 'Loading $fileName…');
+
+    final file = File(path);
+    if (!file.existsSync()) {
+      setState(() => _status = 'Not found:\n$path');
+      return;
+    }
 
     try {
-      final file = File(vectorsJsonPath);
-      if (!file.existsSync()) {
-        setState(() => _status = 'Not found:\n$vectorsJsonPath');
-        return;
-      }
-
       final raw = await file.readAsString();
       final decoded = json.decode(raw);
       if (decoded is! Map || decoded['strokes'] is! List) {
@@ -97,8 +177,10 @@ class _VectorViewerScreenState extends State<VectorViewerScreen>
       final poly = <StrokePolyline>[];
       final cubics = <StrokeCubic>[];
 
-      _srcWidth = (decoded['width'] as num?)?.toDouble();
-      _srcHeight = (decoded['height'] as num?)?.toDouble();
+      final srcWidth = (decoded['width'] as num?)?.toDouble();
+      final srcHeight = (decoded['height'] as num?)?.toDouble();
+      _srcWidth = srcWidth;
+      _srcHeight = srcHeight;
 
       if (format == 'bezier_cubic') {
         for (final s in strokesJson) {
@@ -138,53 +220,128 @@ class _VectorViewerScreenState extends State<VectorViewerScreen>
       _polyStrokes = poly;
       _cubicStrokes = cubics;
 
-      if ((_srcWidth == null || _srcHeight == null) &&
+      double useWidth = srcWidth ?? 1000.0;
+      double useHeight = srcHeight ?? 1000.0;
+      if ((srcWidth == null || srcHeight == null) &&
           (poly.isNotEmpty || cubics.isNotEmpty)) {
         final bounds = _computeRawBounds(poly, cubics);
-        _srcWidth = bounds.width;
-        _srcHeight = bounds.height;
+        useWidth = bounds.width;
+        useHeight = bounds.height;
+        _srcWidth = useWidth;
+        _srcHeight = useHeight;
       }
 
-      final drawable = _buildDrawableStrokes(
+      final newStrokes = _buildDrawableStrokesForObject(
+        jsonName: fileName,
+        origin: origin,
+        objectScale: objectScale,
         polylines: poly,
         cubics: cubics,
-        srcWidth: _srcWidth ?? 1000.0,
-        srcHeight: _srcHeight ?? 1000.0,
+        srcWidth: useWidth,
+        srcHeight: useHeight,
         targetResolution: _targetResolution,
         basePenWidth: _basePenWidthPx,
       );
 
-      final totalCost =
-          drawable.fold<double>(0.0, (sum, d) => sum + d.timeWeight);
-
-      // duration logic: half the previous draw time
-      final baseMs = totalCost.isFinite && totalCost > 0
-          ? (totalCost / 12.0).clamp(15000.0, 60000.0).toInt()
-          : 20000;
-      final ms = math.max(2000, baseMs ~/ 2); // hard lower guard
-
-      _controller.duration = Duration(milliseconds: ms);
-      _controller
-        ..reset()
-        ..forward();
-
       setState(() {
-        _drawableStrokes = drawable;
-        _animValue = 0.0;
-        _stepMode = false;
-        _stepStrokeCount = 0;
+        _drawableStrokes = [..._drawableStrokes, ...newStrokes];
+
+        if (!_drawnJsonNames.contains(fileName)) {
+          _drawnJsonNames.add(fileName);
+        }
+        _selectedEraseName ??= fileName;
 
         final polyPts = poly.fold<int>(0, (s, e) => s + e.points.length);
         final cubicSegs = cubics.fold<int>(0, (s, e) => s + e.segments.length);
-        _status = (format == 'bezier_cubic')
-            ? 'Loaded cubic. Strokes: ${cubics.length}, segments: $cubicSegs\nDrawable strokes: ${drawable.length}, anim: ${ms}ms'
-            : 'Loaded polylines. Strokes: ${poly.length}, points: $polyPts\nDrawable strokes: ${drawable.length}, anim: ${ms}ms';
+        _status =
+            'Added $fileName\nFormat: $format | strokes: poly=${poly.length}, cubic=${cubics.length}, pts=$polyPts, segs=$cubicSegs\nTotal drawable strokes: ${_drawableStrokes.length}';
       });
+
+      _recomputeTimingForAllStrokes();
     } catch (e, st) {
-      setState(() => _status = 'Error: $e');
+      setState(() => _status = 'Error loading $fileName: $e');
       // ignore: avoid_print
       print(st);
     }
+  }
+
+  /// Recompute per-stroke draw time and travel time for ALL current strokes,
+  /// based on adjustable timing parameters.
+  void _recomputeTimingForAllStrokes() {
+    if (_drawableStrokes.isEmpty) return;
+
+    // 1) stroke draw times
+    for (final s in _drawableStrokes) {
+      final length = s.lengthPx;
+      final curvature = s.curvatureMetricDeg;
+
+      final lengthK = length / 1000.0;
+      final curvNorm = (curvature / 70.0).clamp(0.0, 1.0);
+
+      final rawTime = _minStrokeTimeSec +
+          lengthK * _lengthTimePerKPxSec +
+          curvNorm * _curvatureExtraMaxSec;
+
+      s.drawTimeSec = rawTime
+          .clamp(_minStrokeTimeSec, _maxStrokeTimeSec)
+          .toDouble();
+    }
+
+    // 2) travel time between strokes (sequential order in list)
+    DrawableStroke? prev;
+    for (final s in _drawableStrokes) {
+      double travel = 0.0;
+
+      if (prev != null) {
+        final lastP = prev.points.last;
+        final firstP = s.points.first;
+        final dist = (firstP - lastP).distance;
+        final distK = dist / 1000.0;
+
+        final rawTravel =
+            _baseTravelTimeSec + distK * _travelTimePerKPxSec;
+
+        travel = rawTravel
+            .clamp(_minTravelTimeSec, _maxTravelTimeSec)
+            .toDouble();
+      } else {
+        travel = 0.0;
+      }
+
+      s.travelTimeBeforeSec = travel;
+      s.timeWeight = s.travelTimeBeforeSec + s.drawTimeSec;
+
+      prev = s;
+    }
+
+    // 3) total anim time
+    final totalSeconds = _drawableStrokes.fold<double>(
+        0.0, (sum, d) => sum + d.timeWeight);
+
+    final animSeconds = (totalSeconds > 0)
+        ? (totalSeconds / _globalSpeedMultiplier)
+        : 20.0;
+
+    final ms = math.max(1, (animSeconds * 1000).round());
+    _controller.duration = Duration(milliseconds: ms);
+
+    _controller
+      ..reset()
+      ..forward();
+
+    setState(() {
+      _animValue = 0.0;
+      _stepMode = false;
+      _stepStrokeCount = 0;
+      _status =
+          'Total strokes: ${_drawableStrokes.length} | anim=${ms}ms';
+    });
+  }
+
+  // Legacy entry point used by sliders to "rebuild" – now just retimes existing strokes.
+  void _rebuildDrawableFromCurrentStrokes() {
+    if (_drawableStrokes.isEmpty) return;
+    _recomputeTimingForAllStrokes();
   }
 
   void _restartAnimationMode() {
@@ -209,6 +366,41 @@ class _VectorViewerScreenState extends State<VectorViewerScreen>
     });
   }
 
+  /// Remove all strokes belonging to a given JSON.
+  void _eraseObjectByName(String name) {
+    if (name.isEmpty) return;
+    if (_drawableStrokes.isEmpty) return;
+
+    setState(() {
+      _drawableStrokes =
+          _drawableStrokes.where((s) => s.jsonName != name).toList();
+
+      _drawnJsonNames.remove(name);
+
+      if (_drawnJsonNames.isEmpty) {
+        _selectedEraseName = null;
+      } else if (_selectedEraseName == name) {
+        _selectedEraseName = _drawnJsonNames.last;
+      }
+
+      _status = 'Erased $name. Remaining strokes: ${_drawableStrokes.length}';
+    });
+
+    if (_drawableStrokes.isNotEmpty) {
+      _recomputeTimingForAllStrokes();
+    } else {
+      _controller.stop();
+      setState(() {
+        _animValue = 0.0;
+        _stepMode = false;
+        _stepStrokeCount = 0;
+        _status = 'Board empty.';
+      });
+    }
+  }
+
+  // ------------------- UI -------------------
+
   @override
   Widget build(BuildContext context) {
     return Scaffold(
@@ -232,59 +424,520 @@ class _VectorViewerScreenState extends State<VectorViewerScreen>
           ),
           // RIGHT: control panel
           Container(
-            width: 280,
+            width: 340,
             color: const Color(0xFF111111),
             padding: const EdgeInsets.all(16),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                const Text(
-                  'Control Panel',
-                  style: TextStyle(
-                    color: Colors.white,
-                    fontSize: 18,
-                    fontWeight: FontWeight.bold,
+            child: SingleChildScrollView(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  const Text(
+                    'Control Panel',
+                    style: TextStyle(
+                      color: Colors.white,
+                      fontSize: 18,
+                      fontWeight: FontWeight.bold,
+                    ),
                   ),
-                ),
-                const SizedBox(height: 12),
-                ElevatedButton(
-                  onPressed: _loadAndRender,
-                  child: const Text('Load & Render (auto anim)'),
-                ),
-                const SizedBox(height: 8),
-                ElevatedButton(
-                  onPressed: _restartAnimationMode,
-                  child: const Text('Replay animation'),
-                ),
-                const SizedBox(height: 8),
-                ElevatedButton(
-                  onPressed: _stepNextStroke,
-                  child: const Text('Step: next stroke'),
-                ),
-                const SizedBox(height: 12),
-                Text(
-                  _status,
-                  style: const TextStyle(color: Colors.white70),
-                ),
-                const SizedBox(height: 12),
-                Text(
-                  _stepMode
-                      ? 'Mode: STEP  | shown: $_stepStrokeCount'
-                      : 'Mode: ANIM | t=${_animValue.toStringAsFixed(2)}',
-                  style: const TextStyle(color: Colors.white54, fontSize: 12),
-                ),
-                const SizedBox(height: 12),
-                const Text(
-                  'JSON:\nwhiteboard_backend\\StrokeVectors\\edges_0.json',
-                  style: TextStyle(color: Colors.white38, fontSize: 11),
-                ),
-              ],
+                  const SizedBox(height: 12),
+                  ElevatedButton(
+                    onPressed: _loadAndRender,
+                    child: const Text('Load & Render (auto anim)'),
+                  ),
+                  const SizedBox(height: 8),
+                  ElevatedButton(
+                    onPressed: _restartAnimationMode,
+                    child: const Text('Replay animation'),
+                  ),
+                  const SizedBox(height: 8),
+                  ElevatedButton(
+                    onPressed: _stepNextStroke,
+                    child: const Text('Step: next stroke'),
+                  ),
+                  const SizedBox(height: 12),
+                  Text(
+                    _status,
+                    style: const TextStyle(color: Colors.white70),
+                  ),
+                  const SizedBox(height: 12),
+                  Text(
+                    _stepMode
+                        ? 'Mode: STEP  | shown: $_stepStrokeCount'
+                        : 'Mode: ANIM | t=${_animValue.toStringAsFixed(2)}',
+                    style:
+                        const TextStyle(color: Colors.white54, fontSize: 12),
+                  ),
+                  const SizedBox(height: 12),
+                  const Text(
+                    'Legacy JSON path:\nwhiteboard_backend\\StrokeVectors\\edges_0_skeleton.json',
+                    style: TextStyle(color: Colors.white38, fontSize: 11),
+                  ),
+
+                  // -------- JSON / PLACEMENT UI --------
+                  const SizedBox(height: 16),
+                  const Divider(color: Colors.white24),
+                  const SizedBox(height: 8),
+                  const Text(
+                    'Load JSON from folder',
+                    style: TextStyle(
+                      color: Colors.white,
+                      fontSize: 14,
+                      fontWeight: FontWeight.bold,
+                    ),
+                  ),
+                  const SizedBox(height: 4),
+                  Text(
+                    'Folder:\n$_vectorsFolder',
+                    style:
+                        const TextStyle(color: Colors.white38, fontSize: 10),
+                  ),
+                  const SizedBox(height: 4),
+                  TextField(
+                    controller: _fileNameController,
+                    style:
+                        const TextStyle(color: Colors.white, fontSize: 12),
+                    decoration: const InputDecoration(
+                      labelText: 'File name (e.g. edges_0_skeleton.json)',
+                      labelStyle:
+                          TextStyle(color: Colors.white54, fontSize: 11),
+                      filled: true,
+                      fillColor: Color(0xFF222222),
+                      border: OutlineInputBorder(),
+                      isDense: true,
+                      contentPadding:
+                          EdgeInsets.symmetric(horizontal: 8, vertical: 6),
+                    ),
+                  ),
+                  const SizedBox(height: 4),
+                  Row(
+                    children: [
+                      Expanded(
+                        child: TextField(
+                          controller: _posXController,
+                          style: const TextStyle(
+                              color: Colors.white, fontSize: 12),
+                          decoration: const InputDecoration(
+                            labelText: 'X',
+                            labelStyle: TextStyle(
+                                color: Colors.white54, fontSize: 11),
+                            filled: true,
+                            fillColor: Color(0xFF222222),
+                            border: OutlineInputBorder(),
+                            isDense: true,
+                            contentPadding: EdgeInsets.symmetric(
+                                horizontal: 8, vertical: 6),
+                          ),
+                          keyboardType:
+                              const TextInputType.numberWithOptions(
+                                  decimal: true, signed: true),
+                        ),
+                      ),
+                      const SizedBox(width: 8),
+                      Expanded(
+                        child: TextField(
+                          controller: _posYController,
+                          style: const TextStyle(
+                              color: Colors.white, fontSize: 12),
+                          decoration: const InputDecoration(
+                            labelText: 'Y',
+                            labelStyle: TextStyle(
+                                color: Colors.white54, fontSize: 11),
+                            filled: true,
+                            fillColor: Color(0xFF222222),
+                            border: OutlineInputBorder(),
+                            isDense: true,
+                            contentPadding: EdgeInsets.symmetric(
+                                horizontal: 8, vertical: 6),
+                          ),
+                          keyboardType:
+                              const TextInputType.numberWithOptions(
+                                  decimal: true, signed: true),
+                        ),
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: 4),
+                  TextField(
+                    controller: _scaleController,
+                    style:
+                        const TextStyle(color: Colors.white, fontSize: 12),
+                    decoration: const InputDecoration(
+                      labelText: 'Scale (1.0 = default 2k size)',
+                      labelStyle:
+                          TextStyle(color: Colors.white54, fontSize: 11),
+                      filled: true,
+                      fillColor: Color(0xFF222222),
+                      border: OutlineInputBorder(),
+                      isDense: true,
+                      contentPadding:
+                          EdgeInsets.symmetric(horizontal: 8, vertical: 6),
+                    ),
+                    keyboardType: const TextInputType.numberWithOptions(
+                        decimal: true, signed: false),
+                  ),
+
+                  const SizedBox(height: 16),
+                  const Divider(color: Colors.white24),
+                  const SizedBox(height: 8),
+
+                  // --------------- GLOBAL SPEED ---------------
+                  const Text(
+                    'Global speed',
+                    style: TextStyle(
+                      color: Colors.white,
+                      fontSize: 14,
+                      fontWeight: FontWeight.bold,
+                    ),
+                  ),
+                  const SizedBox(height: 4),
+                  Text(
+                    'Multiplier: ${_globalSpeedMultiplier.toStringAsFixed(2)}x',
+                    style:
+                        const TextStyle(color: Colors.white70, fontSize: 11),
+                  ),
+                  Slider(
+                    value: _globalSpeedMultiplier,
+                    min: 0.25,
+                    max: 3.0,
+                    divisions: 11,
+                    label: _globalSpeedMultiplier.toStringAsFixed(2),
+                    onChanged: (v) {
+                      setState(() {
+                        _globalSpeedMultiplier = v;
+                      });
+                    },
+                    onChangeEnd: (_) {
+                      if (_drawableStrokes.isNotEmpty) {
+                        _rebuildDrawableFromCurrentStrokes();
+                      }
+                    },
+                  ),
+
+                  const SizedBox(height: 16),
+                  const Divider(color: Colors.white24),
+                  const SizedBox(height: 8),
+
+                  // --------------- STROKE TIMING ---------------
+                  const Text(
+                    'Stroke timing (per stroke)',
+                    style: TextStyle(
+                      color: Colors.white,
+                      fontSize: 14,
+                      fontWeight: FontWeight.bold,
+                    ),
+                  ),
+                  const SizedBox(height: 4),
+                  Text(
+                    'Min stroke time: ${_minStrokeTimeSec.toStringAsFixed(3)} s',
+                    style:
+                        const TextStyle(color: Colors.white70, fontSize: 11),
+                  ),
+                  Slider(
+                    value: _minStrokeTimeSec,
+                    min: 0.05,
+                    max: _maxStrokeTimeSec,
+                    divisions: 50,
+                    label: _minStrokeTimeSec.toStringAsFixed(3),
+                    onChanged: (v) {
+                      setState(() {
+                        _minStrokeTimeSec = v;
+                      });
+                    },
+                    onChangeEnd: (_) {
+                      if (_drawableStrokes.isNotEmpty) {
+                        _rebuildDrawableFromCurrentStrokes();
+                      }
+                    },
+                  ),
+                  Text(
+                    'Max stroke time: ${_maxStrokeTimeSec.toStringAsFixed(3)} s',
+                    style:
+                        const TextStyle(color: Colors.white70, fontSize: 11),
+                  ),
+                  Slider(
+                    value: _maxStrokeTimeSec,
+                    min: _minStrokeTimeSec,
+                    max: 0.8,
+                    divisions: 70,
+                    label: _maxStrokeTimeSec.toStringAsFixed(3),
+                    onChanged: (v) {
+                      setState(() {
+                        _maxStrokeTimeSec = v;
+                      });
+                    },
+                    onChangeEnd: (_) {
+                      if (_drawableStrokes.isNotEmpty) {
+                        _rebuildDrawableFromCurrentStrokes();
+                      }
+                    },
+                  ),
+                  const SizedBox(height: 4),
+                  Text(
+                    'Length factor: ${_lengthTimePerKPxSec.toStringAsFixed(3)} s per 1000px',
+                    style:
+                        const TextStyle(color: Colors.white70, fontSize: 11),
+                  ),
+                  Slider(
+                    value: _lengthTimePerKPxSec,
+                    min: 0.0,
+                    max: 0.3,
+                    divisions: 30,
+                    label: _lengthTimePerKPxSec.toStringAsFixed(3),
+                    onChanged: (v) {
+                      setState(() {
+                        _lengthTimePerKPxSec = v;
+                      });
+                    },
+                    onChangeEnd: (_) {
+                      if (_drawableStrokes.isNotEmpty) {
+                        _rebuildDrawableFromCurrentStrokes();
+                      }
+                    },
+                  ),
+                  Text(
+                    'Max curvature extra: ${_curvatureExtraMaxSec.toStringAsFixed(3)} s',
+                    style:
+                        const TextStyle(color: Colors.white70, fontSize: 11),
+                  ),
+                  Slider(
+                    value: _curvatureExtraMaxSec,
+                    min: 0.0,
+                    max: 0.3,
+                    divisions: 30,
+                    label: _curvatureExtraMaxSec.toStringAsFixed(3),
+                    onChanged: (v) {
+                      setState(() {
+                        _curvatureExtraMaxSec = v;
+                      });
+                    },
+                    onChangeEnd: (_) {
+                      if (_drawableStrokes.isNotEmpty) {
+                        _rebuildDrawableFromCurrentStrokes();
+                      }
+                    },
+                  ),
+
+                  const SizedBox(height: 16),
+                  const Divider(color: Colors.white24),
+                  const SizedBox(height: 8),
+
+                  // --------------- CURVATURE PROFILE ---------------
+                  const Text(
+                    'Curvature profile (within stroke)',
+                    style: TextStyle(
+                      color: Colors.white,
+                      fontSize: 14,
+                      fontWeight: FontWeight.bold,
+                    ),
+                  ),
+                  const SizedBox(height: 4),
+                  Text(
+                    'Profile strength: ${_curvatureProfileFactor.toStringAsFixed(2)}x',
+                    style:
+                        const TextStyle(color: Colors.white70, fontSize: 11),
+                  ),
+                  Slider(
+                    value: _curvatureProfileFactor,
+                    min: 0.0,
+                    max: 3.0,
+                    divisions: 30,
+                    label: _curvatureProfileFactor.toStringAsFixed(2),
+                    onChanged: (v) {
+                      setState(() {
+                        _curvatureProfileFactor = v;
+                      });
+                    },
+                    onChangeEnd: (_) {
+                      if (_drawableStrokes.isNotEmpty) {
+                        _rebuildDrawableFromCurrentStrokes();
+                      }
+                    },
+                  ),
+                  Text(
+                    'Angle scale: ${_curvatureAngleScale.toStringAsFixed(0)}°',
+                    style:
+                        const TextStyle(color: Colors.white70, fontSize: 11),
+                  ),
+                  Slider(
+                    value: _curvatureAngleScale,
+                    min: 20.0,
+                    max: 160.0,
+                    divisions: 14,
+                    label: _curvatureAngleScale.toStringAsFixed(0),
+                    onChanged: (v) {
+                      setState(() {
+                        _curvatureAngleScale = v;
+                      });
+                    },
+                    onChangeEnd: (_) {
+                      if (_drawableStrokes.isNotEmpty) {
+                        _rebuildDrawableFromCurrentStrokes();
+                      }
+                    },
+                  ),
+
+                  const SizedBox(height: 16),
+                  const Divider(color: Colors.white24),
+                  const SizedBox(height: 8),
+
+                  // --------------- TRAVEL TIMING ---------------
+                  const Text(
+                    'Travel between strokes',
+                    style: TextStyle(
+                      color: Colors.white,
+                      fontSize: 14,
+                      fontWeight: FontWeight.bold,
+                    ),
+                  ),
+                  const SizedBox(height: 4),
+                  Text(
+                    'Base travel: ${_baseTravelTimeSec.toStringAsFixed(3)} s',
+                    style:
+                        const TextStyle(color: Colors.white70, fontSize: 11),
+                  ),
+                  Slider(
+                    value: _baseTravelTimeSec,
+                    min: 0.0,
+                    max: 0.6,
+                    divisions: 60,
+                    label: _baseTravelTimeSec.toStringAsFixed(3),
+                    onChanged: (v) {
+                      setState(() {
+                        _baseTravelTimeSec = v;
+                      });
+                    },
+                    onChangeEnd: (_) {
+                      if (_drawableStrokes.isNotEmpty) {
+                        _rebuildDrawableFromCurrentStrokes();
+                      }
+                    },
+                  ),
+                  Text(
+                    'Distance factor: ${_travelTimePerKPxSec.toStringAsFixed(3)} s per 1000px',
+                    style:
+                        const TextStyle(color: Colors.white70, fontSize: 11),
+                  ),
+                  Slider(
+                    value: _travelTimePerKPxSec,
+                    min: 0.0,
+                    max: 0.4,
+                    divisions: 40,
+                    label: _travelTimePerKPxSec.toStringAsFixed(3),
+                    onChanged: (v) {
+                      setState(() {
+                        _travelTimePerKPxSec = v;
+                      });
+                    },
+                    onChangeEnd: (_) {
+                      if (_drawableStrokes.isNotEmpty) {
+                        _rebuildDrawableFromCurrentStrokes();
+                      }
+                    },
+                  ),
+                  Text(
+                    'Travel clamp min: ${_minTravelTimeSec.toStringAsFixed(3)} s',
+                    style:
+                        const TextStyle(color: Colors.white70, fontSize: 11),
+                  ),
+                  Slider(
+                    value: _minTravelTimeSec,
+                    min: 0.0,
+                    max: _maxTravelTimeSec,
+                    divisions: 60,
+                    label: _minTravelTimeSec.toStringAsFixed(3),
+                    onChanged: (v) {
+                      setState(() {
+                        _minTravelTimeSec = v;
+                      });
+                    },
+                    onChangeEnd: (_) {
+                      if (_drawableStrokes.isNotEmpty) {
+                        _rebuildDrawableFromCurrentStrokes();
+                      }
+                    },
+                  ),
+                  Text(
+                    'Travel clamp max: ${_maxTravelTimeSec.toStringAsFixed(3)} s',
+                    style:
+                        const TextStyle(color: Colors.white70, fontSize: 11),
+                  ),
+                  Slider(
+                    value: _maxTravelTimeSec,
+                    min: _minTravelTimeSec,
+                    max: 0.8,
+                    divisions: 80,
+                    label: _maxTravelTimeSec.toStringAsFixed(3),
+                    onChanged: (v) {
+                      setState(() {
+                        _maxTravelTimeSec = v;
+                      });
+                    },
+                    onChangeEnd: (_) {
+                      if (_drawableStrokes.isNotEmpty) {
+                        _rebuildDrawableFromCurrentStrokes();
+                      }
+                    },
+                  ),
+
+                  // --------------- ERASE UI ---------------
+                  const SizedBox(height: 16),
+                  const Divider(color: Colors.white24),
+                  const SizedBox(height: 8),
+                  const Text(
+                    'Erase objects',
+                    style: TextStyle(
+                      color: Colors.white,
+                      fontSize: 14,
+                      fontWeight: FontWeight.bold,
+                    ),
+                  ),
+                  const SizedBox(height: 4),
+                  if (_drawnJsonNames.isEmpty)
+                    const Text(
+                      'No objects drawn yet.',
+                      style:
+                          TextStyle(color: Colors.white54, fontSize: 11),
+                    )
+                  else ...[
+                    DropdownButton<String>(
+                      dropdownColor: const Color(0xFF222222),
+                      value: _selectedEraseName,
+                      items: _drawnJsonNames
+                          .map(
+                            (name) => DropdownMenuItem(
+                              value: name,
+                              child: Text(
+                                name,
+                                style: const TextStyle(
+                                    color: Colors.white, fontSize: 12),
+                              ),
+                            ),
+                          )
+                          .toList(),
+                      onChanged: (v) {
+                        setState(() {
+                          _selectedEraseName = v;
+                        });
+                      },
+                    ),
+                    const SizedBox(height: 4),
+                    ElevatedButton(
+                      onPressed: _selectedEraseName == null
+                          ? null
+                          : () => _eraseObjectByName(_selectedEraseName!),
+                      child: const Text('Erase selected'),
+                    ),
+                  ],
+                ],
+              ),
             ),
           ),
         ],
       ),
     );
   }
+
+  // ------------------- GEOMETRY HELPERS -------------------
 
   Rect _computeRawBounds(
       List<StrokePolyline> polys, List<StrokeCubic> cubics) {
@@ -319,9 +972,12 @@ class _VectorViewerScreenState extends State<VectorViewerScreen>
     return Rect.fromLTWH(minX, minY, w, h);
   }
 
-  // ---------- BUILD DRAWABLE STROKES ----------
+  // ---------- BUILD DRAWABLE STROKES FOR ONE OBJECT ----------
 
-  List<DrawableStroke> _buildDrawableStrokes({
+  List<DrawableStroke> _buildDrawableStrokesForObject({
+    required String jsonName,
+    required Offset origin,
+    required double objectScale,
     required List<StrokePolyline> polylines,
     required List<StrokeCubic> cubics,
     required double srcWidth,
@@ -332,57 +988,55 @@ class _VectorViewerScreenState extends State<VectorViewerScreen>
     final strokes = <DrawableStroke>[];
 
     final srcMax = math.max(srcWidth, srcHeight);
-    final upscale = srcMax > 0 ? targetResolution / srcMax : 1.0;
+    final baseUpscale = srcMax > 0 ? targetResolution / srcMax : 1.0;
+    final upscale = baseUpscale * (objectScale <= 0 ? 1.0 : objectScale);
+
     final diag = math.sqrt(
       math.pow(srcWidth * upscale, 2) + math.pow(srcHeight * upscale, 2),
     );
+    final diagSafe = diag > 1e-3 ? diag : 1.0;
 
     for (final s in polylines) {
       final pts = s.points
-          .map((p) => Offset(p.dx * upscale, p.dy * upscale))
+          .map((p) {
+            final up = Offset(p.dx * upscale, p.dy * upscale);
+            return Offset(up.dx + origin.dx, up.dy + origin.dy);
+          })
           .toList(growable: false);
       if (pts.length < 2) continue;
       strokes.add(_makeDrawableFromPoints(
+        jsonName: jsonName,
+        objectOrigin: origin,
+        objectScale: objectScale,
         pts: pts,
         basePenWidth: basePenWidth,
-        diag: diag,
+        diag: diagSafe,
       ));
     }
 
     for (final c in cubics) {
-      final pts = _sampleCubicStroke(c, upscale: upscale);
+      final ptsRaw = _sampleCubicStroke(c, upscale: upscale);
+      final pts = ptsRaw
+          .map((p) => Offset(p.dx + origin.dx, p.dy + origin.dy))
+          .toList(growable: false);
       if (pts.length < 2) continue;
       strokes.add(_makeDrawableFromPoints(
+        jsonName: jsonName,
+        objectOrigin: origin,
+        objectScale: objectScale,
         pts: pts,
         basePenWidth: basePenWidth,
-        diag: diag,
+        diag: diagSafe,
       ));
     }
 
-    if (strokes.isEmpty) return strokes;
-
-    final allBounds = _boundsFromDrawable(strokes);
-    final imageCenter = allBounds.center;
-
-    _assignGroups(
-      strokes,
-      proximity: 0.06 * srcMax * upscale,
-    );
-
-    final ordered = _orderStrokesByGroups(
-      strokes,
-      imageCenter: imageCenter,
-    );
-
-    for (final s in ordered) {
-      s.timeWeight =
-          s.drawCostTotal <= 0.0 ? s.lengthPx : s.drawCostTotal;
-    }
-
-    return ordered;
+    return strokes;
   }
 
   DrawableStroke _makeDrawableFromPoints({
+    required String jsonName,
+    required Offset objectOrigin,
+    required double objectScale,
     required List<Offset> pts,
     required double basePenWidth,
     required double diag,
@@ -394,6 +1048,10 @@ class _VectorViewerScreenState extends State<VectorViewerScreen>
 
     double length = 0.0;
     double cost = 0.0;
+
+    double prevSharpNorm = 0.0;
+    final double angleScale =
+        _curvatureAngleScale.abs() < 1e-3 ? 1.0 : _curvatureAngleScale;
 
     for (int i = 1; i < n; i++) {
       final v = pts[i] - pts[i - 1];
@@ -418,17 +1076,38 @@ class _VectorViewerScreenState extends State<VectorViewerScreen>
         }
       }
 
-      final sharpNorm = (angDeg / 80.0).clamp(0.0, 1.5);
-      final speedFactor = 1.0 + 1.2 * sharpNorm; // curves slower
-      final segCost = segLen * speedFactor;
+      double sharpNorm = (angDeg / angleScale).clamp(0.0, 1.5);
+
+      final smoothedSharp = 0.7 * prevSharpNorm + 0.3 * sharpNorm;
+      prevSharpNorm = smoothedSharp;
+
+      final slowFactor = 1.0 + _curvatureProfileFactor * smoothedSharp;
+
+      final segCost = segLen * slowFactor;
 
       cost += segCost;
       cumGeom[i] = length;
       cumCost[i] = cost;
     }
 
+    if (length < 0.0) {
+      length = 0.0;
+    }
+
     if (cost <= 0.0) {
-      cost = length <= 0.0 ? 1.0 : length;
+      if (n > 1) {
+        for (int i = 1; i < n; i++) {
+          final t = i / (n - 1);
+          cumGeom[i] = length * t;
+          cumCost[i] = t;
+        }
+      }
+      cost = 1.0;
+    } else {
+      for (int i = 0; i < n; i++) {
+        cumCost[i] /= cost;
+      }
+      cost = 1.0;
     }
 
     final centroid = _centroid(pts);
@@ -448,7 +1127,21 @@ class _VectorViewerScreenState extends State<VectorViewerScreen>
 
     final displayPts = amp > 0.0 ? _applyWobble(pts, amp) : pts;
 
+    final lengthK = length / 1000.0;
+    final curvNormGlobal = (curvature / 70.0).clamp(0.0, 1.0);
+
+    final rawTime = _minStrokeTimeSec +
+        lengthK * _lengthTimePerKPxSec +
+        curvNormGlobal * _curvatureExtraMaxSec;
+
+    final drawTimeSec = rawTime
+        .clamp(_minStrokeTimeSec, _maxStrokeTimeSec)
+        .toDouble();
+
     return DrawableStroke(
+      jsonName: jsonName,
+      objectOrigin: objectOrigin,
+      objectScale: objectScale,
       points: displayPts,
       originalPoints: pts,
       lengthPx: length,
@@ -457,7 +1150,8 @@ class _VectorViewerScreenState extends State<VectorViewerScreen>
       curvatureMetricDeg: curvature,
       cumGeomLen: cumGeom,
       cumDrawCost: cumCost,
-      drawCostTotal: cost,
+      drawCostTotal: 1.0,
+      drawTimeSec: drawTimeSec,
     );
   }
 
@@ -528,22 +1222,6 @@ class _VectorViewerScreenState extends State<VectorViewerScreen>
     return out;
   }
 
-  Rect _boundsFromDrawable(List<DrawableStroke> strokes) {
-    double minX = double.infinity, minY = double.infinity;
-    double maxX = -double.infinity, maxY = -double.infinity;
-    for (final s in strokes) {
-      final b = s.bounds;
-      if (b.left < minX) minX = b.left;
-      if (b.top < minY) minY = b.top;
-      if (b.right > maxX) maxX = b.right;
-      if (b.bottom > maxY) maxY = b.bottom;
-    }
-    if (minX == double.infinity) {
-      return const Rect.fromLTWH(0, 0, 1, 1);
-    }
-    return Rect.fromLTRB(minX, minY, maxX, maxY);
-  }
-
   Rect _boundsOfPoints(List<Offset> pts) {
     double minX = double.infinity, minY = double.infinity;
     double maxX = -double.infinity, maxY = -double.infinity;
@@ -593,158 +1271,6 @@ class _VectorViewerScreenState extends State<VectorViewerScreen>
         t2 * t * seg.p1.dy;
     return Offset(x, y);
   }
-
-  // ---------- GROUPING ----------
-
-  void _assignGroups(List<DrawableStroke> strokes,
-      {required double proximity}) {
-    if (strokes.isEmpty) return;
-    final n = strokes.length;
-    final visited = List<bool>.filled(n, false);
-    int groupId = 0;
-
-    final centroids = strokes.map((s) => s.centroid).toList(growable: false);
-
-    for (int i = 0; i < n; i++) {
-      if (visited[i]) continue;
-      final stack = <int>[i];
-      visited[i] = true;
-      int groupSize = 0;
-      while (stack.isNotEmpty) {
-        final idx = stack.removeLast();
-        strokes[idx].groupId = groupId;
-        groupSize++;
-        final ci = centroids[idx];
-        for (int j = 0; j < n; j++) {
-          if (visited[j]) continue;
-          final cj = centroids[j];
-          if ((ci - cj).distance <= proximity) {
-            visited[j] = true;
-            stack.add(j);
-          }
-        }
-      }
-      for (int k = 0; k < n; k++) {
-        if (strokes[k].groupId == groupId) {
-          strokes[k].groupSize = groupSize;
-        }
-      }
-      groupId++;
-    }
-  }
-
-  List<DrawableStroke> _orderStrokesByGroups(
-    List<DrawableStroke> strokes, {
-    required Offset imageCenter,
-  }) {
-    if (strokes.isEmpty) return strokes;
-
-    final groups = <int, List<DrawableStroke>>{};
-    for (final s in strokes) {
-      groups.putIfAbsent(s.groupId, () => <DrawableStroke>[]).add(s);
-    }
-
-    final groupIds = groups.keys.toList();
-
-    double maxGroupSize = 0.0;
-    double maxGroupLen = 0.0;
-    double maxGroupTotalLen = 0.0;
-    double maxCenterDist = 0.0;
-
-    final groupCenters = <int, Offset>{};
-    final groupAvgLen = <int, double>{};
-    final groupSizes = <int, int>{};
-    final groupCenterDist = <int, double>{};
-    final groupTotalLen = <int, double>{};
-
-    for (final gid in groupIds) {
-      final gList = groups[gid]!;
-      final size = gList.length;
-      groupSizes[gid] = size;
-      if (size > maxGroupSize) maxGroupSize = size.toDouble();
-
-      double sx = 0.0, sy = 0.0, totalLen = 0.0, sumLen = 0.0;
-      for (final s in gList) {
-        sx += s.centroid.dx;
-        sy += s.centroid.dy;
-        sumLen += s.lengthPx;
-        totalLen += s.lengthPx;
-      }
-      final center =
-          Offset(sx / size.toDouble(), sy / size.toDouble());
-      groupCenters[gid] = center;
-
-      final avgLen = size > 0 ? totalLen / size.toDouble() : 0.0;
-      groupAvgLen[gid] = avgLen;
-      if (avgLen > maxGroupLen) maxGroupLen = avgLen;
-
-      groupTotalLen[gid] = sumLen;
-      if (sumLen > maxGroupTotalLen) maxGroupTotalLen = sumLen;
-
-      final dist = (center - imageCenter).distance;
-      groupCenterDist[gid] = dist;
-      if (dist > maxCenterDist) maxCenterDist = dist;
-    }
-
-    if (maxGroupSize <= 0) maxGroupSize = 1.0;
-    if (maxGroupLen <= 0) maxGroupLen = 1.0;
-    if (maxGroupTotalLen <= 0) maxGroupTotalLen = 1.0;
-    if (maxCenterDist <= 0) maxCenterDist = 1.0;
-
-    final groupScores = <int, double>{};
-    for (final gid in groupIds) {
-      final sizeNorm =
-          (groupSizes[gid]!.toDouble() / maxGroupSize).clamp(0.0, 1.0);
-      final avgLenNorm =
-          (groupAvgLen[gid]! / maxGroupLen).clamp(0.0, 1.0);
-      final totalLenNorm =
-          (groupTotalLen[gid]! / maxGroupTotalLen).clamp(0.0, 1.0);
-      final centerNorm =
-          (1.0 - groupCenterDist[gid]! / maxCenterDist).clamp(0.0, 1.0);
-
-      final score = 0.45 * totalLenNorm +
-          0.35 * sizeNorm +
-          0.15 * avgLenNorm +
-          0.05 * centerNorm;
-      groupScores[gid] = score;
-    }
-
-    groupIds.sort((a, b) =>
-        (groupScores[b] ?? 0.0).compareTo(groupScores[a] ?? 0.0));
-
-    final ordered = <DrawableStroke>[];
-
-    for (final gid in groupIds) {
-      final gList = groups[gid]!;
-      final gCenter = groupCenters[gid]!;
-
-      double maxLen = 0.0;
-      double maxRad = 0.0;
-      for (final s in gList) {
-        if (s.lengthPx > maxLen) maxLen = s.lengthPx;
-        final d = (s.centroid - gCenter).distance;
-        if (d > maxRad) maxRad = d;
-      }
-      if (maxLen <= 0) maxLen = 1.0;
-      if (maxRad <= 0) maxRad = 1.0;
-
-      for (final s in gList) {
-        final lenNorm = (s.lengthPx / maxLen).clamp(0.0, 1.0);
-        final centerDist = (s.centroid - gCenter).distance;
-        final centerNorm =
-            (1.0 - centerDist / maxRad).clamp(0.0, 1.0);
-        final score = 0.8 * lenNorm + 0.2 * centerNorm;
-        s.importanceScore = score;
-      }
-
-      gList.sort((a, b) =>
-          b.importanceScore.compareTo(a.importanceScore));
-
-      ordered.addAll(gList);
-    }
-
-    return ordered;
-  }
 }
 
 /* ---------- Raw data types ---------- */
@@ -775,23 +1301,34 @@ class StrokeCubic {
 /* ---------- Drawable stroke ---------- */
 
 class DrawableStroke {
-  final List<Offset> points; // upscaled + wobble
-  final List<Offset> originalPoints; // pre-wobble
+  // origin + identity for erase / grouping
+  final String jsonName;
+  final Offset objectOrigin;
+  final double objectScale;
+
+  final List<Offset> points; // upscaled + wobble + placed
+  final List<Offset> originalPoints; // pre-wobble (but with placement)
   final double lengthPx;
   final Offset centroid;
   final Rect bounds;
   final double curvatureMetricDeg;
 
-  final List<double> cumGeomLen; // cumulative geometric length
-  final List<double> cumDrawCost; // cumulative time-cost (length * curveFactor)
-  final double drawCostTotal; // total cost for this stroke
+  final List<double> cumGeomLen;
+  final List<double> cumDrawCost;
+  final double drawCostTotal;
+
+  double drawTimeSec;          // how long we draw this stroke
+  double travelTimeBeforeSec;  // pause/travel before this stroke starts
+  double timeWeight;           // travel + draw; used by global animator
 
   int groupId = -1;
   int groupSize = 1;
   double importanceScore = 0.0;
-  double timeWeight = 0.0; // used by global animator
 
   DrawableStroke({
+    required this.jsonName,
+    required this.objectOrigin,
+    required this.objectScale,
     required this.points,
     required this.originalPoints,
     required this.lengthPx,
@@ -801,6 +1338,9 @@ class DrawableStroke {
     required this.cumGeomLen,
     required this.cumDrawCost,
     required this.drawCostTotal,
+    required this.drawTimeSec,
+    this.travelTimeBeforeSec = 0.0,
+    this.timeWeight = 0.0,
   });
 }
 
@@ -838,13 +1378,11 @@ class WhiteboardPainter extends CustomPainter {
     canvas.scale(scale);
 
     if (stepMode) {
-      // STEP MODE: draw first N strokes fully
       final count = stepStrokeCount.clamp(0, strokes.length);
       for (int i = 0; i < count; i++) {
         _drawStroke(canvas, strokes[i], 1.0, scale);
       }
     } else {
-      // ANIMATION MODE: global time across all strokes
       final totalWeight =
           strokes.fold<double>(0.0, (s, d) => s + d.timeWeight);
       final clampedT = animationT.clamp(0.0, 1.0);
@@ -852,28 +1390,36 @@ class WhiteboardPainter extends CustomPainter {
 
       double acc = 0.0;
       for (final stroke in strokes) {
-        final w = stroke.timeWeight;
-        if (w <= 0) continue;
-        final start = acc;
-        final end = acc + w;
-        acc = end;
-
-        double phase;
-        if (target >= end) {
-          phase = 1.0;
-        } else if (target <= start) {
-          phase = 0.0;
-        } else {
-          phase = (target - start) / w;
+        final travel = stroke.travelTimeBeforeSec;
+        final draw = stroke.drawTimeSec;
+        if (draw <= 0.0 && travel <= 0.0) {
+          continue;
         }
 
-        if (phase <= 0.0) continue;
+        final strokeStart = acc;
+        final travelEnd = strokeStart + travel;
+        final strokeEnd = travelEnd + draw;
+        acc = strokeEnd;
 
-        _drawStroke(canvas, stroke, phase, scale);
+        if (target >= strokeEnd) {
+          _drawStroke(canvas, stroke, 1.0, scale);
+          continue;
+        }
 
-        if (target < end) {
+        if (target <= strokeStart) {
           break;
         }
+
+        if (target < travelEnd) {
+          break;
+        }
+
+        final local = (target - travelEnd) / draw;
+        final phase = local.clamp(0.0, 1.0);
+        if (phase > 0.0) {
+          _drawStroke(canvas, stroke, phase, scale);
+        }
+        break;
       }
     }
 
@@ -885,14 +1431,13 @@ class WhiteboardPainter extends CustomPainter {
     final pts = stroke.points;
     if (pts.length < 2) return;
 
-    // per-stroke draw vs pause (used only in anim mode, harmless in step mode)
     const double drawFrac = 0.8;
     final local = phase.clamp(0.0, 1.0);
     if (local <= 0.0) return;
 
     double drawPhase;
     if (local >= drawFrac) {
-      drawPhase = 1.0; // pause segment: stroke fully drawn
+      drawPhase = 1.0;
     } else {
       drawPhase = local / drawFrac;
     }
@@ -900,7 +1445,7 @@ class WhiteboardPainter extends CustomPainter {
     if (drawPhase <= 0.0) return;
 
     final n = pts.length;
-    final totalCost = stroke.drawCostTotal;
+    final totalCost = stroke.drawCostTotal; // normalized to 1.0
 
     int idxMax;
     if (drawPhase >= 1.0 || totalCost <= 0.0) {
@@ -969,8 +1514,7 @@ class WhiteboardPainter extends CustomPainter {
     return Rect.fromLTWH(minX, minY, w, h);
   }
 
-  double _computeUniformScale(Rect bounds, Size size,
-      {double padding = 10}) {
+  double _computeUniformScale(Rect bounds, Size size, {double padding = 10}) {
     final sx = (size.width - 2 * padding) / bounds.width;
     final sy = (size.height - 2 * padding) / bounds.height;
     final v = math.min(sx, sy);
