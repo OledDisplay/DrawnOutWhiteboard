@@ -1,51 +1,49 @@
-Settings for whiteboard:
-By default - slow human like drawing and pauses
-Set all the 'travel' settings to 0 to get a nicely animated, but quick printout
+Settings for whiteboard: \
+
+By default - slow human like drawing and pauses \
+Set all the 'travel' settings to 0 to get a nicely animated, but quick printout \
 Change "min stroke time" to control general speed 
-
-
 
 Setting up enviorment(s):
 
 
 1. For whiteboard
 
-  make sure you have python
-  cd whiteboard_backend
-  Install tesseract and add the path to the exe to ImagePreproccessor.py
-  By default : pytesseract.pytesseract.tesseract_cmd = r"C:\\Program Files\\Tesseract-OCR\\tesseract.exe"
-  (this is done because adding tesseract to path doesnt work for me for some reason)
+  make sure you have python \
+  cd whiteboard_backend \
+  Install tesseract and add the path to the exe to ImagePreproccessor.py \
+  By default : pytesseract.pytesseract.tesseract_cmd = r"C:\\Program Files\\Tesseract-OCR\\tesseract.exe" \
+  (this is done because adding tesseract to path doesnt work for me for some reason) \
 
-create a venv
+create a venv \
 pip install -r requirements.txt
 
-Make sure you have flutter setup for windows (flutter, visual studio)
-cd visual_whiteboard
+Make sure you have flutter setup for windows (flutter, visual studio) \
+cd visual_whiteboard \
 flutter pub get
 
-2. For researcher:
+2. For researcher: \
 
-  Requirements.txt covers everything, so step 1 env is enough
+  Requirements.txt covers everything, so step 1 env is enough \
 
-  Get the wordnet (python shell):
-  import nltk
+  Get the wordnet (python shell): \
+  import nltk \
   nltk.download('wordnet')
-  nltk.download('omw-1.4')  # optional, adds multilingual data
 
-Setting up program and Running:
+Setting up program and Running: \
   
-  *if you dont want to research images (takes a while) - put your own in whiteboard_backend\ResearchImages\ddg
+  *if you dont want to research images (takes a while) - put your own in whiteboard_backend\ResearchImages\ddg \
 
-  Run these in order to get images, proccess image, split them for printing:
-  cd whiteboard_backend
-  -Imageresearcher.py - researcher for images, takes a while
-   *Right now only ddg images are used, but researcher also gets from other sources
-  -ImagePreproccessor.py -> takes images, removes lables, runs canny, merges close outlines -> outputs to ProccessedImages
-  -ImageVectorizer.py -> takes proccessed images, turns many vectors, used for printing -> outputs to StrokeVectors
-  -ImageVecOrganizer.py -> organizes vectors to have nice looking order in printing
+  Run these in order to get images, proccess image, split them for printing: \
+  cd whiteboard_backend \
+  -Imageresearcher.py - researcher for images, takes a while \
+   *Right now only ddg images are used, but researcher also gets from other sources \
+  -ImagePreproccessor.py -> takes images, removes lables, runs canny, merges close outlines -> outputs to ProccessedImages \
+  -ImageVectorizer.py -> takes proccessed images, turns many vectors, used for printing -> outputs to StrokeVectors \
+  -ImageVecOrganizer.py -> organizes vectors to have nice looking order in printing 
 
-  Run for whiteboard app:
-  cd visual_whiteboard
+  Run for whiteboard app: \
+  cd visual_whiteboard \
   flutter run (windows)
 
 Tweak and play around with params based on usecase
