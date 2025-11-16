@@ -1,4 +1,4 @@
-Settings for whiteboard: \
+Settings for whiteboard: 
 
 By default - slow human like drawing and pauses \
 Set all the 'travel' settings to 0 to get a nicely animated, but quick printout \
