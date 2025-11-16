@@ -38,12 +38,17 @@ class _VectorViewerScreenState extends State<VectorViewerScreen>
   static const String _legacyJsonPath =
       r'C:\Users\marti\allFolder\code\DRAWNOUT\whiteboard_backend\StrokeVectors\edges_0_skeleton.json';
 
-  // RAW strokes (kept, but not used for multi-object logic anymore)
+  // RAW strokes from last loaded file (kept for debugging)
   List<StrokePolyline> _polyStrokes = const [];
   List<StrokeCubic> _cubicStrokes = const [];
 
-  // DRAWABLE strokes on the board (all objects merged)
+  // DRAWABLE strokes on the board
+  // - _staticStrokes: already drawn, never animated again
+  // - _animStrokes: current object being animated
+  // - _drawableStrokes: union (for UI info / step mode)
   List<DrawableStroke> _drawableStrokes = const [];
+  List<DrawableStroke> _staticStrokes = const [];
+  List<DrawableStroke> _animStrokes = const [];
 
   double? _srcWidth;
   double? _srcHeight;
@@ -58,12 +63,23 @@ class _VectorViewerScreenState extends State<VectorViewerScreen>
   int _stepStrokeCount = 0; // how many strokes are fully visible in step mode
 
   static const double _targetResolution = 2000.0; // target max side
-  static const double _basePenWidthPx = 3.0; // logical image px
+  static const double _basePenWidthPx = 3.0;      // logical image px
+
+  // Virtual board extents in world coordinates – 0,0 to 2000,2000.
+  // We keep the view fitted to at least this rect so 0,0 is stable
+  // and old strokes don't move when you load new ones (as long as you stay
+  // within that board).
+  static const double _boardWidth = _targetResolution;
+  static const double _boardHeight = _targetResolution;
+
+  // Max number of points we keep per stroke for display.
+  // This is the main optimization knob.
+  static const int _maxDisplayPointsPerStroke = 120;
 
   // ------------------- CORE TIMING PARAMETERS -------------------
 
   // Stroke draw timing (seconds)
-  double _minStrokeTimeSec = 0.14;        // base minimum per stroke
+  double _minStrokeTimeSec = 0.18;        // base minimum per stroke
   double _maxStrokeTimeSec = 0.32;        // max per stroke
 
   // Extra time from length: seconds per 1000px of stroke length
@@ -77,10 +93,10 @@ class _VectorViewerScreenState extends State<VectorViewerScreen>
   double _curvatureAngleScale = 80.0;     // degrees / 1 unit sharpness (bigger = less sensitive)
 
   // Travel / pause between strokes (seconds)
-  double _baseTravelTimeSec = 0.20;       // base wait between strokes
+  double _baseTravelTimeSec = 0.15;       // base wait between strokes
   double _travelTimePerKPxSec = 0.12;     // seconds per 1000px of distance
-  double _minTravelTimeSec = 0.20;        // clamp min travel
-  double _maxTravelTimeSec = 0.30;        // clamp max travel
+  double _minTravelTimeSec = 0.15;        // clamp min travel
+  double _maxTravelTimeSec = 0.35;        // clamp max travel
 
   // Global animation timing
   double _globalSpeedMultiplier = 1.0;    // >1 = faster, <1 = slower
@@ -107,11 +123,27 @@ class _VectorViewerScreenState extends State<VectorViewerScreen>
     _controller = AnimationController(
       vsync: this,
       duration: const Duration(milliseconds: 20000),
-    )..addListener(() {
+    )
+      ..addListener(() {
         if (!_stepMode) {
           setState(() {
             _animValue = _controller.value;
           });
+        }
+      })
+      ..addStatusListener((status) {
+        if (status == AnimationStatus.completed) {
+          // When animation finishes, freeze the animated strokes into static.
+          if (_animStrokes.isNotEmpty) {
+            setState(() {
+              _staticStrokes = [..._staticStrokes, ..._animStrokes];
+              _animStrokes = const [];
+              _drawableStrokes = [..._staticStrokes];
+              _animValue = 1.0;
+              _status =
+                  'Animation finished. Total strokes: ${_drawableStrokes.length}';
+            });
+          }
         }
       });
   }
@@ -148,6 +180,7 @@ class _VectorViewerScreenState extends State<VectorViewerScreen>
 
   /// Core: load a JSON by name from _vectorsFolder and append its strokes
   /// onto the current board, positioned at [origin] and scaled by [objectScale].
+  /// Already drawn strokes stay frozen; only this new object animates.
   Future<void> _addObjectFromJson({
     required String fileName,
     required Offset origin,
@@ -244,7 +277,17 @@ class _VectorViewerScreenState extends State<VectorViewerScreen>
       );
 
       setState(() {
-        _drawableStrokes = [..._drawableStrokes, ...newStrokes];
+        // finalize any currently animating strokes into static
+        if (_animStrokes.isNotEmpty) {
+          _controller.stop();
+          _staticStrokes = [..._staticStrokes, ..._animStrokes];
+          _animStrokes = const [];
+          _animValue = 0.0;
+        }
+
+        // new object strokes become the currently animating set
+        _animStrokes = newStrokes;
+        _drawableStrokes = [..._staticStrokes, ..._animStrokes];
 
         if (!_drawnJsonNames.contains(fileName)) {
           _drawnJsonNames.add(fileName);
@@ -257,7 +300,7 @@ class _VectorViewerScreenState extends State<VectorViewerScreen>
             'Added $fileName\nFormat: $format | strokes: poly=${poly.length}, cubic=${cubics.length}, pts=$polyPts, segs=$cubicSegs\nTotal drawable strokes: ${_drawableStrokes.length}';
       });
 
-      _recomputeTimingForAllStrokes();
+      _recomputeTimingForAnimStrokes();
     } catch (e, st) {
       setState(() => _status = 'Error loading $fileName: $e');
       // ignore: avoid_print
@@ -265,13 +308,13 @@ class _VectorViewerScreenState extends State<VectorViewerScreen>
     }
   }
 
-  /// Recompute per-stroke draw time and travel time for ALL current strokes,
-  /// based on adjustable timing parameters.
-  void _recomputeTimingForAllStrokes() {
-    if (_drawableStrokes.isEmpty) return;
+  /// Recompute draw and travel times for the CURRENTLY ANIMATED strokes only.
+  /// Static strokes on the board are not touched.
+  void _recomputeTimingForAnimStrokes() {
+    if (_animStrokes.isEmpty) return;
 
-    // 1) stroke draw times
-    for (final s in _drawableStrokes) {
+    // 1) per-stroke draw times based on length and curvature
+    for (final s in _animStrokes) {
       final length = s.lengthPx;
       final curvature = s.curvatureMetricDeg;
 
@@ -287,9 +330,9 @@ class _VectorViewerScreenState extends State<VectorViewerScreen>
           .toDouble();
     }
 
-    // 2) travel time between strokes (sequential order in list)
+    // 2) travel time only within this new object (sequential in _animStrokes)
     DrawableStroke? prev;
-    for (final s in _drawableStrokes) {
+    for (final s in _animStrokes) {
       double travel = 0.0;
 
       if (prev != null) {
@@ -314,13 +357,24 @@ class _VectorViewerScreenState extends State<VectorViewerScreen>
       prev = s;
     }
 
-    // 3) total anim time
-    final totalSeconds = _drawableStrokes.fold<double>(
+    // 3) total anim time for this object
+    final totalSeconds = _animStrokes.fold<double>(
         0.0, (sum, d) => sum + d.timeWeight);
 
     final animSeconds = (totalSeconds > 0)
         ? (totalSeconds / _globalSpeedMultiplier)
-        : 20.0;
+        : 0.0;
+
+    if (animSeconds <= 0.0) {
+      _controller.stop();
+      setState(() {
+        _animValue = 1.0;
+        _drawableStrokes = [..._staticStrokes, ..._animStrokes];
+        _status =
+            'Total strokes: ${_drawableStrokes.length} | nothing to animate';
+      });
+      return;
+    }
 
     final ms = math.max(1, (animSeconds * 1000).round());
     _controller.duration = Duration(milliseconds: ms);
@@ -333,19 +387,25 @@ class _VectorViewerScreenState extends State<VectorViewerScreen>
       _animValue = 0.0;
       _stepMode = false;
       _stepStrokeCount = 0;
+      _drawableStrokes = [..._staticStrokes, ..._animStrokes];
       _status =
-          'Total strokes: ${_drawableStrokes.length} | anim=${ms}ms';
+          'Total strokes: ${_drawableStrokes.length} | anim=${ms}ms (new object)';
     });
   }
 
-  // Legacy entry point used by sliders to "rebuild" – now just retimes existing strokes.
+  // Used by sliders to retime ONLY the currently animating strokes.
   void _rebuildDrawableFromCurrentStrokes() {
-    if (_drawableStrokes.isEmpty) return;
-    _recomputeTimingForAllStrokes();
+    if (_animStrokes.isEmpty) return;
+    _recomputeTimingForAnimStrokes();
   }
 
   void _restartAnimationMode() {
-    if (_drawableStrokes.isEmpty) return;
+    if (_animStrokes.isEmpty) {
+      setState(() {
+        _status = 'No active animation – add an object to animate.';
+      });
+      return;
+    }
     setState(() {
       _stepMode = false;
       _animValue = 0.0;
@@ -367,13 +427,19 @@ class _VectorViewerScreenState extends State<VectorViewerScreen>
   }
 
   /// Remove all strokes belonging to a given JSON.
+  /// Static strokes stay static; no reanimation of others.
   void _eraseObjectByName(String name) {
     if (name.isEmpty) return;
     if (_drawableStrokes.isEmpty) return;
 
     setState(() {
-      _drawableStrokes =
-          _drawableStrokes.where((s) => s.jsonName != name).toList();
+      // remove from static and anim sets
+      _staticStrokes =
+          _staticStrokes.where((s) => s.jsonName != name).toList();
+      _animStrokes =
+          _animStrokes.where((s) => s.jsonName != name).toList();
+
+      _drawableStrokes = [..._staticStrokes, ..._animStrokes];
 
       _drawnJsonNames.remove(name);
 
@@ -386,15 +452,15 @@ class _VectorViewerScreenState extends State<VectorViewerScreen>
       _status = 'Erased $name. Remaining strokes: ${_drawableStrokes.length}';
     });
 
-    if (_drawableStrokes.isNotEmpty) {
-      _recomputeTimingForAllStrokes();
-    } else {
+    if (_animStrokes.isEmpty) {
       _controller.stop();
       setState(() {
         _animValue = 0.0;
         _stepMode = false;
         _stepStrokeCount = 0;
-        _status = 'Board empty.';
+        if (_drawableStrokes.isEmpty) {
+          _status = 'Board empty.';
+        }
       });
     }
   }
@@ -413,11 +479,14 @@ class _VectorViewerScreenState extends State<VectorViewerScreen>
               color: Colors.white,
               child: CustomPaint(
                 painter: WhiteboardPainter(
-                  strokes: _drawableStrokes,
+                  staticStrokes: _staticStrokes,
+                  animStrokes: _animStrokes,
                   animationT: _animValue,
                   basePenWidth: _basePenWidthPx,
                   stepMode: _stepMode,
                   stepStrokeCount: _stepStrokeCount,
+                  boardWidth: _boardWidth,
+                  boardHeight: _boardHeight,
                 ),
               ),
             ),
@@ -607,7 +676,7 @@ class _VectorViewerScreenState extends State<VectorViewerScreen>
                       });
                     },
                     onChangeEnd: (_) {
-                      if (_drawableStrokes.isNotEmpty) {
+                      if (_animStrokes.isNotEmpty) {
                         _rebuildDrawableFromCurrentStrokes();
                       }
                     },
@@ -644,7 +713,7 @@ class _VectorViewerScreenState extends State<VectorViewerScreen>
                       });
                     },
                     onChangeEnd: (_) {
-                      if (_drawableStrokes.isNotEmpty) {
+                      if (_animStrokes.isNotEmpty) {
                         _rebuildDrawableFromCurrentStrokes();
                       }
                     },
@@ -666,7 +735,7 @@ class _VectorViewerScreenState extends State<VectorViewerScreen>
                       });
                     },
                     onChangeEnd: (_) {
-                      if (_drawableStrokes.isNotEmpty) {
+                      if (_animStrokes.isNotEmpty) {
                         _rebuildDrawableFromCurrentStrokes();
                       }
                     },
@@ -689,7 +758,7 @@ class _VectorViewerScreenState extends State<VectorViewerScreen>
                       });
                     },
                     onChangeEnd: (_) {
-                      if (_drawableStrokes.isNotEmpty) {
+                      if (_animStrokes.isNotEmpty) {
                         _rebuildDrawableFromCurrentStrokes();
                       }
                     },
@@ -711,7 +780,7 @@ class _VectorViewerScreenState extends State<VectorViewerScreen>
                       });
                     },
                     onChangeEnd: (_) {
-                      if (_drawableStrokes.isNotEmpty) {
+                      if (_animStrokes.isNotEmpty) {
                         _rebuildDrawableFromCurrentStrokes();
                       }
                     },
@@ -748,7 +817,7 @@ class _VectorViewerScreenState extends State<VectorViewerScreen>
                       });
                     },
                     onChangeEnd: (_) {
-                      if (_drawableStrokes.isNotEmpty) {
+                      if (_animStrokes.isNotEmpty) {
                         _rebuildDrawableFromCurrentStrokes();
                       }
                     },
@@ -770,7 +839,7 @@ class _VectorViewerScreenState extends State<VectorViewerScreen>
                       });
                     },
                     onChangeEnd: (_) {
-                      if (_drawableStrokes.isNotEmpty) {
+                      if (_animStrokes.isNotEmpty) {
                         _rebuildDrawableFromCurrentStrokes();
                       }
                     },
@@ -807,7 +876,7 @@ class _VectorViewerScreenState extends State<VectorViewerScreen>
                       });
                     },
                     onChangeEnd: (_) {
-                      if (_drawableStrokes.isNotEmpty) {
+                      if (_animStrokes.isNotEmpty) {
                         _rebuildDrawableFromCurrentStrokes();
                       }
                     },
@@ -829,7 +898,7 @@ class _VectorViewerScreenState extends State<VectorViewerScreen>
                       });
                     },
                     onChangeEnd: (_) {
-                      if (_drawableStrokes.isNotEmpty) {
+                      if (_animStrokes.isNotEmpty) {
                         _rebuildDrawableFromCurrentStrokes();
                       }
                     },
@@ -851,7 +920,7 @@ class _VectorViewerScreenState extends State<VectorViewerScreen>
                       });
                     },
                     onChangeEnd: (_) {
-                      if (_drawableStrokes.isNotEmpty) {
+                      if (_animStrokes.isNotEmpty) {
                         _rebuildDrawableFromCurrentStrokes();
                       }
                     },
@@ -873,7 +942,7 @@ class _VectorViewerScreenState extends State<VectorViewerScreen>
                       });
                     },
                     onChangeEnd: (_) {
-                      if (_drawableStrokes.isNotEmpty) {
+                      if (_animStrokes.isNotEmpty) {
                         _rebuildDrawableFromCurrentStrokes();
                       }
                     },
@@ -972,188 +1041,307 @@ class _VectorViewerScreenState extends State<VectorViewerScreen>
     return Rect.fromLTWH(minX, minY, w, h);
   }
 
+  /// Downsample a polyline to at most [maxPoints] points.
+  /// Keeps endpoints and roughly preserves shape.
+/// Downsample a polyline to at most [maxPoints] points.
+/// Keeps endpoints and roughly preserves shape.
+List<Offset> _downsamplePolyline(List<Offset> pts, int maxPoints) {
+  final n = pts.length;
+  if (n <= maxPoints || maxPoints <= 2) return pts;
+
+  // Use arclength-based resampling instead of “every Nth index”
+  // so spacing between points stays roughly uniform.
+  double totalLen = 0.0;
+  final segLen = List<double>.filled(n, 0.0);
+
+  for (int i = 1; i < n; i++) {
+    final d = (pts[i] - pts[i - 1]).distance;
+    segLen[i] = d;
+    totalLen += d;
+  }
+
+  if (totalLen <= 1e-6) {
+    // Degenerate (all points almost the same) -> keep first and last.
+    return <Offset>[pts.first, pts.last];
+  }
+
+  final out = <Offset>[];
+  out.add(pts.first);
+
+  final step = totalLen / (maxPoints - 1);
+  double accum = 0.0;
+  double nextTarget = step;
+  int i = 1;
+
+  while (i < n - 1 && out.length < maxPoints - 1) {
+    final d = segLen[i];
+    if (d <= 0.0) {
+      i++;
+      continue;
+    }
+
+    if (accum + d >= nextTarget) {
+      final t = (nextTarget - accum) / d;
+      final p = Offset(
+        pts[i - 1].dx + (pts[i].dx - pts[i - 1].dx) * t,
+        pts[i - 1].dy + (pts[i].dy - pts[i - 1].dy) * t,
+      );
+      out.add(p);
+      nextTarget += step;
+    } else {
+      accum += d;
+      i++;
+    }
+  }
+
+  out.add(pts.last);
+  return out;
+}
+
+
   // ---------- BUILD DRAWABLE STROKES FOR ONE OBJECT ----------
 
-  List<DrawableStroke> _buildDrawableStrokesForObject({
-    required String jsonName,
-    required Offset origin,
-    required double objectScale,
-    required List<StrokePolyline> polylines,
-    required List<StrokeCubic> cubics,
-    required double srcWidth,
-    required double srcHeight,
-    required double targetResolution,
-    required double basePenWidth,
-  }) {
-    final strokes = <DrawableStroke>[];
+  // ---------- BUILD DRAWABLE STROKES FOR ONE OBJECT ----------
 
-    final srcMax = math.max(srcWidth, srcHeight);
-    final baseUpscale = srcMax > 0 ? targetResolution / srcMax : 1.0;
-    final upscale = baseUpscale * (objectScale <= 0 ? 1.0 : objectScale);
+List<DrawableStroke> _buildDrawableStrokesForObject({
+  required String jsonName,
+  required Offset origin,
+  required double objectScale,
+  required List<StrokePolyline> polylines,
+  required List<StrokeCubic> cubics,
+  required double srcWidth,
+  required double srcHeight,
+  required double targetResolution,
+  required double basePenWidth,
+}) {
+  final strokes = <DrawableStroke>[];
 
-    final diag = math.sqrt(
-      math.pow(srcWidth * upscale, 2) + math.pow(srcHeight * upscale, 2),
-    );
-    final diagSafe = diag > 1e-3 ? diag : 1.0;
+  // 1) Compute upscale factor (same as before)
+  final srcMax = math.max(srcWidth, srcHeight);
+  final baseUpscale = srcMax > 0 ? targetResolution / srcMax : 1.0;
+  final scale = objectScale <= 0 ? 1.0 : objectScale;
+  final upscale = baseUpscale * scale;
 
-    for (final s in polylines) {
-      final pts = s.points
-          .map((p) {
-            final up = Offset(p.dx * upscale, p.dy * upscale);
-            return Offset(up.dx + origin.dx, up.dy + origin.dy);
-          })
-          .toList(growable: false);
-      if (pts.length < 2) continue;
-      strokes.add(_makeDrawableFromPoints(
-        jsonName: jsonName,
-        objectOrigin: origin,
-        objectScale: objectScale,
-        pts: pts,
-        basePenWidth: basePenWidth,
-        diag: diagSafe,
-      ));
-    }
+  // 2) Object-level diagonal for amplitude/timing stuff
+  final diag = math.sqrt(
+    math.pow(srcWidth * upscale, 2) + math.pow(srcHeight * upscale, 2),
+  );
+  final diagSafe = diag > 1e-3 ? diag : 1.0;
 
-    for (final c in cubics) {
-      final ptsRaw = _sampleCubicStroke(c, upscale: upscale);
-      final pts = ptsRaw
-          .map((p) => Offset(p.dx + origin.dx, p.dy + origin.dy))
-          .toList(growable: false);
-      if (pts.length < 2) continue;
-      strokes.add(_makeDrawableFromPoints(
-        jsonName: jsonName,
-        objectOrigin: origin,
-        objectScale: objectScale,
-        pts: pts,
-        basePenWidth: basePenWidth,
-        diag: diagSafe,
-      ));
-    }
+  // 3) Compute bounds of ALL strokes in source coords,
+  //    then their center. This is the anchor.
+  final srcBounds = _computeRawBounds(polylines, cubics);
+  final srcCenter = Offset(
+    srcBounds.left + srcBounds.width / 2.0,
+    srcBounds.top + srcBounds.height / 2.0,
+  );
+  // Same center, but already scaled into world units:
+  final centerScaled = Offset(
+    srcCenter.dx * upscale,
+    srcCenter.dy * upscale,
+  );
 
-    return strokes;
+  // 4) Build polyline strokes – scale, recenter around origin, then simplify.
+  for (final s in polylines) {
+    final pts = s.points
+        .map((p) {
+          // scale to world
+          final scaled = Offset(p.dx * upscale, p.dy * upscale);
+          // recenter: move so that object center → origin
+          return Offset(
+            scaled.dx - centerScaled.dx + origin.dx,
+            scaled.dy - centerScaled.dy + origin.dy,
+          );
+        })
+        .toList(growable: false);
+
+    if (pts.length < 2) continue;
+
+    strokes.add(_makeDrawableFromPoints(
+      jsonName: jsonName,
+      objectOrigin: origin,
+      objectScale: scale,
+      pts: pts,
+      basePenWidth: basePenWidth,
+      diag: diagSafe,
+    ));
   }
 
-  DrawableStroke _makeDrawableFromPoints({
-    required String jsonName,
-    required Offset objectOrigin,
-    required double objectScale,
-    required List<Offset> pts,
-    required double basePenWidth,
-    required double diag,
-  }) {
-    final n = pts.length;
+  // 5) Build cubic strokes – same centering logic, but on sampled points.
+  for (final c in cubics) {
+    final ptsRaw = _sampleCubicStroke(c, upscale: upscale); // already scaled
+    final pts = ptsRaw
+        .map((p) => Offset(
+              p.dx - centerScaled.dx + origin.dx,
+              p.dy - centerScaled.dy + origin.dy,
+            ))
+        .toList(growable: false);
 
-    final cumGeom = List<double>.filled(n, 0.0);
-    final cumCost = List<double>.filled(n, 0.0);
+    if (pts.length < 2) continue;
 
-    double length = 0.0;
-    double cost = 0.0;
+    strokes.add(_makeDrawableFromPoints(
+      jsonName: jsonName,
+      objectOrigin: origin,
+      objectScale: scale,
+      pts: pts,
+      basePenWidth: basePenWidth,
+      diag: diagSafe,
+    ));
+  }
 
-    double prevSharpNorm = 0.0;
-    final double angleScale =
-        _curvatureAngleScale.abs() < 1e-3 ? 1.0 : _curvatureAngleScale;
+  return strokes;
+}
 
-    for (int i = 1; i < n; i++) {
-      final v = pts[i] - pts[i - 1];
-      final segLen = v.distance;
-      if (segLen < 1e-6) {
-        cumGeom[i] = length;
-        cumCost[i] = cost;
-        continue;
-      }
 
-      length += segLen;
+DrawableStroke _makeDrawableFromPoints({
+  required String jsonName,
+  required Offset objectOrigin,
+  required double objectScale,
+  required List<Offset> pts,
+  required double basePenWidth,
+  required double diag,
+}) {
+  // Normalize scale a bit: treat <=0 as 1.0
+  final scale = objectScale <= 0 ? 1.0 : objectScale;
 
-      double angDeg = 0.0;
-      if (i > 1) {
-        final vPrev = pts[i - 1] - pts[i - 2];
-        final lenPrev = vPrev.distance;
-        if (lenPrev >= 1e-6) {
-          final dot =
-              (vPrev.dx * v.dx + vPrev.dy * v.dy) / (lenPrev * segLen);
-          final clamped = dot.clamp(-1.0, 1.0);
-          angDeg = math.acos(clamped) * 180.0 / math.pi;
-        }
-      }
+  // Compute an effective max number of display points per stroke
+  // depending on scale:
+  //
+  // - At scale=1.0 → keep _maxDisplayPointsPerStroke
+  // - At scale<1.0 → proportionally fewer points
+  //   (scale=0.5 => about half; 0.25 => quarter, etc., clamped)
+  // - At scale>1.0 → slightly more points, but capped.
+  final clampedScale = scale.clamp(0.1, 3.0);
+  double scaleFactor;
+  if (clampedScale <= 1.0) {
+    scaleFactor = clampedScale; // shrink → fewer points
+  } else {
+    // When enlarging, don't explode point count; mild increase only.
+    scaleFactor = 1.0 + 0.4 * (clampedScale - 1.0);
+  }
 
-      double sharpNorm = (angDeg / angleScale).clamp(0.0, 1.5);
+  int effectiveMax = (_maxDisplayPointsPerStroke * scaleFactor).round();
+  if (effectiveMax < 8) effectiveMax = 8;
+  if (effectiveMax > _maxDisplayPointsPerStroke) {
+    effectiveMax = _maxDisplayPointsPerStroke;
+  }
 
-      final smoothedSharp = 0.7 * prevSharpNorm + 0.3 * sharpNorm;
-      prevSharpNorm = smoothedSharp;
+  // Main optimization: downsample based on this effectiveMax
+  final workPts = _downsamplePolyline(pts, effectiveMax);
+  final n = workPts.length;
 
-      final slowFactor = 1.0 + _curvatureProfileFactor * smoothedSharp;
+  final cumGeom = List<double>.filled(n, 0.0);
+  final cumCost = List<double>.filled(n, 0.0);
 
-      final segCost = segLen * slowFactor;
+  double length = 0.0;
+  double cost = 0.0;
 
-      cost += segCost;
+  double prevSharpNorm = 0.0;
+  final double angleScale =
+      _curvatureAngleScale.abs() < 1e-3 ? 1.0 : _curvatureAngleScale;
+
+  for (int i = 1; i < n; i++) {
+    final v = workPts[i] - workPts[i - 1];
+    final segLen = v.distance;
+    if (segLen < 1e-6) {
       cumGeom[i] = length;
       cumCost[i] = cost;
+      continue;
     }
 
-    if (length < 0.0) {
-      length = 0.0;
-    }
+    length += segLen;
 
-    if (cost <= 0.0) {
-      if (n > 1) {
-        for (int i = 1; i < n; i++) {
-          final t = i / (n - 1);
-          cumGeom[i] = length * t;
-          cumCost[i] = t;
-        }
+    double angDeg = 0.0;
+    if (i > 1) {
+      final vPrev = workPts[i - 1] - workPts[i - 2];
+      final lenPrev = vPrev.distance;
+      if (lenPrev >= 1e-6) {
+        final dot =
+            (vPrev.dx * v.dx + vPrev.dy * v.dy) / (lenPrev * segLen);
+        final clamped = dot.clamp(-1.0, 1.0);
+        angDeg = math.acos(clamped) * 180.0 / math.pi;
       }
-      cost = 1.0;
-    } else {
-      for (int i = 0; i < n; i++) {
-        cumCost[i] /= cost;
-      }
-      cost = 1.0;
     }
 
-    final centroid = _centroid(pts);
-    final curvature = _estimateCurvatureDeg(pts);
-    final bounds = _boundsOfPoints(pts);
+    double sharpNorm = (angDeg / angleScale).clamp(0.0, 1.5);
 
-    double amp = 0.0;
-    if (length > 0.02 * diag) {
-      final lenNorm = (length / diag).clamp(0.0, 1.0);
-      final curvNorm = (curvature / 70.0).clamp(0.0, 1.0);
-      final baseAmp = basePenWidth * 0.9;
-      amp = baseAmp *
-          (0.5 + 0.8 * math.pow(lenNorm, 0.7)) *
-          (0.6 + 0.4 * (1.0 - curvNorm));
-      amp = amp.clamp(0.5, basePenWidth * 2.0);
-    }
+    final smoothedSharp = 0.7 * prevSharpNorm + 0.3 * sharpNorm;
+    prevSharpNorm = smoothedSharp;
 
-    final displayPts = amp > 0.0 ? _applyWobble(pts, amp) : pts;
+    final slowFactor = 1.0 + _curvatureProfileFactor * smoothedSharp;
 
-    final lengthK = length / 1000.0;
-    final curvNormGlobal = (curvature / 70.0).clamp(0.0, 1.0);
+    final segCost = segLen * slowFactor;
 
-    final rawTime = _minStrokeTimeSec +
-        lengthK * _lengthTimePerKPxSec +
-        curvNormGlobal * _curvatureExtraMaxSec;
-
-    final drawTimeSec = rawTime
-        .clamp(_minStrokeTimeSec, _maxStrokeTimeSec)
-        .toDouble();
-
-    return DrawableStroke(
-      jsonName: jsonName,
-      objectOrigin: objectOrigin,
-      objectScale: objectScale,
-      points: displayPts,
-      originalPoints: pts,
-      lengthPx: length,
-      centroid: centroid,
-      bounds: bounds,
-      curvatureMetricDeg: curvature,
-      cumGeomLen: cumGeom,
-      cumDrawCost: cumCost,
-      drawCostTotal: 1.0,
-      drawTimeSec: drawTimeSec,
-    );
+    cost += segCost;
+    cumGeom[i] = length;
+    cumCost[i] = cost;
   }
+
+  if (length < 0.0) {
+    length = 0.0;
+  }
+
+  double drawCostTotal;
+  if (cost <= 0.0) {
+    // fallback: linear cost 0..1
+    if (n > 1) {
+      for (int i = 1; i < n; i++) {
+        final t = i / (n - 1);
+        cumGeom[i] = length * t;
+        cumCost[i] = t;
+      }
+    }
+    drawCostTotal = 1.0;
+  } else {
+    // keep true cost scale
+    drawCostTotal = cost;
+  }
+
+  final centroid = _centroid(workPts);
+  final curvature = _estimateCurvatureDeg(workPts);
+  final bounds = _boundsOfPoints(workPts);
+
+  double amp = 0.0;
+  if (length > 0.02 * diag) {
+    final lenNorm = (length / diag).clamp(0.0, 1.0);
+    final curvNorm = (curvature / 70.0).clamp(0.0, 1.0);
+    final baseAmp = basePenWidth * 0.9;
+    amp = baseAmp *
+        (0.5 + 0.8 * math.pow(lenNorm, 0.7)) *
+        (0.6 + 0.4 * (1.0 - curvNorm));
+    amp = amp.clamp(0.5, basePenWidth * 2.0);
+  }
+
+  final displayPts = amp > 0.0 ? _applyWobble(workPts, amp) : workPts;
+
+  final lengthK = length / 1000.0;
+  final curvNormGlobal = (curvature / 70.0).clamp(0.0, 1.0);
+
+  final rawTime = _minStrokeTimeSec +
+      lengthK * _lengthTimePerKPxSec +
+      curvNormGlobal * _curvatureExtraMaxSec;
+
+  final drawTimeSec = rawTime
+      .clamp(_minStrokeTimeSec, _maxStrokeTimeSec)
+      .toDouble();
+
+  return DrawableStroke(
+    jsonName: jsonName,
+    objectOrigin: objectOrigin,
+    objectScale: objectScale,
+    points: displayPts,
+    originalPoints: workPts,
+    lengthPx: length,
+    centroid: centroid,
+    bounds: bounds,
+    curvatureMetricDeg: curvature,
+    cumGeomLen: cumGeom,
+    cumDrawCost: cumCost,
+    drawCostTotal: drawCostTotal,
+    drawTimeSec: drawTimeSec,
+  );
+}
+
 
   Offset _centroid(List<Offset> pts) {
     if (pts.isEmpty) return Offset.zero;
@@ -1307,7 +1495,7 @@ class DrawableStroke {
   final double objectScale;
 
   final List<Offset> points; // upscaled + wobble + placed
-  final List<Offset> originalPoints; // pre-wobble (but with placement)
+  final List<Offset> originalPoints; // pre-wobble (downsampled, with placement)
   final double lengthPx;
   final Offset centroid;
   final Rect bounds;
@@ -1347,26 +1535,39 @@ class DrawableStroke {
 /* ---------- Painter ---------- */
 
 class WhiteboardPainter extends CustomPainter {
-  final List<DrawableStroke> strokes;
+  final List<DrawableStroke> staticStrokes;
+  final List<DrawableStroke> animStrokes;
   final double animationT;
   final double basePenWidth;
 
   final bool stepMode;
   final int stepStrokeCount;
 
+  // Virtual board size – used to keep 0,0 stable.
+  final double boardWidth;
+  final double boardHeight;
+
   const WhiteboardPainter({
-    required this.strokes,
+    required this.staticStrokes,
+    required this.animStrokes,
     required this.animationT,
     required this.basePenWidth,
     required this.stepMode,
     required this.stepStrokeCount,
+    required this.boardWidth,
+    required this.boardHeight,
   });
 
   @override
   void paint(Canvas canvas, Size size) {
-    if (strokes.isEmpty) return;
+    if (staticStrokes.isEmpty && animStrokes.isEmpty) return;
 
-    final bounds = _computeBounds(strokes);
+    final allStrokes = <DrawableStroke>[
+      ...staticStrokes,
+      ...animStrokes,
+    ];
+
+    final bounds = _computeBounds(allStrokes);
     final scale = _computeUniformScale(bounds, size, padding: 80);
     final tx =
         (size.width - bounds.width * scale) / 2 - bounds.left * scale;
@@ -1378,48 +1579,57 @@ class WhiteboardPainter extends CustomPainter {
     canvas.scale(scale);
 
     if (stepMode) {
-      final count = stepStrokeCount.clamp(0, strokes.length);
+      // STEP MODE: draw first N strokes fully from combined list
+      final count = stepStrokeCount.clamp(0, allStrokes.length);
       for (int i = 0; i < count; i++) {
-        _drawStroke(canvas, strokes[i], 1.0, scale);
+        _drawStroke(canvas, allStrokes[i], 1.0, scale);
       }
     } else {
-      final totalWeight =
-          strokes.fold<double>(0.0, (s, d) => s + d.timeWeight);
-      final clampedT = animationT.clamp(0.0, 1.0);
-      final target = totalWeight > 0 ? totalWeight * clampedT : 0.0;
+      // Draw static strokes fully
+      for (final s in staticStrokes) {
+        _drawStroke(canvas, s, 1.0, scale);
+      }
 
-      double acc = 0.0;
-      for (final stroke in strokes) {
-        final travel = stroke.travelTimeBeforeSec;
-        final draw = stroke.drawTimeSec;
-        if (draw <= 0.0 && travel <= 0.0) {
-          continue;
-        }
+      // Animate only the currently animated strokes
+      if (animStrokes.isNotEmpty) {
+        final totalWeight =
+            animStrokes.fold<double>(0.0, (s, d) => s + d.timeWeight);
+        final clampedT = animationT.clamp(0.0, 1.0);
+        final target = totalWeight > 0 ? totalWeight * clampedT : 0.0;
 
-        final strokeStart = acc;
-        final travelEnd = strokeStart + travel;
-        final strokeEnd = travelEnd + draw;
-        acc = strokeEnd;
+        double acc = 0.0;
+        for (final stroke in animStrokes) {
+          final travel = stroke.travelTimeBeforeSec;
+          final draw = stroke.drawTimeSec;
+          if (draw <= 0.0 && travel <= 0.0) {
+            continue;
+          }
 
-        if (target >= strokeEnd) {
-          _drawStroke(canvas, stroke, 1.0, scale);
-          continue;
-        }
+          final strokeStart = acc;
+          final travelEnd = strokeStart + travel;
+          final strokeEnd = travelEnd + draw;
+          acc = strokeEnd;
 
-        if (target <= strokeStart) {
+          if (target >= strokeEnd) {
+            _drawStroke(canvas, stroke, 1.0, scale);
+            continue;
+          }
+
+          if (target <= strokeStart) {
+            break;
+          }
+
+          if (target < travelEnd) {
+            break;
+          }
+
+          final local = (target - travelEnd) / draw;
+          final phase = local.clamp(0.0, 1.0);
+          if (phase > 0.0) {
+            _drawStroke(canvas, stroke, phase, scale);
+          }
           break;
         }
-
-        if (target < travelEnd) {
-          break;
-        }
-
-        final local = (target - travelEnd) / draw;
-        final phase = local.clamp(0.0, 1.0);
-        if (phase > 0.0) {
-          _drawStroke(canvas, stroke, phase, scale);
-        }
-        break;
       }
     }
 
@@ -1445,7 +1655,7 @@ class WhiteboardPainter extends CustomPainter {
     if (drawPhase <= 0.0) return;
 
     final n = pts.length;
-    final totalCost = stroke.drawCostTotal; // normalized to 1.0
+    final totalCost = stroke.drawCostTotal;
 
     int idxMax;
     if (drawPhase >= 1.0 || totalCost <= 0.0) {
@@ -1497,21 +1707,10 @@ class WhiteboardPainter extends CustomPainter {
   }
 
   Rect _computeBounds(List<DrawableStroke> strokes) {
-    double minX = double.infinity, minY = double.infinity;
-    double maxX = -double.infinity, maxY = -double.infinity;
-    for (final s in strokes) {
-      final b = s.bounds;
-      if (b.left < minX) minX = b.left;
-      if (b.top < minY) minY = b.top;
-      if (b.right > maxX) maxX = b.right;
-      if (b.bottom > maxY) maxY = b.bottom;
-    }
-    if (minX == double.infinity) {
-      return const Rect.fromLTWH(0, 0, 1, 1);
-    }
-    final w = math.max(1e-3, maxX - minX);
-    final h = math.max(1e-3, maxY - minY);
-    return Rect.fromLTWH(minX, minY, w, h);
+    // (new version)
+    final double halfW = boardWidth / 2.0;
+    final double halfH = boardHeight / 2.0;
+    return Rect.fromLTWH(-halfW, -halfH, boardWidth, boardHeight);
   }
 
   double _computeUniformScale(Rect bounds, Size size, {double padding = 10}) {
@@ -1525,9 +1724,12 @@ class WhiteboardPainter extends CustomPainter {
 
   @override
   bool shouldRepaint(covariant WhiteboardPainter old) =>
-      old.strokes != strokes ||
+      old.staticStrokes != staticStrokes ||
+      old.animStrokes != animStrokes ||
       old.animationT != animationT ||
       old.basePenWidth != basePenWidth ||
       old.stepMode != stepMode ||
-      old.stepStrokeCount != stepStrokeCount;
+      old.stepStrokeCount != stepStrokeCount ||
+      old.boardWidth != boardWidth ||
+      old.boardHeight != boardHeight;
 }

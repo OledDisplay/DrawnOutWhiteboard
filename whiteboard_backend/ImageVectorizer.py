@@ -47,10 +47,10 @@ import numpy as np
 #- measuring how much the direction changes between samples (curvature),
 #- scanning forward and grouping “turn regions” over several indices.
 
-#Step 4 – conservative simplification
+#Step 4 – Douglas–Peucker simplification
 #Now each stroke is still a polyline with potentially too many points ->
 #We want to give more opurtunity to the rendering engine, and not just have many pixels to draw
-#We run a very conservative simplifier
+#We run a conservative
 #We never touch indices where the direction changes, so curves stay intact;
 
 #Step 5 – merge small strokes into neighbours
@@ -122,6 +122,9 @@ MERGE_DIST_FRAC_DIAG       = 0.004  # relative distance gate vs image diagonal
 MERGE_DIST_MIN             = 2.0    # px
 MERGE_DIST_MAX             = 10.0    # px
 MERGE_ANGLE_MAX            = 110.0   # deg – max angle at join to allow merge
+
+#POINT SIMPLIFICATION
+SIMPLIFY_EPS_PX = 0.4 
 
 # 8-connected neighbor offsets
 NEIGHBORS_8 = [
@@ -674,6 +677,7 @@ def _simplify_poly_conservative(poly: np.ndarray) -> np.ndarray:
     if len(out) < 2:
         return pts
     return np.asarray(out, dtype=np.float32)
+
 
 # ------------------- MERGE SMALL STROKES -------------------
 
