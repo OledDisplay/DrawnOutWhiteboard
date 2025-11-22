@@ -78,7 +78,6 @@ BASE = Path(__file__).resolve().parent
 # skeleton PNGs (0/255) from skeletonizer
 IN_DIR = BASE / "Skeletonized"
 OUT_DIR = BASE / "StrokeVectors"
-OUT_DIR.mkdir(parents=True, exist_ok=True)
 
 # ------------------- GLOBAL KNOBS -------------------
 LEFTOVER_MIN_CC_PIXELS = 0   
@@ -103,7 +102,7 @@ JUNC_CONTINUE_ANG_MAX      = 45.0   # deg – how much deflection we still accep
 
 # per-stroke segmentation (corner detection) knobs
 CURV_WIN_RADIUS_SMALL      = 4      # half-window for local orientation smoothing
-CURV_WARN_ANGLE            = 18.0   # deg – below this we don't consider a corner
+CURV_WARN_ANGLE            = 22.0   # deg – below this we don't consider a corner
 CURV_CORNER_TOTAL_MIN      = 80.0   # deg – total turn threshold for a corner
 CURV_CORNER_MAX_MIN        = 50.0   # deg – max local turn threshold for a corner
 CURV_CORNER_REGION_MAXLEN  = 5      # max allowed region length for a concentrated corner
@@ -121,7 +120,7 @@ MERGE_SMALL_LEN_MIN        = 65.0    # absolute minimum length (px) to consider 
 MERGE_DIST_FRAC_DIAG       = 0.004  # relative distance gate vs image diagonal
 MERGE_DIST_MIN             = 2.0    # px
 MERGE_DIST_MAX             = 10.0    # px
-MERGE_ANGLE_MAX            = 110.0   # deg – max angle at join to allow merge
+MERGE_ANGLE_MAX            = 90.0  # deg – max angle at join to allow merge
 
 #POINT SIMPLIFICATION
 SIMPLIFY_EPS_PX = 0.4 
@@ -975,7 +974,7 @@ def _catmull_rom_to_beziers(pts: np.ndarray, alpha=0.5) -> List[List[float]]:
 
 # ------------------- PROCESS SINGLE -------------------
 
-def _process_single(path: Path) -> Tuple[str, dict]:
+def _process_single(path: Path, output : Path) -> Tuple[str, dict]:
     fg = _load_edges_binary(path)
     H, W = fg.shape
     diag = math.hypot(W, H)
@@ -1073,7 +1072,8 @@ def _process_single(path: Path) -> Tuple[str, dict]:
             "merge_small_len_percentile": MERGE_SMALL_LEN_PERCENTILE,
         },
     }
-    out_json = OUT_DIR / f"{path.stem}.json"
+    output.mkdir(parents=True, exist_ok=True)
+    out_json = output / f"{path.stem}.json"
     out_json.write_text(json.dumps(data, indent=2), encoding="utf-8")
     return str(path), data
 
@@ -1088,7 +1088,7 @@ def main():
     if not imgs:
         return
     for p in imgs:
-        src, meta = _process_single(p)
+        src, meta = _process_single(p, OUT_DIR)
         print(f"[OK] {Path(src).name}: strokes={len(meta['strokes'])}, "
               f"time={meta['stats']['time_sec']}s")
 

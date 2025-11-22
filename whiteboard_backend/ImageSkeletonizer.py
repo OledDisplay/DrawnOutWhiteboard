@@ -31,7 +31,6 @@ import numpy as np
 BASE = Path(__file__).resolve().parent
 IN_DIR  = BASE / "ProccessedImages"   # input: your already processed images
 OUT_DIR = BASE / "Skeletonized"       # output: skeleton PNGs
-OUT_DIR.mkdir(parents=True, exist_ok=True)
 
 # ===================== KNOBS =====================
 
@@ -177,7 +176,10 @@ def pen_width_skeleton(fg01: np.ndarray, pen_width: float) -> np.ndarray:
 
 # ===================== MAIN PIPELINE =====================
 
-def process_one(path: Path):
+def process_one(path: Path, output : Path):
+
+    output.mkdir(parents=True, exist_ok=True)
+
     print(f"[START] {path.name}")
     fg = load_foreground(path)
 
@@ -185,7 +187,7 @@ def process_one(path: Path):
 
     # 0/1 → 0/255 for saving
     img_out = (skel * 255).astype(np.uint8)
-    out_path = OUT_DIR / f"{path.stem}_skeleton.png"
+    out_path = output / f"{path.stem}_skeleton.png"
     cv2.imwrite(str(out_path), img_out)
     print(f"[OK]  wrote {out_path}")
 
@@ -205,7 +207,7 @@ def main():
         return
 
     for p in imgs:
-        process_one(p)
+        process_one(p, OUT_DIR)
 
 
 if __name__ == "__main__":
