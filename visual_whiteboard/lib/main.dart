@@ -9,6 +9,36 @@ void main() {
   runApp(const WhiteboardApp());
 }
 
+/// Find the whiteboard_backend folder starting from Directory.current
+/// and walking upwards. Then append [subdir].
+static String _resolveBackendSubdir(String subdir) {
+  // Start where the process is running (for Windows desktop:
+  // build/windows/x64/runner/Debug by default).
+  var dir = Directory.current;
+
+  // Walk up at most 10 levels to be safe.
+  for (int i = 0; i < 10; i++) {
+    final candidate =
+        Directory('${dir.path}\\whiteboard_backend');
+    if (candidate.existsSync()) {
+      if (subdir.isEmpty) return candidate.path;
+      return '${candidate.path}\\$subdir';
+    }
+
+    final parent = dir.parent;
+    if (parent.path == dir.path) {
+      // Reached filesystem root; stop.
+      break;
+    }
+    dir = parent;
+  }
+
+  // Fallback: just assume current dir has whiteboard_backend next to it.
+  // This will fail loudly if it's wrong.
+  return '${Directory.current.path}\\whiteboard_backend\\$subdir';
+}
+
+
 class WhiteboardApp extends StatelessWidget {
   const WhiteboardApp({super.key});
 
@@ -28,30 +58,26 @@ class VectorViewerScreen extends StatefulWidget {
   State<VectorViewerScreen> createState() => _VectorViewerScreenState();
 }
 
+
 class _VectorViewerScreenState extends State<VectorViewerScreen>
     with SingleTickerProviderStateMixin {
   // === BASE FOLDER FOR JSONS (IMAGES) ===
-  static const String _vectorsFolder =
-      r'C:\Users\marti\Code\DrawnOutWhiteboard\whiteboard_backend\StrokeVectors';
+  // === BASE FOLDER FOR JSONS (IMAGES) ===
+  static String get _vectorsFolder =>
+      _resolveBackendSubdir('StrokeVectors');
 
   // FONT GLYPH JSONS (TEXT)
-  static const String _fontVectorsFolder =
-      r'C:\Users\marti\Code\DrawnOutWhiteboard\whiteboard_backend\Font';
-  static const String _fontMetricsPath =
-      r'C:\Users\marti\Code\DrawnOutWhiteboard\whiteboard_backend\Font\font_metrics.json';
+  static String get _fontVectorsFolder =>
+      _resolveBackendSubdir('Font');
 
-  // single file path (legacy text, not used for loading anymore)
-  static const String _legacyJsonPath =
-      r'C:\Users\marti\allFolder\code\DRAWNOUT\whiteboard_backend\StrokeVectors\edges_0_skeleton.json';
+  static String get _fontMetricsPath =>
+      '${_fontVectorsFolder}\\font_metrics.json';
 
   // RAW strokes from last loaded file (kept for debugging)
   List<StrokePolyline> _polyStrokes = const [];
   List<StrokeCubic> _cubicStrokes = const [];
 
   // DRAWABLE strokes on the board
-  // - _staticStrokes: already drawn, never animated again
-  // - _animStrokes: current object being animated
-  // - _drawableStrokes: union (for UI info / step mode)
   List<DrawableStroke> _drawableStrokes = const [];
   List<DrawableStroke> _staticStrokes = const [];
   List<DrawableStroke> _animStrokes = const [];
@@ -66,12 +92,12 @@ class _VectorViewerScreenState extends State<VectorViewerScreen>
 
   // step mode
   bool _stepMode = false;
-  int _stepStrokeCount = 0; // how many strokes are fully visible in step mode
+  int _stepStrokeCount = 0;
 
   static const double _targetResolution = 2000.0; // target max side
   static const double _basePenWidthPx = 3.0; // logical image px
 
-  // Virtual board extents in world coordinates – 0,0 to 2000,2000.
+  // Virtual board extents in world coordinates.
   static const double _boardWidth = _targetResolution;
   static const double _boardHeight = _targetResolution;
 
@@ -81,27 +107,30 @@ class _VectorViewerScreenState extends State<VectorViewerScreen>
   // ------------------- CORE TIMING PARAMETERS (NON-TEXT) -------------------
 
   // Stroke draw timing (seconds) for normal objects/images
-  double _minStrokeTimeSec = 0.18; // base minimum per stroke
-  double _maxStrokeTimeSec = 0.32; // max per stroke
+  double _minStrokeTimeSec = 0.18;
+  double _maxStrokeTimeSec = 0.32;
 
   // Extra time from length: seconds per 1000px of stroke length
-  double _lengthTimePerKPxSec = 0.08; // e.g. 0.08s per 1000px
+  double _lengthTimePerKPxSec = 0.08;
 
   // Extra time from curvature: max seconds added at "full" curvature
-  double _curvatureExtraMaxSec = 0.08; // e.g. up to +0.08s for very curly strokes
+  double _curvatureExtraMaxSec = 0.08;
 
   // Curvature profile along the stroke (local slowdowns)
-  double _curvatureProfileFactor = 1.5; // how strongly bends slow local movement
-  double _curvatureAngleScale = 80.0; // degrees / 1 unit sharpness
+  double _curvatureProfileFactor = 1.5;
+  double _curvatureAngleScale = 80.0;
 
   // Travel / pause between strokes (seconds) for normal objects
-  double _baseTravelTimeSec = 0.15; // base wait between strokes
-  double _travelTimePerKPxSec = 0.12; // seconds per 1000px of distance
-  double _minTravelTimeSec = 0.15; // clamp min travel
-  double _maxTravelTimeSec = 0.35; // clamp max travel
+  double _baseTravelTimeSec = 0.15;
+  double _travelTimePerKPxSec = 0.12;
+  double _minTravelTimeSec = 0.15;
+  double _maxTravelTimeSec = 0.35;
 
   // Global animation timing
-  double _globalSpeedMultiplier = 1.0; // >1 = faster, <1 = slower
+  double _globalSpeedMultiplier = 1.0;
+
+  double _textLetterGapPx = 20.0; // default gap in board pixels between letters
+
 
   // --------------- MULTI-OBJECT SUPPORT ---------------
 
@@ -115,7 +144,7 @@ class _VectorViewerScreenState extends State<VectorViewerScreen>
   final TextEditingController _scaleController =
       TextEditingController(text: '1.0');
 
-  // list of distinct json names currently on board
+  // list of distinct json names currently on board (including text prompts)
   final List<String> _drawnJsonNames = [];
   String? _selectedEraseName;
 
@@ -127,17 +156,10 @@ class _VectorViewerScreenState extends State<VectorViewerScreen>
   double? _fontImageHeightPx; // image_height used in font generation
 
   // text timing: when _animIsText = true, we use these rules
-  bool _animIsText = false; // text vs normal objects
+  bool _animIsText = false;
   double _textStrokeBaseTimeSec = 0.035; // constant per stroke
-  double _textStrokeCurveExtraFrac =
-      0.25; // fraction of base added at max curvature
-  double _textLetterPauseSec = 0.0; // currently not used (no waits)
-
-  // text spacing
-  double _textLetterGapPx =
-      0.5; // minimal gap between end of one letter and start of next (board units)
-  double _textSpaceWidthFactor =
-      0.5; // width of " " relative to letterSize along baseline
+  double _textStrokeCurveExtraFrac = 0.25; // fraction of base added at max curvature
+  double _textLetterPauseSec = 0.0; // currently unused (no waits)
 
   // reference used only for text scaling UI defaults
   double _textBaseFontSizeRef = 200.0;
@@ -151,6 +173,8 @@ class _VectorViewerScreenState extends State<VectorViewerScreen>
       TextEditingController(text: '0');
   final TextEditingController _textSizeController =
       TextEditingController(text: '180');
+  final TextEditingController _textGapController =
+    TextEditingController(text: '20'); 
 
   @override
   void initState() {
@@ -168,7 +192,6 @@ class _VectorViewerScreenState extends State<VectorViewerScreen>
       })
       ..addStatusListener((status) {
         if (status == AnimationStatus.completed) {
-          // When animation finishes, freeze the animated strokes into static.
           if (_animStrokes.isNotEmpty) {
             setState(() {
               _staticStrokes = [..._staticStrokes, ..._animStrokes];
@@ -218,8 +241,6 @@ class _VectorViewerScreenState extends State<VectorViewerScreen>
 
   // ------------------- LOADING & BUILDING (IMAGES) -------------------
 
-  /// Legacy button handler – now just reads from the UI fields
-  /// and delegates to _addObjectFromJson.
   Future<void> _loadAndRender() async {
     final fileName = _fileNameController.text.trim();
     if (fileName.isEmpty) {
@@ -240,9 +261,6 @@ class _VectorViewerScreenState extends State<VectorViewerScreen>
     );
   }
 
-  /// Core: load a JSON by name from _vectorsFolder and append its strokes
-  /// onto the current board, positioned at [origin] and scaled by [objectScale].
-  /// Already drawn strokes stay frozen; only this new object animates.
   Future<void> _addObjectFromJson({
     required String fileName,
     required Offset origin,
@@ -339,7 +357,6 @@ class _VectorViewerScreenState extends State<VectorViewerScreen>
       );
 
       setState(() {
-        // finalize any currently animating strokes into static
         if (_animStrokes.isNotEmpty) {
           _controller.stop();
           _staticStrokes = [..._staticStrokes, ..._animStrokes];
@@ -347,9 +364,8 @@ class _VectorViewerScreenState extends State<VectorViewerScreen>
           _animValue = 0.0;
         }
 
-        _animIsText = false; // this object is not text
+        _animIsText = false; // this batch is not text
 
-        // new object strokes become the currently animating set
         _animStrokes = newStrokes;
         _drawableStrokes = [..._staticStrokes, ..._animStrokes];
 
@@ -434,8 +450,6 @@ class _VectorViewerScreenState extends State<VectorViewerScreen>
 
   // ------------------- TIMING RECOMPUTE -------------------
 
-  /// Recompute draw and travel times for the CURRENTLY ANIMATED strokes only.
-  /// Static strokes on the board are not touched.
   void _recomputeTimingForAnimStrokes() {
     if (_animStrokes.isEmpty) return;
 
@@ -528,7 +542,6 @@ class _VectorViewerScreenState extends State<VectorViewerScreen>
     });
   }
 
-  // Used by sliders to retime ONLY the currently animating strokes.
   void _rebuildDrawableFromCurrentStrokes() {
     if (_animStrokes.isEmpty) return;
     _recomputeTimingForAnimStrokes();
@@ -561,8 +574,6 @@ class _VectorViewerScreenState extends State<VectorViewerScreen>
     });
   }
 
-  /// Remove all strokes belonging to a given JSON/prompt name.
-  /// Static strokes stay static; no reanimation of others.
   void _eraseObjectByName(String name) {
     if (name.isEmpty) return;
     if (_drawableStrokes.isEmpty) return;
@@ -600,7 +611,7 @@ class _VectorViewerScreenState extends State<VectorViewerScreen>
 
   // ------------------- TEXT WRITING -------------------
 
-  Future<void> _writeTextFromUi() async {
+    Future<void> _writeTextFromUi() async {
     final prompt = _textPromptController.text;
     if (prompt.isEmpty) {
       setState(() {
@@ -614,12 +625,18 @@ class _VectorViewerScreenState extends State<VectorViewerScreen>
     final size =
         double.tryParse(_textSizeController.text.trim()) ?? _textBaseFontSizeRef;
 
+    // NEW: update gap factor from UI
+    final gapParsed =
+     double.tryParse(_textGapController.text.trim()) ?? _textLetterGapPx;
+    _textLetterGapPx = math.max(0.0, gapParsed);
+
     await _writeTextPrompt(
       prompt: prompt,
       origin: Offset(x, y),
       letterSize: size,
     );
   }
+
 
   Future<void> _writeTextPrompt({
     required String prompt,
@@ -656,23 +673,25 @@ class _VectorViewerScreenState extends State<VectorViewerScreen>
 
     double cursorX = origin.dx;
     final double baselineWorldY = origin.dy;
-    final double baselineGlyph = imageHeight / 2.0; // where baseline lives in glyph
-    // no need to precompute baselineGlyphScaled; we use (p.dy - baselineGlyph)*scale
+    final double baselineGlyph = imageHeight / 2.0;
+    final double baselineGlyphScaled = baselineGlyph * scale;
+
+    final double letterGapPx = _textLetterGapPx;
+    const double spaceWidthFactor = 0.5;
+
 
     for (int i = 0; i < prompt.length; i++) {
       final ch = prompt[i];
       final code = ch.codeUnitAt(0);
 
       if (ch == ' ') {
-        // space: advance by a fraction of letter size
-        cursorX += letterSize * _textSpaceWidthFactor;
+        cursorX += letterSize * spaceWidthFactor;
         continue;
       }
 
       final glyph = await _getGlyphForCode(code);
       if (glyph == null) {
-        // unknown glyph -> treat as space
-        cursorX += letterSize * _textSpaceWidthFactor;
+        cursorX += letterSize * spaceWidthFactor;
         continue;
       }
 
@@ -680,21 +699,22 @@ class _VectorViewerScreenState extends State<VectorViewerScreen>
       final glyphWidth = math.max(gb.width, 1e-3);
       final glyphLeft = gb.left;
 
-      final double letterOffsetX = cursorX;
+      // X anchor: place leftmost stroke of glyph at cursorX
+      final double letterOffsetX = cursorX - glyphLeft * scale;
 
-      // Build strokes for this letter:
+      // Y anchor: baseline alignment
+      final double letterOffsetY =
+          baselineWorldY - baselineGlyphScaled;
+
       for (final stroke in glyph.cubics) {
         final ptsRaw = _sampleCubicStroke(stroke, upscale: scale);
         if (ptsRaw.length < 2) continue;
 
-        // IMPORTANT:
-        //  - subtract gb.left so local x is "left aligned" per glyph
-        //  - subtract baselineGlyph so y is baseline-relative
         final ptsPlaced = ptsRaw
             .map(
               (p) => Offset(
-                (p.dx - glyphLeft) * scale + letterOffsetX,
-                (p.dy - baselineGlyph) * scale + baselineWorldY,
+                p.dx + letterOffsetX,
+                p.dy + letterOffsetY,
               ),
             )
             .toList(growable: false);
@@ -711,9 +731,8 @@ class _VectorViewerScreenState extends State<VectorViewerScreen>
         );
       }
 
-      // Advance cursor by *actual* glyph width + fixed gap
       final glyphWidthScaled = glyphWidth * scale;
-      cursorX += glyphWidthScaled + _textLetterGapPx;
+      cursorX += glyphWidthScaled + letterGapPx;
     }
 
     if (newStrokes.isEmpty) {
@@ -1003,7 +1022,7 @@ class _VectorViewerScreenState extends State<VectorViewerScreen>
                     ],
                   ),
                   const SizedBox(height: 4),
-                  TextField(
+                                    TextField(
                     controller: _textSizeController,
                     style:
                         const TextStyle(color: Colors.white, fontSize: 12),
@@ -1021,6 +1040,25 @@ class _VectorViewerScreenState extends State<VectorViewerScreen>
                     keyboardType: const TextInputType.numberWithOptions(
                         decimal: true, signed: false),
                   ),
+                  const SizedBox(height: 4),
+                  // NEW: letter gap factor
+                  TextField(
+                    controller: _textGapController,
+                    style: const TextStyle(color: Colors.white, fontSize: 12),
+                    decoration: const InputDecoration(
+                      labelText: 'Letter gap (px)',
+                      labelStyle: TextStyle(color: Colors.white54, fontSize: 11),
+                      filled: true,
+                      fillColor: Color(0xFF222222),
+                      border: OutlineInputBorder(),
+                      isDense: true,
+                      contentPadding:
+                          EdgeInsets.symmetric(horizontal: 8, vertical: 6),
+                    ),
+                    keyboardType: const TextInputType.numberWithOptions(
+                        decimal: true, signed: false),
+                  ),
+
                   const SizedBox(height: 4),
                   ElevatedButton(
                     onPressed: _writeTextFromUi,
@@ -1117,7 +1155,7 @@ class _VectorViewerScreenState extends State<VectorViewerScreen>
                       });
                     },
                     onChangeEnd: (_) {
-                      if (_animStrokes.isNotEmpty) {
+                      if (_animStrokes.isNotEmpty && !_animIsText) {
                         _rebuildDrawableFromCurrentStrokes();
                       }
                     },
@@ -1423,8 +1461,6 @@ class _VectorViewerScreenState extends State<VectorViewerScreen>
     return Rect.fromLTWH(minX, minY, w, h);
   }
 
-  /// Downsample a polyline to at most [maxPoints] points.
-  /// Keeps endpoints and roughly preserves shape.
   List<Offset> _downsamplePolyline(List<Offset> pts, int maxPoints) {
     final n = pts.length;
     if (n <= maxPoints || maxPoints <= 2) return pts;
@@ -1557,7 +1593,7 @@ class _VectorViewerScreenState extends State<VectorViewerScreen>
     return strokes;
   }
 
-    DrawableStroke _makeDrawableFromPoints({
+  DrawableStroke _makeDrawableFromPoints({
     required String jsonName,
     required Offset objectOrigin,
     required double objectScale,
@@ -2089,4 +2125,3 @@ class WhiteboardPainter extends CustomPainter {
       old.boardWidth != boardWidth ||
       old.boardHeight != boardHeight;
 }
-
