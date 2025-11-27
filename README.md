@@ -48,6 +48,10 @@ Setting up program and Running: \
 
 Tweak and play around with params based on usecase
 
+Changing fonts:
+Drop in an otf file in whiteboard_backend, go into ReadFontToPng.py and change the FONT_PATH to whatever you need \
+Run ReadFontToPng.py
+
 
 *Setting up flux - currently unused
 --

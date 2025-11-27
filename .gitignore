@@ -23,6 +23,9 @@ staticfiles/
 media/
 *.bak
 
+#font files
+*.otf
+
 #temporary
 outputs/
 ResearchImages/
