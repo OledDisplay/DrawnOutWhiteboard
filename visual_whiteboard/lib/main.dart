@@ -9,36 +9,6 @@ void main() {
   runApp(const WhiteboardApp());
 }
 
-/// Find the whiteboard_backend folder starting from Directory.current
-/// and walking upwards. Then append [subdir].
-static String _resolveBackendSubdir(String subdir) {
-  // Start where the process is running (for Windows desktop:
-  // build/windows/x64/runner/Debug by default).
-  var dir = Directory.current;
-
-  // Walk up at most 10 levels to be safe.
-  for (int i = 0; i < 10; i++) {
-    final candidate =
-        Directory('${dir.path}\\whiteboard_backend');
-    if (candidate.existsSync()) {
-      if (subdir.isEmpty) return candidate.path;
-      return '${candidate.path}\\$subdir';
-    }
-
-    final parent = dir.parent;
-    if (parent.path == dir.path) {
-      // Reached filesystem root; stop.
-      break;
-    }
-    dir = parent;
-  }
-
-  // Fallback: just assume current dir has whiteboard_backend next to it.
-  // This will fail loudly if it's wrong.
-  return '${Directory.current.path}\\whiteboard_backend\\$subdir';
-}
-
-
 class WhiteboardApp extends StatelessWidget {
   const WhiteboardApp({super.key});
 
@@ -389,6 +359,36 @@ class _VectorViewerScreenState extends State<VectorViewerScreen>
   }
 
   // ------------------- GLYPH LOADING (TEXT) -------------------
+
+  /// Find the whiteboard_backend folder starting from Directory.current
+  /// and walking upwards. Then append [subdir].
+  static String _resolveBackendSubdir(String subdir) {
+    // Start where the process is running (for Windows desktop:
+    // build/windows/x64/runner/Debug by default).
+    var dir = Directory.current;
+
+    // Walk up at most 10 levels to be safe.
+    for (int i = 0; i < 10; i++) {
+      final candidate =
+          Directory('${dir.path}\\whiteboard_backend');
+      if (candidate.existsSync()) {
+        if (subdir.isEmpty) return candidate.path;
+        return '${candidate.path}\\$subdir';
+      }
+
+      final parent = dir.parent;
+      if (parent.path == dir.path) {
+        // Reached filesystem root; stop.
+        break;
+      }
+      dir = parent;
+    }
+
+    // Fallback: just assume current dir has whiteboard_backend next to it.
+    // This will fail loudly if it's wrong.
+    return '${Directory.current.path}\\whiteboard_backend\\$subdir';
+  }
+
 
   Future<GlyphData?> _getGlyphForCode(int codeUnit) async {
     if (_glyphCache.containsKey(codeUnit)) {
