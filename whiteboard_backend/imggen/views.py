@@ -232,8 +232,8 @@ def generate_images_batch(request):
 def research_images(request):
     """
     {
-      "query": eukaryotic cell,
-      "subject": Biology
+    "query": "eukaryotic cell",
+    "subject": "Biology"
     }
     """
     if request.method != "POST":

@@ -1,8 +1,8 @@
-# smart_hits.py
 from __future__ import annotations
 import re
-from typing import List, Tuple, Optional, Iterable, Set
+from typing import List, Tuple, Optional, Iterable, Set, Any
 from bs4 import BeautifulSoup, Tag
+import numpy as np
 
 # ---------- lightweight helpers ----------
 
@@ -44,6 +44,68 @@ def _nearest_heading(node: Tag) -> Optional[Tag]:
                 return sib
         cur = cur.parent
     return None
+
+def _split_sentences(text: str) -> List[str]:
+    """
+    Very lightweight sentence splitter: split on punctuation followed by whitespace.
+    Good enough for short HTML paragraphs.
+    """
+    text = (text or "").strip()
+    if not text:
+        return []
+    parts = re.split(r"(?<=[.!?])\s+", text)
+    return [p.strip() for p in parts if p.strip()]
+
+def _find_context_window(text: str, base_query: str, profile: "QueryProfile") -> str:
+    """
+    Take current, previous and next sentence around the first hit of the base_query
+    (or any query token); fall back to the middle sentence if nothing matches.
+    """
+    sents = _split_sentences(text)
+    if not sents:
+        return text or ""
+
+    q = (base_query or "").strip().lower()
+    hit_idx: Optional[int] = None
+
+    # First try exact phrase
+    if q:
+        for i, sent in enumerate(sents):
+            if q in sent.lower():
+                hit_idx = i
+                break
+
+    # Fallback: any query token
+    if hit_idx is None and profile.query_tokens:
+        q_set = set(profile.query_tokens)
+        for i, sent in enumerate(sents):
+            toks = set(_content_tokens(sent))
+            if q_set & toks:
+                hit_idx = i
+                break
+
+    # Fallback: middle sentence
+    if hit_idx is None:
+        hit_idx = len(sents) // 2
+
+    start = max(0, hit_idx - 1)
+    end = min(len(sents), hit_idx + 2)  # [start, end)
+    return " ".join(sents[start:end])
+
+def _to_vec(x: Any) -> np.ndarray:
+    arr = np.asarray(x, dtype=float)
+    if arr.ndim > 1:
+        arr = arr.reshape(-1)
+    return arr
+
+def _cosine_sim(a: Any, b: Any) -> float:
+    va = _to_vec(a)
+    vb = _to_vec(b)
+    na = np.linalg.norm(va)
+    nb = np.linalg.norm(vb)
+    if na == 0.0 or nb == 0.0:
+        return 0.0
+    return float(va.dot(vb) / (na * nb))
 
 # ---------- query profile ----------
 
@@ -164,7 +226,11 @@ def smart_find_hits_in_soup(
     lemma_obj: dict,
     *,
     min_score: float = 0.60,
-    top_k: Optional[int] = None
+    top_k: Optional[int] = None,
+    encoder: Optional[Any] = None,
+    query_embedding: Optional[Any] = None,
+    sem_min_score: float = 0.45,
+    return_embedding: bool = True
 ) -> List[Tuple[Tag, float, dict]]:
     """
     Returns a ranked list of (node, score, details). Filter by min_score and optional top_k.
@@ -172,6 +238,8 @@ def smart_find_hits_in_soup(
     profile = QueryProfile(base_query, lemma_obj)
     if not profile.any_tokens() and not profile.exact_rx:
         return []
+
+    use_semantic = encoder is not None and query_embedding is not None
 
     cands = _candidate_nodes(soup)
     scored: List[Tuple[Tag,float,dict]] = []
@@ -188,10 +256,28 @@ def smart_find_hits_in_soup(
 
         text = _text_of(n)
         s, details = _score_block(profile, text, htxt)
-        if s >= min_score:
-            details["heading_text"] = htxt[:120]
-            details["snippet"] = text[:160]
-            scored.append((n, s, details))
+        if s < min_score:
+            continue
+
+        # Build context window around the hit
+        ctx_text = _find_context_window(text, base_query, profile)
+        details["heading_text"] = htxt[:120]
+        details["snippet"] = text[:160]
+        details["ctx_text"] = ctx_text[:240]
+
+        # Optional semantic filtering with MiniLM (or any sentence encoder)
+        if use_semantic:
+            ctx_emb = encoder.encode(ctx_text)
+            sem_score = _cosine_sim(query_embedding, ctx_emb)
+            details["sem_score"] = sem_score
+            if return_embedding:
+                details["ctx_embedding"] = ctx_emb
+            # light but meaningful filter: we already know text contains the prompt/lemmas,
+            # so we just drop clearly off-context hits
+            if sem_score < sem_min_score:
+                continue
+
+        scored.append((n, s, details))
 
     scored.sort(key=lambda x: x[1], reverse=True)
     return scored[:top_k] if top_k else scored
