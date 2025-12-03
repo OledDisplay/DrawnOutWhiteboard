@@ -21,6 +21,9 @@ except Exception as _e:
     _EMBED_MODEL = None
     print(f"[EMBED] sentence-transformers not available or model load failed: {_e}", flush=True)
 
+from ImageRanker import SiglipBackend, rerank_image_candidates_siglip
+
+
 ROOT_DIR = Path(__file__).resolve().parent
 SOURCE_PATH = os.path.join(ROOT_DIR, "source_urls")
 IMAGES_PATH = os.path.join(ROOT_DIR, "ResearchImages")
@@ -1390,12 +1393,10 @@ def download_image(session: requests.Session, img_url: str, dest_dir: str) -> Op
 
 
 
-    
 
-
-def _extract_img_candidates_near_hit(node, soup, page_url, *, per_hit_cap=2):
+def _extract_img_candidates_near_hit(node, soup, page_url, *, per_hit_cap: Optional[int] = None):
     """
-    Return up to per_hit_cap best image URLs near a hit node.
+    Return image URLs near a hit node (optionally capped by per_hit_cap).
     Handles <img src>, data-* sources, srcset (chooses largest), <picture><source>,
     and <a href="...img.ext">. Searches nearest <figure>/<section>/<article> ancestors,
     then a limited sibling/parent scope, then (last) a small global fallback.
@@ -1414,6 +1415,8 @@ def _extract_img_candidates_near_hit(node, soup, page_url, *, per_hit_cap=2):
             return
         key = (u_abs, why)
         if key in seen:
+            return
+        if per_hit_cap is not None and len(cand) >= per_hit_cap:
             return
         seen.add(key)
         cand.append((u_abs, why))
@@ -1478,14 +1481,14 @@ def _extract_img_candidates_near_hit(node, soup, page_url, *, per_hit_cap=2):
                 if srcset:
                     url = srcset.split(",")[-1].strip().split()[0]
                     _add(url, "picture/srcset")
-                    if len(cand) >= per_hit_cap:
+                    if per_hit_cap is not None and len(cand) >= per_hit_cap:
                         return cand
             img = pic.find("img")
             if img:
                 url = _img_url_from_tag(img)
                 if url:
                     _add(url, "picture/img")
-                    if len(cand) >= per_hit_cap:
+                    if per_hit_cap is not None and len(cand) >= per_hit_cap:
                         return cand
 
         # plain <img>
@@ -1493,7 +1496,7 @@ def _extract_img_candidates_near_hit(node, soup, page_url, *, per_hit_cap=2):
             url = _img_url_from_tag(img)
             if url:
                 _add(url, "img")
-                if len(cand) >= per_hit_cap:
+                if per_hit_cap is not None and len(cand) >= per_hit_cap:
                     return cand
 
         # <a href="...img.ext">
@@ -1501,13 +1504,16 @@ def _extract_img_candidates_near_hit(node, soup, page_url, *, per_hit_cap=2):
             href = (a.get("href") or "").strip()
             if href and re.search(r"\.(png|jpe?g|gif|webp|svg|tiff?)($|\?)", href, re.I):
                 _add(href, "a->image")
-                if len(cand) >= per_hit_cap:
+                if per_hit_cap is not None and len(cand) >= per_hit_cap:
                     return cand
 
-        if len(cand) >= per_hit_cap:
+        if per_hit_cap is not None and len(cand) >= per_hit_cap:
             break
 
-    return cand[:per_hit_cap]
+    if per_hit_cap is not None:
+        return cand[:per_hit_cap]
+    return cand
+
     
 def partition_anchors(cur: str, anchors: list[str], allowed_fn):
     """
@@ -1561,10 +1567,11 @@ def stage2_drill_search_and_images(
     html_cache: dict,
     anchors_cache: dict,
     global_image_cap: int | None = None,
-    per_hit_cap: int = 2,
+    per_hit_cap: Optional[int] = None,
     fatigue_limit: int = 25,   # trigger only *after first image*, after 25 dry pages
     encoder: Optional[Any] = None,
     query_embedding: Optional[Any] = None,
+    prompt_embedding: Optional[Any] = None,
 ) -> list[str]:
     phrase_rxs, _ = _compile_phrase_regexes_adapter(base_query, lemma_obj)
 
@@ -1617,16 +1624,28 @@ def stage2_drill_search_and_images(
             dedupe_set=globals().setdefault("_saved_img_urls", set()),
         )
         if dest:
-            dbg(f"[IMG] saved {dest}")
             meta = {
                 "source_kind": "domain_search",
                 "page_url": page_url,
                 "base_context": base_query,
             }
+            if isinstance(candidate, str):
+                meta["image_url"] = candidate
+            if prompt_embedding is not None:
+                meta["prompt_embedding"] = prompt_embedding
             if hit_meta:
                 meta.update(hit_meta)
+
+            if "ctx_score" in meta or "ctx_sem_score" in meta:
+                meta["ctx_confidence"] = meta.get("ctx_sem_score", meta.get("ctx_score"))
+                dbg(f"[CTX][domain] saved {dest} ctx_score={meta.get('ctx_score')} "
+                    f"ctx_sem={meta.get('ctx_sem_score')} conf={meta.get('ctx_confidence')}")
+            else:
+                dbg(f"[CTX][domain] saved {dest} ctx=n/a")
+
             _register_image_metadata(dest, meta)
             saved_paths.append(dest)
+            dbg(f"[IMG] saved {dest}")
             return True
         return False
 
@@ -1635,15 +1654,23 @@ def stage2_drill_search_and_images(
             if _global_cap_hit():
                 raise _StopAll()
             _dbg_hit_reason(page_url, node, phrase_rxs[0])
-            hit_meta = {
-                "hit_score": score,
-                "hit_heading": details.get("heading_text"),
-                "hit_snippet": details.get("snippet"),
-                "ctx_text": details.get("ctx_text"),
-                "ctx_sem_score": details.get("sem_score"),
+
+            ctx_score = details.get("ctx_score", score)
+            ctx_sem = details.get("ctx_sem_score", details.get("sem_score"))
+
+            # unify context metadata schema (no ddg-only / domain-only extras)
+            raw_ctx_meta = {
+                "ctx_text": details.get("ctx_text") or details.get("snippet") or details.get("heading_text"),
+                "ctx_score": ctx_score,
+                "ctx_sem_score": ctx_sem,
             }
             if "ctx_embedding" in details:
-                hit_meta["ctx_embedding"] = details["ctx_embedding"]
+                raw_ctx_meta["ctx_embedding"] = details["ctx_embedding"]
+            if "ctx_score" in raw_ctx_meta or "ctx_sem_score" in raw_ctx_meta:
+                raw_ctx_meta["ctx_confidence"] = raw_ctx_meta.get("ctx_sem_score", raw_ctx_meta.get("ctx_score"))
+
+            hit_meta = _normalize_ctx_meta(raw_ctx_meta)
+
             cands = _extract_img_candidates_near_hit(node, tsoup, page_url, per_hit_cap=per_hit_cap) or []
             for img_url, why in cands:
                 if _global_cap_hit():
@@ -1654,6 +1681,7 @@ def stage2_drill_search_and_images(
                     if per_root_counter[0] >= hard_image_cap:
                         dbg(f"[S2] PER-ROOT CAP {hard_image_cap} reached → next root")
                         raise _NextRoot()
+
 
     # === TERMINAL PROCESSOR ===
     def _process_terminal_url(tu: str, *, per_root_counter: list[int], fatigue_counter: list[int]):
@@ -1672,11 +1700,11 @@ def stage2_drill_search_and_images(
             tsoup,
             base_query,
             lemma_obj,
-            min_score=0.60,
+            min_score=0.7,          
             top_k=None,
             encoder=encoder,
             query_embedding=query_embedding,
-            sem_min_score=0.45,
+            sem_min_score=0.5,
             return_embedding=True,
         )
         dbg(f"[S2][TERM] url={tu} hits={len(ranked)}")
@@ -1773,6 +1801,7 @@ def stage2_drill_search_and_images(
         dbg(f"[S2] GLOBAL STOP total_images={len(saved_paths)} (global_cap={global_image_cap})")
 
     return saved_paths
+
 
 
 
@@ -2105,7 +2134,8 @@ PARSERS = {
 # =========================
 def handle_result_no_api(source: Source, query: str, subj: str, hard_image_cap: int = 5,
                          encoder: Optional[Any] = None,
-                         query_embedding: Optional[Any] = None):
+                         query_embedding: Optional[Any] = None,
+                         base_ctx_embedding: Optional[Any] = None):
     def uniq_keep_order(items):
         seen = set()
         out = []
@@ -2207,20 +2237,22 @@ def handle_result_no_api(source: Source, query: str, subj: str, hard_image_cap: 
     # NEW STAGE 2 (drill + text search + image download) — pass the *roots* actually selected
     dbg(f"[NOAPI] Stage 2 starting with roots={len(roots)} hard_image_cap={hard_image_cap}")
     saved = stage2_drill_search_and_images(
-        roots=roots,                      # ← FIX: use roots, not valid_endpoints
+        roots=roots,                      # ← use roots
         base_query=query,
-        lemma_obj=lemma_obj_query,        # ← FIX: use query lemmas for text matching
-        hard_image_cap=hard_image_cap,    # ← honor caller's cap
+        lemma_obj=lemma_obj_query,        # ← use query lemmas for text matching
+        hard_image_cap=hard_image_cap,    # ← per-root cap (now bumped at call site)
         session=session,
         html_cache=html_cache,
         anchors_cache=anchors_cache,
         encoder=encoder,
         query_embedding=query_embedding,
+        prompt_embedding=base_ctx_embedding,
+        per_hit_cap = 1,
     )
-
 
     source.img_paths = saved
     return saved
+
 
 
 def _download_to(u: str, dest_dir: str, idx: int, dbg=print) -> str | None:
@@ -2325,7 +2357,8 @@ def ddg_cc_image_harvest(query: str,
       - streams results gently
       - retries on 403 with backoff + jitter
       - downloads ONLY if the result page shows CC evidence
-      - optionally runs smart hits on the CC page to attach context/embedding
+      - attaches per-image context from ddg_image_context (filename/alt/title + nearby text)
+      - optionally attaches context embedding/semantic score
       - stops early if 20 consecutive pages have no CC evidence
     """
     dest_dir = os.path.join(IMAGES_PATH, "ddg")
@@ -2423,34 +2456,31 @@ def ddg_cc_image_harvest(query: str,
         # we *did* find CC evidence → reset streak
         no_cc_streak = 0
 
-        ctx_meta = None
-        if lemma_obj and encoder is not None and query_embedding is not None:
+        # --- per-image context (filename/alt/title + nearby text) ---
+                # --- per-image context (filename/alt/title + nearby text) ---
+        ctx_meta: dict = {}
+        try:
+            soup = BeautifulSoup(html, "html.parser")
             try:
-                soup = BeautifulSoup(html, "html.parser")
-                ranked = smart_find_hits_in_soup(
+                from ddg_image_context import ddg_extract_image_context
+                ctx_meta = ddg_extract_image_context(
                     soup,
-                    query,
-                    lemma_obj,
-                    min_score=0.55,
-                    top_k=3,
+                    page_url=page_url,
+                    image_url=img_url,
+                    base_query=query,
+                    lemma_obj=lemma_obj or {},
                     encoder=encoder,
                     query_embedding=query_embedding,
-                    sem_min_score=0.45,
                     return_embedding=True,
-                )
-                if ranked:
-                    node, score, details = ranked[0]
-                    ctx_meta = {
-                        "hit_score": score,
-                        "hit_heading": details.get("heading_text"),
-                        "hit_snippet": details.get("snippet"),
-                        "ctx_text": details.get("ctx_text"),
-                        "ctx_sem_score": details.get("sem_score"),
-                    }
-                    if "ctx_embedding" in details:
-                        ctx_meta["ctx_embedding"] = details["ctx_embedding"]
+                ) or {}
+                # normalize so ddg + domain use exactly the same ctx_* fields
+                ctx_meta = _normalize_ctx_meta(ctx_meta)
+            except ImportError as e:
+                dbg(f"[DDG] ddg_image_context import error: {e}")
             except Exception as e:
-                dbg(f"[DDG] smart_hits error: {e}")
+                dbg(f"[DDG] ddg_extract_image_context error: {e}")
+        except Exception as e:
+            dbg(f"[DDG] context soup error: {e}")
 
         # ok to download the image
         p = _download_to(img_url, dest_dir, len(saved), dbg=dbg)
@@ -2459,24 +2489,28 @@ def ddg_cc_image_harvest(query: str,
                 "source_kind": "ddg",
                 "page_url": page_url,
                 "image_url": img_url,
+                "base_context": query,
             }
-            
+
             if base_ctx_embedding is not None:
-                if hasattr(base_ctx_embedding, "tolist"):
-                    meta["base_ctx_embedding"] = base_ctx_embedding.tolist()
-                else:
-                    meta["base_ctx_embedding"] = list(base_ctx_embedding)
+                meta["prompt_embedding"] = base_ctx_embedding
 
             if ctx_meta:
                 meta.update(ctx_meta)
-            if ctx_meta:
-                meta.update(ctx_meta)
+
+            if "ctx_score" in meta or "ctx_sem_score" in meta:
+                meta["ctx_confidence"] = meta.get("ctx_sem_score", meta.get("ctx_score"))
+                dbg(f"[DDG][CTX] saved {p} ctx_score={meta.get('ctx_score')} "
+                    f"ctx_sem={meta.get('ctx_sem_score')} conf={meta.get('ctx_confidence')}")
+            else:
+                dbg(f"[DDG][CTX] saved {p} ctx=n/a")
+
             _register_image_metadata(p, meta)
             saved.append(p)
-            dbg(f"[DDG] saved ({len(saved)}/{target_count}) {p}")
 
-    dbg(f"[DDG] done saved={len(saved)}")
+    dbg(f"[DDG] saved ({len(saved)}/{target_count}) {p}")
     return saved
+
 
 
 
@@ -2529,26 +2563,63 @@ def _json_safe(obj):
         return [_json_safe(x) for x in obj]
     return obj
 
+def _normalize_ctx_meta(ctx_meta: dict) -> dict:
+    """
+    Keep only unified context fields so DDG and domain_search share the same schema.
+    Allowed keys:
+      - ctx_text
+      - ctx_embedding
+      - ctx_score
+      - ctx_sem_score
+      - ctx_confidence
+    """
+    if not ctx_meta:
+        return {}
+    allowed = {"ctx_text", "ctx_embedding", "ctx_score", "ctx_sem_score", "ctx_confidence"}
+    out = {}
+    for k in allowed:
+        if k in ctx_meta:
+            out[k] = ctx_meta[k]
+    return out
 
 
-def collect_unique_images(images_root: str, dbg=print):
+
+def collect_unique_images(images_root: str, base_ctx_embedding=None, prompt_text: str | None = None, dbg=print):
     """
-    Walks `images_root`, finds unique images, and copies them into
-    <images_root>/UniqueImages.
-    Dedup rules:
-      1) Exact file content (SHA1) → drop duplicates.
-      2) Same perceptual hash (aHash64) → drop later ones (handles 1:1 resized copies).
-    Keeps the first encountered path for each group.
-    Also aggregates IMAGE_METADATA into a per-unique-image map and writes
-    <UniqueImages>/image_metadata.json.
+    Walks `images_root`, dedupes images, ranks them with SigLIP + context,
+    and keeps ONLY the top 10 in <images_root>/UniqueImages.
+
+    Pipeline:
+      1) Deduplicate by SHA1 and perceptual hash, aggregate IMAGE_METADATA per canonical path.
+      2) For each image, pick the best context (highest ctx_confidence) as its representative.
+      3) Build candidates and run SigLIP-based reranking (top_n=30, final_k=10).
+      4) Copy ONLY the 10 winners into UniqueImages.
+      5) Write:
+         - image_metadata_core.json     (source/page/url/etc., no heavy vectors or scores)
+         - image_metadata_context.json  (prompt embedding + SigLIP embedding + scores + per-context ctx_*)
+
+    SigLIP outputs added to context JSON per image:
+      - clip_embedding   (SigLIP image embedding)
+      - clip_score       (SigLIP image score)
+      - confidence_score (context centroid+prompt score)
+      - final_score      (65% confidence, 35% clip_score)
     """
-    unique_paths: list[str] = []
     unique_dir = os.path.join(images_root, "UniqueImages")
     os.makedirs(unique_dir, exist_ok=True)
 
-    sha1_to_dest: Dict[str, str] = {}
-    ahash_to_dest: Dict[str, str] = {}
-    unique_meta: Dict[str, List[dict]] = {}
+    # Clear previous run outputs (files only)
+    for fname in os.listdir(unique_dir):
+        fpath = os.path.join(unique_dir, fname)
+        if os.path.isfile(fpath):
+            try:
+                os.remove(fpath)
+            except Exception as e:
+                dbg(f"[collect][warn][cleanup] {fpath} -> {e}")
+
+    # 1) Dedupe by SHA1 + perceptual hash, aggregate metadata by canonical path
+    sha1_to_canonical: Dict[str, str] = {}
+    ahash_to_canonical: Dict[str, str] = {}
+    canonical_metas: Dict[str, List[dict]] = {}
 
     for dirpath, _, filenames in os.walk(images_root):
         # skip copying UniqueImages into itself
@@ -2567,55 +2638,211 @@ def collect_unique_images(images_root: str, dbg=print):
                 dbg(f"[collect][skip][read] {path} -> {e}")
                 continue
 
-            dest_path = sha1_to_dest.get(sha1)
+            canonical = sha1_to_canonical.get(sha1)
 
             # 2) perceptual hash if needed
-            if dest_path is None:
+            if canonical is None:
                 ah = _ahash64(path)
-                if ah is not None and ah in ahash_to_dest:
-                    dest_path = ahash_to_dest[ah]
+                if ah is not None and ah in ahash_to_canonical:
+                    canonical = ahash_to_canonical[ah]
+                else:
+                    canonical = path
+                    sha1_to_canonical[sha1] = canonical
+                    if ah is not None:
+                        ahash_to_canonical[ah] = canonical
 
-            # 3) new unique -> copy
-            if dest_path is None:
-                try:
-                    dest_path = os.path.join(unique_dir, os.path.basename(path))
-                    base, ext = os.path.splitext(dest_path)
-                    n = 1
-                    while os.path.exists(dest_path):
-                        dest_path = f"{base}_{n}{ext}"
-                        n += 1
-                    shutil.copy2(path, dest_path)
-                    unique_paths.append(dest_path)
-                    dbg(f"[collect][copy] {path} -> {dest_path}")
-                except Exception as e:
-                    dbg(f"[collect][err][copy] {path} -> {e}")
-                    continue
-
-                sha1_to_dest[sha1] = dest_path
-                ah_local = _ahash64(path)
-                if ah_local is not None:
-                    ahash_to_dest[ah_local] = dest_path
-
-            # 4) merge metadata for this path into the unique dest
+            # 3) merge metadata for this path into the canonical path
             metas = IMAGE_METADATA.get(path)
             if metas:
-                lst = unique_meta.get(dest_path)
+                lst = canonical_metas.get(canonical)
                 if lst is None:
-                    unique_meta[dest_path] = list(metas)
+                    canonical_metas[canonical] = list(metas)
                 else:
                     lst.extend(metas)
 
-    # write metadata JSON
+    if not canonical_metas:
+        dbg("[collect] no images with metadata found; nothing to rank")
+        return []
+
+    # 2) Build ranking candidates from best context per image
+    candidates: List[dict] = []
+    for img_path, metas in canonical_metas.items():
+        # pick prompt embedding for this image (if any meta has it), else global base_ctx_embedding
+        img_prompt_emb = None
+        for m in metas:
+            pe = m.get("prompt_embedding") or m.get("base_ctx_embedding")
+            if pe is not None:
+                img_prompt_emb = pe
+                break
+        if img_prompt_emb is None:
+            img_prompt_emb = base_ctx_embedding
+
+        # best context for ranking
+        best_ctx = None
+        for m in metas:
+            ctx_emb = m.get("ctx_embedding")
+            if ctx_emb is None:
+                continue
+            ctx_conf = m.get("ctx_confidence", m.get("ctx_sem_score", m.get("ctx_score", 0.0)))
+            if best_ctx is None or ctx_conf > best_ctx["ctx_confidence"]:
+                best_ctx = {
+                    "ctx_embedding": ctx_emb,
+                    "ctx_text": m.get("ctx_text"),
+                    "ctx_score": m.get("ctx_score"),
+                    "ctx_sem_score": m.get("ctx_sem_score"),
+                    "ctx_confidence": float(ctx_conf),
+                }
+
+        if best_ctx is None:
+            # no usable context embedding → can't rank this image
+            continue
+
+        candidates.append(
+            {
+                "image_path": img_path,
+                "ctx_embedding": best_ctx["ctx_embedding"],
+                "prompt_embedding": img_prompt_emb,
+                "ctx_confidence": best_ctx["ctx_confidence"],
+                "ctx_score": best_ctx["ctx_score"],
+                "ctx_sem_score": best_ctx["ctx_sem_score"],
+                "ctx_text": best_ctx["ctx_text"] or "",
+            }
+        )
+
+    if not candidates:
+        dbg("[collect] no candidates with ctx_embedding; skipping SigLIP ranking")
+        return []
+
+    # 3) Run SigLIP ranking (top 30 → final 10)
+    prompt_text = prompt_text or ""
+    backend = SiglipBackend()
+    ranked = rerank_image_candidates_siglip(
+        candidates=candidates,
+        prompt_text=prompt_text,
+        backend=backend,
+        top_n=30,
+        final_k=10,
+    )
+
+    if not ranked:
+        dbg("[collect] SigLIP ranking returned no winners")
+        return []
+
+    winners_by_path = {w["image_path"]: w for w in ranked}
+
+    # 4) Copy ONLY winners to UniqueImages and build metadata
+    unique_paths: List[str] = []
+    core_meta: Dict[str, List[dict]] = {}
+    ctx_meta: Dict[str, dict] = {}
+
+    heavy_fields = {
+        "ctx_embedding",
+        "prompt_embedding",
+        "base_ctx_embedding",
+        "ctx_score",
+        "ctx_sem_score",
+        "sem_score",
+        "ctx_confidence",
+        "clip_embedding",
+        "clip_score",
+        "confidence_score",
+        "final_score",
+    }
+
+    for img_path, metas in canonical_metas.items():
+        winner = winners_by_path.get(img_path)
+        if winner is None:
+            continue  # not in top 10
+
+        # copy image into UniqueImages (avoid name collisions)
+        dest_path = os.path.join(unique_dir, os.path.basename(img_path))
+        base, ext = os.path.splitext(dest_path)
+        n = 1
+        while os.path.exists(dest_path):
+            dest_path = f"{base}_{n}{ext}"
+            n += 1
+        try:
+            shutil.copy2(img_path, dest_path)
+            unique_paths.append(dest_path)
+            dbg(f"[collect][copy] {img_path} -> {dest_path}")
+        except Exception as e:
+            dbg(f"[collect][err][copy] {img_path} -> {e}")
+            continue
+
+        # per-image prompt embedding (reuse if present on any meta)
+        img_prompt_emb = None
+        for m in metas:
+            pe = m.get("prompt_embedding") or m.get("base_ctx_embedding")
+            if pe is not None:
+                img_prompt_emb = pe
+                break
+        if img_prompt_emb is None:
+            img_prompt_emb = base_ctx_embedding
+
+        # core metadata + per-context blocks
+        core_list: List[dict] = []
+        ctx_contexts: List[dict] = []
+
+        for m in metas:
+            # core metadata = everything except heavy vector + scoring fields
+            m_core = {}
+            for k, v in m.items():
+                if k in heavy_fields:
+                    continue
+                m_core[k] = v
+            if m_core:
+                core_list.append(m_core)
+
+            # context block if we have any context-ish info
+            has_ctx = any(
+                k in m
+                for k in ("ctx_embedding", "ctx_text", "ctx_score", "ctx_sem_score", "ctx_confidence")
+            )
+            if has_ctx:
+                ctx_conf = m.get("ctx_confidence", m.get("ctx_sem_score", m.get("ctx_score")))
+                ctx_entry = {
+                    "source_kind": m.get("source_kind"),
+                    "source_name": m.get("source_name"),
+                    "page_url": m.get("page_url"),
+                    "image_url": m.get("image_url"),
+                    "ctx_text": m.get("ctx_text"),
+                    "ctx_score": m.get("ctx_score"),
+                    "ctx_sem_score": m.get("ctx_sem_score"),
+                    "ctx_confidence": ctx_conf,
+                    "ctx_embedding": m.get("ctx_embedding"),
+                }
+                ctx_contexts.append(ctx_entry)
+
+        if core_list:
+            core_meta[dest_path] = core_list
+
+        ctx_meta[dest_path] = {
+            "prompt_embedding": img_prompt_emb,
+            "clip_embedding": winner.get("clip_embedding"),
+            "clip_score": winner.get("clip_score"),
+            "confidence_score": winner.get("confidence_score"),
+            "final_score": winner.get("final_score"),
+            "contexts": ctx_contexts,
+        }
+
+    # 5) write metadata JSONs (SigLIP vectors & scores go into the context JSON)
     try:
-        meta_path = os.path.join(unique_dir, "image_metadata.json")
-        with open(meta_path, "w", encoding="utf-8") as f:
-            json.dump(_json_safe(unique_meta), f, indent=2, ensure_ascii=False)
-        dbg(f"[collect] metadata saved to {meta_path}")
+        core_path = os.path.join(unique_dir, "image_metadata_core.json")
+        with open(core_path, "w", encoding="utf-8") as f:
+            json.dump(_json_safe(core_meta), f, indent=2, ensure_ascii=False)
+        dbg(f"[collect] core metadata saved to {core_path}")
+
+        ctx_path = os.path.join(unique_dir, "image_metadata_context.json")
+        with open(ctx_path, "w", encoding="utf-8") as f:
+            json.dump(_json_safe(ctx_meta), f, indent=2, ensure_ascii=False)
+        dbg(f"[collect] context metadata saved to {ctx_path}")
     except Exception as e:
         dbg(f"[collect][err][meta] {e}")
 
-    dbg(f"[collect] unique={len(unique_paths)} saved to {unique_dir}")
+    dbg(f"[collect] winners={len(unique_paths)} saved to {unique_dir}")
     return unique_paths
+
+
 
 def _embed_prompt_to_list(text: str):
     if _EMBED_MODEL is None:
@@ -2632,7 +2859,7 @@ def _embed_prompt_to_list(text: str):
 # =========================
 # MAIN
 # =========================
-def research(query : str, subj : str ):
+def research(query: str, subj: str):
 
     base_ctx_embedding = _embed_prompt_to_list(query)
 
@@ -2660,38 +2887,38 @@ def research(query : str, subj : str ):
     for src in sources:
         if src.type == "API":
             dbg(f"opened source {src.name} as api (parser='{src.name}'), sending request..")
-    #        status, data, built = send_request(src, settings)
-    #        dbg(f"sent request, responded {status}")
-    #        if status == 200 and data is not None:
-    #            try:
-    #                _ = PARSERS.get(src.name)
-    #                if _:
-    #                   _. __call__  # noqa: touch
-    #            except Exception:
-    #               pass
-    #        # parse regardless; the parser guards internally
-    #        if data is not None:
-    #            parse_fn = PARSERS.get(src.name)
-    #            if parse_fn:
-    #                parse_fn(src, data)
+            # status, data, built = send_request(src, settings)
+            # dbg(f"sent request, responded {status}")
+            # if status == 200 and data is not None:
+            #     try:
+            #         _ = PARSERS.get(src.name)
+            #         if _:
+            #             _. __call__  # noqa: touch
+            #     except Exception:
+            #         pass
+            # if data is not None:
+            #     parse_fn = PARSERS.get(src.name)
+            #     if parse_fn:
+            #         parse_fn(src, data)
         else:
             web_sources.append(src)
 
-
+    # DDG: CC-backed images with per-image context
     ddg_cc_image_harvest(
         query=query,
-        target_count=7,
+        target_count=20,              # higher cap so the new behaviour actually matters
         lemma_obj=lemma_obj_query,
         encoder=encoder,
         query_embedding=query_embedding,
-        base_ctx_embedding=base_ctx_embedding
+        base_ctx_embedding=base_ctx_embedding,
     )
-    
+
     for src in web_sources:
         dbg(f"opened source {src.name}, has no api, starting process..")
-        handle_result_no_api(src, query, subj, hard_image_cap=5,
+        handle_result_no_api(src, query, subj, hard_image_cap=25,
                              encoder=encoder,
-                             query_embedding=query_embedding)
+                             query_embedding=query_embedding,
+                             base_ctx_embedding=base_ctx_embedding)
 
     # attach base_context + source info for any images parsed from APIs (and also reinforce for no-api)
     for src in sources:
@@ -2705,8 +2932,10 @@ def research(query : str, subj : str ):
                 "source_name": src.name,
                 "base_context": query,
             }
+            if base_ctx_embedding is not None:
+                meta["prompt_embedding"] = base_ctx_embedding
             _register_image_metadata(p, meta)
     
-    unique = collect_unique_images(IMAGES_PATH, dbg)
+    unique = collect_unique_images(IMAGES_PATH, base_ctx_embedding, prompt_text=query, dbg=dbg)
     dbg(f"Unique images:{unique}")
     return unique
