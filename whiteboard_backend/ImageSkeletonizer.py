@@ -192,11 +192,17 @@ def process_one(path: Path, output : Path):
     print(f"[OK]  wrote {out_path}")
 
 
-def main():
+def skeletonize_images():
+
+    import shutil
+    if OUT_DIR.exists():
+        shutil.rmtree(OUT_DIR)
+    OUT_DIR.mkdir(parents=True, exist_ok=True)
+
     imgs = sorted(
         [
             p for p in IN_DIR.glob("*")
-            if p.suffix.lower() in (".png", ".jpg", ".jpeg", ".bmp", ".tif", ".tiff")
+            if p.suffix.lower() in (".png", ".jpg", ".jpeg", ".bmp", ".tif", ".tiff") and "edges" in p.stem.lower()
         ],
         key=lambda p: p.name.lower(),
     )
@@ -209,6 +215,3 @@ def main():
     for p in imgs:
         process_one(p, OUT_DIR)
 
-
-if __name__ == "__main__":
-    main()

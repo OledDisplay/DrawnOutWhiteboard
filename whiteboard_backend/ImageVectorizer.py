@@ -1079,7 +1079,13 @@ def _process_single(path: Path, output : Path) -> Tuple[str, dict]:
 
 # ------------------- MAIN -------------------
 
-def main():
+def vectorize_images():
+    
+    import shutil
+    if OUT_DIR.exists():
+        shutil.rmtree(OUT_DIR)
+    OUT_DIR.mkdir(parents=True, exist_ok=True)
+
     imgs = sorted([
         p for p in IN_DIR.glob("*")
         if p.suffix.lower() in (".png", ".jpg", ".jpeg", ".bmp", ".tif", ".tiff")
@@ -1091,6 +1097,3 @@ def main():
         src, meta = _process_single(p, OUT_DIR)
         print(f"[OK] {Path(src).name}: strokes={len(meta['strokes'])}, "
               f"time={meta['stats']['time_sec']}s")
-
-if __name__ == "__main__":
-    main()
