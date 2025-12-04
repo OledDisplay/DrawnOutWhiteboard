@@ -1,11 +1,42 @@
 # generator/views.py
 from django.views.decorators.csrf import csrf_exempt
-from django.http import JsonResponse, HttpResponseBadRequest
+from django.views.decorators.http import require_http_methods
+from django.http import JsonResponse, HttpResponseBadRequest, HttpResponseNotAllowed
+
 from pathlib import Path
 import json, time, uuid, requests
 from typing import List, Dict, Any, Optional
+
+from .models import WhiteboardObject
+from .utils import validate_image_json, validate_text_prompt
+
 from Imageresearcher import research
-#from ImagePreproccessor import process_images
+from ImagePreproccessor import proccess_images
+from ImageSkeletonizer import skeletonize_images
+from ImageVectorizer import vectorize_images
+from ImageVecOrganizer import organize_images
+
+
+"""
+
+"http://127.0.0.1:8000/research/"
+
+{
+"query": "eukaryotic cell",
+"subject": "Biology"
+}
+
+"""
+
+"""
+
+http://127.0.0.1:8000/preprocess/
+
+{
+"inputdir": "ResearchImages/UniqueImages"
+}
+
+"""
 
 # ── CONFIG ───────────────────────────────────────────────────────────────
 COMFY_SERVER = "http://127.0.0.1:8188"
@@ -230,12 +261,7 @@ def generate_images_batch(request):
 
 @csrf_exempt
 def research_images(request):
-    """
-    {
-    "query": "eukaryotic cell",
-    "subject": "Biology"
-    }
-    """
+
     if request.method != "POST":
         return HttpResponseBadRequest("POST JSON only")
 
@@ -272,12 +298,7 @@ def research_images(request):
 
 @csrf_exempt
 def process_images(request):
-    """
-    {
-    "inputdir": "ResearchImages/ddg",
-    "outputdir": "WhiteboardProccessedImages"
-    }
-    """
+
     if request.method != "POST":
         return HttpResponseBadRequest("POST JSON only")
     
@@ -298,22 +319,205 @@ def process_images(request):
         }, status=400)
 
     inpt = (body.get("inputdir") or "").strip()
-    output   = (body.get("outputdir") or "").strip()
-    if not inpt or not output:
-        return HttpResponseBadRequest("Missing 'inpt' or 'output'")
+    if not inpt:
+        return HttpResponseBadRequest("Missing 'inpt'")
     
     base = Path(__file__).resolve().parent.parent
     i_dir  = base / inpt
-    out_dir = base / output
     
-    out_dir.mkdir(exist_ok=True)
-    imgs = [p for p in i_dir.glob("*") if p.suffix.lower() in [".png",".jpg",".jpeg",".bmp",".tif",".tiff"]]
-    if not imgs:
-        print(f"[!] No images found in {inpt}")
-        return
 
-    #process_images(imgs, out_dir)
+    proccess_images(i_dir)
+    skeletonize_images()
+    vectorize_images()
+    organize_images()
 
     return JsonResponse({"ok": True})
 
+@csrf_exempt
+@require_http_methods(["POST"])
+def create_image_object(request):
+    """
+    Body JSON:
+    {
+      "file_name": "edges_0_skeleton.json",
+      "x": 0.0,
+      "y": 0.0,
+      "scale": 1.0
+    }
+    Looks up file in StrokeVectors, validates, then stores board object.
+    """
+    try:
+        payload = json.loads(request.body.decode("utf-8"))
+    except json.JSONDecodeError:
+        return JsonResponse({"error": "Invalid JSON body"}, status=400)
 
+    file_name = payload.get("file_name")
+    if not file_name:
+        return JsonResponse({"error": "file_name is required"}, status=400)
+
+    x = float(payload.get("x", 0.0))
+    y = float(payload.get("y", 0.0))
+    scale = float(payload.get("scale", 1.0))
+
+    # Validate the JSON file in StrokeVectors
+    try:
+        validate_image_json(file_name)
+    except FileNotFoundError as e:
+        return JsonResponse({"error": f"JSON file not found: {e}"}, status=404)
+    except ValueError as e:
+        return JsonResponse({"error": str(e)}, status=400)
+
+    # Upsert behavior: one object per name, just like _drawnJsonNames in UI
+    obj, created = WhiteboardObject.objects.update_or_create(
+        name=file_name,
+        defaults={
+            "kind": WhiteboardObject.KIND_IMAGE,
+            "pos_x": x,
+            "pos_y": y,
+            "scale": scale,
+            "letter_size": None,
+            "letter_gap": None,
+        },
+    )
+
+    return JsonResponse(
+        {
+            "name": obj.name,
+            "kind": obj.kind,
+            "pos_x": obj.pos_x,
+            "pos_y": obj.pos_y,
+            "scale": obj.scale,
+            "created": created,
+        },
+        status=201 if created else 200,
+    )
+
+
+# ---------- 2) CREATE TEXT OBJECT (WRITE TEXT) ----------
+
+@csrf_exempt
+@require_http_methods(["POST"])
+def create_text_object(request):
+    """
+    Body JSON:
+    {
+      "prompt": "Hello, world",
+      "x": 0.0,
+      "y": 0.0,
+      "letter_size": 180.0,
+      "letter_gap": 20.0
+    }
+    Mirrors _writeTextPrompt in spirit: stores a text 'object' on the board.
+    Name = prompt, same as jsonName in your UI.
+    """
+    try:
+        payload = json.loads(request.body.decode("utf-8"))
+    except json.JSONDecodeError:
+        return JsonResponse({"error": "Invalid JSON body"}, status=400)
+
+    prompt = payload.get("prompt")
+    if not prompt:
+        return JsonResponse({"error": "prompt is required"}, status=400)
+
+    x = float(payload.get("x", 0.0))
+    y = float(payload.get("y", 0.0))
+    letter_size = float(payload.get("letter_size", 180.0))
+    letter_gap = float(payload.get("letter_gap", 20.0))
+
+    if letter_size <= 0:
+        return JsonResponse({"error": "letter_size must be > 0"}, status=400)
+
+    # Validate that at least one glyph exists in Font
+    try:
+        validate_text_prompt(prompt)
+    except ValueError as e:
+        return JsonResponse({"error": str(e)}, status=400)
+
+    # Again, upsert by name, like _drawnJsonNames
+    obj, created = WhiteboardObject.objects.update_or_create(
+        name=prompt,
+        defaults={
+            "kind": WhiteboardObject.KIND_TEXT,
+            "pos_x": x,
+            "pos_y": y,
+            "scale": 1.0,  # you can compute real scale from metrics if you care
+            "letter_size": letter_size,
+            "letter_gap": letter_gap,
+        },
+    )
+
+    return JsonResponse(
+        {
+            "name": obj.name,
+            "kind": obj.kind,
+            "pos_x": obj.pos_x,
+            "pos_y": obj.pos_y,
+            "letter_size": obj.letter_size,
+            "letter_gap": obj.letter_gap,
+            "created": created,
+        },
+        status=201 if created else 200,
+    )
+
+
+# ---------- 3) LIST ALL OBJECTS ----------
+
+@require_http_methods(["GET"])
+def list_objects(request):
+    """
+    Returns:
+    {
+      "objects": [
+        {"name": "edges_0_skeleton.json", "kind": "image"},
+        {"name": "Hello, world", "kind": "text"}
+      ]
+    }
+    """
+    objs = WhiteboardObject.objects.all()
+    data = [
+        {
+            "name": o.name,
+            "kind": o.kind,
+            "pos_x": o.pos_x,
+            "pos_y": o.pos_y,
+            "scale": o.scale,
+            "letter_size": o.letter_size,
+            "letter_gap": o.letter_gap,
+        }
+        for o in objs
+    ]
+    return JsonResponse({"objects": data}, status=200)
+
+
+# ---------- 4) DELETE OBJECT BY NAME ----------
+
+@csrf_exempt
+@require_http_methods(["DELETE"])
+def delete_object(request):
+    """
+    Body JSON:
+    {
+      "name": "edges_0_skeleton.json"
+    }
+    or
+    {
+      "name": "Hello, world"
+    }
+    Deletes a single WhiteboardObject row (does NOT delete files on disk).
+    """
+    try:
+        payload = json.loads(request.body.decode("utf-8"))
+    except json.JSONDecodeError:
+        return JsonResponse({"error": "Invalid JSON body"}, status=400)
+
+    name = payload.get("name")
+    if not name:
+        return JsonResponse({"error": "name is required"}, status=400)
+
+    try:
+        obj = WhiteboardObject.objects.get(name=name)
+    except WhiteboardObject.DoesNotExist:
+        return JsonResponse({"error": "Object not found"}, status=404)
+
+    obj.delete()
+    return JsonResponse({"deleted": name}, status=200)

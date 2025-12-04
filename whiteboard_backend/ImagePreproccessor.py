@@ -31,7 +31,7 @@ pytesseract.pytesseract.tesseract_cmd = r"C:\\Program Files\\Tesseract-OCR\\tess
 
 # ===== SETTINGS =====
 BASE = Path(__file__).resolve().parent
-IN_DIR = BASE / r"ResearchImages/ddg"
+IN_DIR = BASE / r"ResearchImages/UniqueImages"
 OUT_DIR = BASE / r"ProccessedImages"
 
 MIN_CONF = 10
@@ -564,10 +564,39 @@ def process_one(path: Path):
     try:
         if SHOW_PROGRESS:
             print(f"[START] {path}")
-        img0 = cv2.imread(str(path))
+        img0 = cv2.imread(str(path), cv2.IMREAD_UNCHANGED)
         if img0 is None:
             print(f"[WARN] cannot read {path}")
             return
+
+        # --- FIXED: keep original pixels, only turn fully transparent into white ---
+        if img0.ndim == 3 and img0.shape[2] == 4:  # BGRA / RGBA
+            b, g, r, a = cv2.split(img0)
+
+            # start from original RGB
+            rgb = cv2.merge([b, g, r])
+
+            # treat only *fully* transparent pixels as background
+            # if you want, you can use a small threshold instead of == 0
+            mask = (a == 0)   # or (a < 5) if some files use near-zero
+
+            if np.any(mask):
+                rgb[mask] = [255, 255, 255]
+
+            img0 = rgb  # 3-channel BGR, no alpha
+
+        elif img0.ndim == 2:
+            # grayscale -> BGR
+            img0 = cv2.cvtColor(img0, cv2.COLOR_GRAY2BGR)
+
+        elif img0.ndim == 3 and img0.shape[2] == 3:
+            # already BGR
+            pass
+
+        else:
+            # weird shape → fall back to normal color read
+            img0 = cv2.imread(str(path), cv2.IMREAD_COLOR)
+
         index = _get_next_index()
 
         img, gray = preprocess(img0)
@@ -632,22 +661,26 @@ def process_one(path: Path):
     except Exception:
         print(f"[ERR] crashed on {path}:\n{traceback.format_exc()}")
 
-def main():
-    print(f"[INFO] IN_DIR={IN_DIR}")
+def proccess_images(indir):
+    print(f"[INFO] IN_DIR={indir}")
     print(f"[INFO] OUT_DIR={OUT_DIR}")
+
+    import shutil
+    if OUT_DIR.exists():
+        shutil.rmtree(OUT_DIR)
     OUT_DIR.mkdir(parents=True, exist_ok=True)
 
     imgs = sorted(
-        [p for p in IN_DIR.glob("*") if p.suffix.lower() in (".png", ".jpg", ".jpeg", ".bmp", ".tif", ".tiff")],
+        [p for p in indir.glob("*") if p.suffix.lower() in (
+            ".png", ".jpg", ".jpeg", ".bmp", ".tif", ".tiff", ".webp"
+        )],
         key=lambda p: p.name.lower(),
     )
+
     print(f"[INFO] found {len(imgs)} image(s).")
     if not imgs:
-        print(f"[!] No images found in {IN_DIR}. Exiting.")
+        print(f"[!] No images found in {indir}. Exiting.")
         return
 
     for p in imgs:
         process_one(p)
-
-if __name__ == "__main__":
-    main()

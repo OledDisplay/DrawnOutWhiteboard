@@ -4,6 +4,8 @@ import 'dart:math' as math;
 import 'dart:ui';
 
 import 'package:flutter/material.dart';
+import 'package:http/http.dart' as http;  // <-- ADD THIS
+
 
 void main() {
   runApp(const WhiteboardApp());
@@ -66,6 +68,13 @@ class _VectorViewerScreenState extends State<VectorViewerScreen>
 
   static const double _targetResolution = 2000.0; // target max side
   static const double _basePenWidthPx = 3.0; // logical image px
+
+  // ------------ Backend API config ------------
+  static const String _apiBaseUrl = 'http://127.0.0.1:8000'; // change if needed
+  static const bool _backendEnabled = true;
+
+  Uri _apiUri(String path) => Uri.parse('$_apiBaseUrl$path');
+
 
   // Virtual board extents in world coordinates.
   static const double _boardWidth = _targetResolution;
@@ -174,7 +183,13 @@ class _VectorViewerScreenState extends State<VectorViewerScreen>
           }
         }
       });
+
+    // Load any objects saved on the backend (if enabled)
+    _loadObjectsFromBackend();
   }
+
+
+  
 
   @override
   void dispose() {
@@ -209,6 +224,149 @@ class _VectorViewerScreenState extends State<VectorViewerScreen>
     }
   }
 
+    // ========== BACKEND SYNC HELPERS ==========
+
+  Future<void> _syncCreateImageOnBackend({
+    required String fileName,
+    required Offset origin,
+    required double scale,
+  }) async {
+    if (!_backendEnabled) return;
+    final uri = _apiUri('/api/whiteboard/objects/image/');
+    final body = json.encode({
+      'file_name': fileName,
+      'x': origin.dx,
+      'y': origin.dy,
+      'scale': scale,
+    });
+
+    final resp = await http.post(
+      uri,
+      headers: {'Content-Type': 'application/json'},
+      body: body,
+    );
+    if (resp.statusCode >= 400) {
+      throw Exception('HTTP ${resp.statusCode}: ${resp.body}');
+    }
+  }
+
+  Future<void> _syncCreateTextOnBackend({
+    required String prompt,
+    required Offset origin,
+    required double letterSize,
+    required double letterGap,
+  }) async {
+    if (!_backendEnabled) return;
+    final uri = _apiUri('/api/whiteboard/objects/text/');
+    final body = json.encode({
+      'prompt': prompt,
+      'x': origin.dx,
+      'y': origin.dy,
+      'letter_size': letterSize,
+      'letter_gap': letterGap,
+    });
+
+    final resp = await http.post(
+      uri,
+      headers: {'Content-Type': 'application/json'},
+      body: body,
+    );
+    if (resp.statusCode >= 400) {
+      throw Exception('HTTP ${resp.statusCode}: ${resp.body}');
+    }
+  }
+
+  Future<void> _syncDeleteOnBackend(String name) async {
+    if (!_backendEnabled) return;
+    final uri = _apiUri('/api/whiteboard/objects/delete/');
+    final body = json.encode({'name': name});
+
+    final resp = await http.delete(
+      uri,
+      headers: {'Content-Type': 'application/json'},
+      body: body,
+    );
+
+    // 404 is ok – already deleted backend-side
+    if (resp.statusCode >= 400 && resp.statusCode != 404) {
+      throw Exception('HTTP ${resp.statusCode}: ${resp.body}');
+    }
+  }
+
+  Future<void> _loadObjectsFromBackend() async {
+    if (!_backendEnabled) return;
+    try {
+      final uri = _apiUri('/api/whiteboard/objects/');
+      final resp = await http.get(uri);
+      if (resp.statusCode != 200) {
+        setState(() {
+          _status = 'Backend list error: HTTP ${resp.statusCode}';
+        });
+        return;
+      }
+
+      final decoded = json.decode(resp.body);
+      if (decoded is! Map || decoded['objects'] is! List) {
+        setState(() {
+          _status = 'Backend list invalid format';
+        });
+        return;
+      }
+
+      final List objs = decoded['objects'] as List;
+
+      for (final o in objs) {
+        if (o is! Map) continue;
+        final name = (o['name'] ?? '').toString();
+        final kind = (o['kind'] ?? '').toString();
+        final double x = (o['pos_x'] as num?)?.toDouble() ?? 0.0;
+        final double y = (o['pos_y'] as num?)?.toDouble() ?? 0.0;
+        final double scale =
+            (o['scale'] as num?)?.toDouble() ?? 1.0;
+
+        if (kind == 'image') {
+          // pure local draw, no backend call
+          await _addObjectFromJsonInternal(
+            fileName: name,
+            origin: Offset(x, y),
+            objectScale: scale,
+          );
+        } else if (kind == 'text') {
+          final double letterSize =
+              (o['letter_size'] as num?)?.toDouble() ?? _textBaseFontSizeRef;
+          final double letterGap =
+              (o['letter_gap'] as num?)?.toDouble() ?? _textLetterGapPx;
+
+          // use stored gap for this text batch
+          _textLetterGapPx = letterGap;
+          await _writeTextPromptLocal(
+            prompt: name,
+            origin: Offset(x, y),
+            letterSize: letterSize,
+          );
+        }
+      }
+
+      // After initial load, flatten any remaining anim strokes into static
+      if (mounted) {
+        _controller.stop();
+        setState(() {
+          _staticStrokes = [..._staticStrokes, ..._animStrokes];
+          _animStrokes = const [];
+          _drawableStrokes = [..._staticStrokes];
+          _animValue = 1.0;
+          _status = 'Synced ${objs.length} object(s) from backend.';
+        });
+      }
+    } catch (e) {
+      if (!mounted) return;
+      setState(() {
+        _status = 'Backend sync failed: $e';
+      });
+    }
+  }
+
+
   // ------------------- LOADING & BUILDING (IMAGES) -------------------
 
   Future<void> _loadAndRender() async {
@@ -231,7 +389,40 @@ class _VectorViewerScreenState extends State<VectorViewerScreen>
     );
   }
 
+    // Public entry: UI + external callers
   Future<void> _addObjectFromJson({
+    required String fileName,
+    required Offset origin,
+    required double objectScale,
+  }) async {
+    // Local drawing first (existing behavior)
+    await _addObjectFromJsonInternal(
+      fileName: fileName,
+      origin: origin,
+      objectScale: objectScale,
+    );
+
+    // Fire-and-forget backend sync
+    if (_backendEnabled) {
+      () async {
+        try {
+          await _syncCreateImageOnBackend(
+            fileName: fileName,
+            origin: origin,
+            scale: objectScale,
+          );
+        } catch (e) {
+          if (!mounted) return;
+          setState(() {
+            _status += '\n[Backend create image failed: $e]';
+          });
+        }
+      }();
+    }
+  }
+
+  // Internal: your previous local logic moved here, unchanged
+  Future<void> _addObjectFromJsonInternal({
     required String fileName,
     required Offset origin,
     required double objectScale,
@@ -357,6 +548,7 @@ class _VectorViewerScreenState extends State<VectorViewerScreen>
       print(st);
     }
   }
+
 
   // ------------------- GLYPH LOADING (TEXT) -------------------
 
@@ -574,7 +766,7 @@ class _VectorViewerScreenState extends State<VectorViewerScreen>
     });
   }
 
-  void _eraseObjectByName(String name) {
+   void _eraseObjectByName(String name) {
     if (name.isEmpty) return;
     if (_drawableStrokes.isEmpty) return;
 
@@ -607,7 +799,22 @@ class _VectorViewerScreenState extends State<VectorViewerScreen>
         }
       });
     }
+
+    // Backend delete (fire-and-forget)
+    if (_backendEnabled) {
+      () async {
+        try {
+          await _syncDeleteOnBackend(name);
+        } catch (e) {
+          if (!mounted) return;
+          setState(() {
+            _status += '\n[Backend delete failed: $e]';
+          });
+        }
+      }();
+    }
   }
+
 
   // ------------------- TEXT WRITING -------------------
 
@@ -638,7 +845,39 @@ class _VectorViewerScreenState extends State<VectorViewerScreen>
   }
 
 
+   // Public entry: UI and others
   Future<void> _writeTextPrompt({
+    required String prompt,
+    required Offset origin,
+    required double letterSize,
+  }) async {
+    await _writeTextPromptLocal(
+      prompt: prompt,
+      origin: origin,
+      letterSize: letterSize,
+    );
+
+    if (_backendEnabled) {
+      () async {
+        try {
+          await _syncCreateTextOnBackend(
+            prompt: prompt,
+            origin: origin,
+            letterSize: letterSize,
+            letterGap: _textLetterGapPx,
+          );
+        } catch (e) {
+          if (!mounted) return;
+          setState(() {
+            _status += '\n[Backend text sync failed: $e]';
+          });
+        }
+      }();
+    }
+  }
+
+  // Internal: your previous local draw logic moved here
+  Future<void> _writeTextPromptLocal({
     required String prompt,
     required Offset origin,
     required double letterSize,
@@ -678,7 +917,6 @@ class _VectorViewerScreenState extends State<VectorViewerScreen>
 
     final double letterGapPx = _textLetterGapPx;
     const double spaceWidthFactor = 0.5;
-
 
     for (int i = 0; i < prompt.length; i++) {
       final ch = prompt[i];
@@ -758,6 +996,7 @@ class _VectorViewerScreenState extends State<VectorViewerScreen>
 
     _recomputeTimingForAnimStrokes();
   }
+
 
   // ------------------- UI -------------------
 

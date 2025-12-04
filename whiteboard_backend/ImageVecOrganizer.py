@@ -343,7 +343,8 @@ def reorder_strokes_in_file(path: Path) -> None:
     print(f"[OK] reordered {path.name}: strokes={len(reordered)}, clusters={len(clusters)}")
 
 
-def main():
+def organize_images():
+    
     files = sorted(
         [p for p in JSON_DIR.glob("*.json")],
         key=lambda p: p.name.lower(),
@@ -355,6 +356,3 @@ def main():
     for p in files:
         reorder_strokes_in_file(p)
 
-
-if __name__ == "__main__":
-    main()

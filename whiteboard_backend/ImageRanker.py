@@ -47,7 +47,7 @@ class SiglipBackend:
       - encode_image(path: str) -> np.ndarray (L2-normalized)
     """
 
-    def __init__(self, model_name: str = "google/siglip-base-patch16-224", device: Optional[str] = None):
+    def __init__(self, model_name: str = "google/siglip-base-patch16-384", device: Optional[str] = None):
         if device is None:
             device = "cuda" if torch.cuda.is_available() else "cpu"
         self.device = device
