@@ -3,8 +3,12 @@ import re
 from typing import List, Tuple, Optional, Iterable, Set, Any
 from bs4 import BeautifulSoup, Tag
 import numpy as np
+from urllib.parse import urlparse, unquote
 
 # ---------- lightweight helpers ----------
+
+def dbg(*args):
+        print(*args, flush=True)
 
 _STOP = {
     "a","an","the","and","or","but","if","while","with","of","for","to","in","on",
@@ -15,11 +19,57 @@ _STOP = {
 
 _TOKEN_RX = re.compile(r"[A-Za-z0-9]+(?:['\-][A-Za-z0-9]+)?")  # keeps hyphenated like "prokaryotic-like"
 
+_TOKEN_RX = re.compile(r"[A-Za-z0-9]+(?:['\-][A-Za-z0-9]+)?")  # keeps hyphenated like "prokaryotic-like"
+
 def _tok(text: str) -> List[str]:
     return [t.lower() for t in _TOKEN_RX.findall(text or "")]
 
+def _normalize_token(t: str) -> str:
+    """
+    Very small, safe normalizer:
+      - lowercases
+      - strips simple possessives (’s, 's)
+      - collapses basic English plurals: cells -> cell, lysosomes -> lysosome
+    This is enough to unify 'cell', 'cells', 'cell’s' etc.
+    """
+    t = t.lower()
+
+    # strip common possessives
+    if t.endswith("’s") or t.endswith("'s"):
+        t = t[:-2]
+
+    # crude plural → singular (only if reasonably long)
+    if len(t) > 3:
+        if t.endswith("ies"):
+            # bodies -> body
+            t = t[:-3] + "y"
+        elif t.endswith("ses"):
+            # processes -> process
+            t = t[:-2]
+        elif t.endswith("s") and not t.endswith("ss"):
+            # cells -> cell, organelles -> organelle
+            t = t[:-1]
+
+    return t
+
 def _content_tokens(text: str) -> List[str]:
-    return [t for t in _tok(text) if t not in _STOP and len(t) > 1]
+    """
+    Tokens used for scoring:
+      - normalized via _normalize_token
+      - stopwords removed
+      - length > 1
+    """
+    out: List[str] = []
+    for raw in _tok(text):
+        t = _normalize_token(raw)
+        if t in _STOP:
+            continue
+        if len(t) <= 1:
+            continue
+        out.append(t)
+    return out
+
+
 
 def _bigrams(tokens: List[str]) -> Set[Tuple[str,str]]:
     return set(zip(tokens, tokens[1:]))
@@ -107,28 +157,70 @@ def _cosine_sim(a: Any, b: Any) -> float:
         return 0.0
     return float(va.dot(vb) / (na * nb))
 
+def _build_fuzzy_phrase_rx(phrase: str) -> Optional[re.Pattern]:
+    """
+    Build a regex for the base phrase that:
+      - normalizes tokens
+      - allows the *last* word to be plural/possessive:
+        'eukaryotic cell' -> matches 'eukaryotic cell', 'eukaryotic cells', 'eukaryotic cell’s'
+    """
+    phrase = (phrase or "").strip()
+    if not phrase:
+        return None
+
+    toks = _tok(phrase)
+    if not toks:
+        return None
+
+    norm = [_normalize_token(t) for t in toks]
+    last = norm[-1]
+
+    # last token: allow plural/possessive variants
+    last_pat = rf"{re.escape(last)}(?:['’]s|s)?"
+
+    if len(norm) == 1:
+        pat = rf"\b{last_pat}\b"
+    else:
+        mid = r"\s+".join(re.escape(t) for t in norm[:-1])
+        pat = rf"\b{mid}\s+{last_pat}\b"
+
+    return re.compile(pat, re.I)
+
+
 # ---------- query profile ----------
 
 class QueryProfile:
     def __init__(self, base_query: str, lemma_obj: dict):
         self.base_query = (base_query or "").strip()
-        self.exact_rx = re.compile(r"\b" + re.escape(self.base_query) + r"\b", re.I) if self.base_query else None
 
-        lemmas = []
+        # Phrase match that tolerates plural/possessive on the last word.
+        # 'eukaryotic cell' will match 'eukaryotic cells', 'eukaryotic cell’s', etc.
+        self.exact_rx = _build_fuzzy_phrase_rx(self.base_query)
+
+        # ---- split core tokens vs lemma tokens ----
+        lemma_tokens: List[str] = []
         for entry in (lemma_obj or {}).values():
             for w in entry.get("lemmas", []) or []:
                 w = (w or "").strip()
                 if w:
-                    lemmas.append(w)
-        # canonical token set from base + lemmas
-        toks = _content_tokens(" ".join([self.base_query] + lemmas))
-        self.query_tokens = _unique(toks)
+                    lemma_tokens.extend(_content_tokens(w))
 
-        # order-agnostic bigrams for mild reordering tolerance
-        self.query_bigrams = _bigrams(self.query_tokens)
+        # tokens coming ONLY from the user query
+        self.core_tokens: List[str] = _unique(_content_tokens(self.base_query))
+
+        # extra lemma tokens (don’t let them dilute coverage)
+        all_lemma = _unique(lemma_tokens)
+        self.syn_tokens: List[str] = [t for t in all_lemma if t not in self.core_tokens]
+
+        # backwards-compat: anything that uses query_tokens keeps seeing just core tokens
+        self.query_tokens: List[str] = self.core_tokens
+
+        # order-agnostic bigrams for mild reordering tolerance, from the core tokens only
+        self.query_bigrams = _bigrams(self.core_tokens)
 
     def any_tokens(self) -> bool:
         return bool(self.query_tokens)
+
 
 # ---------- scoring ----------
 
@@ -200,7 +292,7 @@ def _score_block(profile: QueryProfile, text: str, heading_text: str) -> Tuple[f
     details = dict(exact=exact, coverage=cov, density=dens, proximity=prox, bigram=bigr, heading=head)
     return score, details
 
-# ---------- candidate enumeration ----------
+# ---------- candidate enumeration (text blocks) ----------
 
 _CAND_SELECTORS = [
     "h1","h2","h3","h4",
@@ -218,7 +310,117 @@ def _candidate_nodes(soup: BeautifulSoup) -> List[Tag]:
                 seen.add(n); out.append(n)
     return out
 
-# ---------- main entry ----------
+# ---------- image helpers (attrs + local context) ----------
+
+def _image_attr_text_and_tokens(img: Tag) -> Tuple[str, List[str]]:
+    """
+    Build a text blob from img alt/title/src (filename + tail path),
+    then tokenize it for matching.
+    """
+    parts: List[str] = []
+
+    alt = img.get("alt")
+    if isinstance(alt, str) and alt.strip():
+        parts.append(alt)
+
+    title = img.get("title")
+    if isinstance(title, str) and title.strip():
+        parts.append(title)
+
+    src = img.get("src") or img.get("data-src") or img.get("data-original")
+    if isinstance(src, str) and src.strip():
+        try:
+            p = urlparse(src)
+            path = unquote(p.path or "")
+        except Exception:
+            path = src
+        # keep only the tail of the path; split on separators to expose keywords
+        segs = [s for s in path.split("/") if s]
+        tail = "/".join(segs[-3:]) if segs else ""
+        tail = tail.replace("_", " ").replace("-", " ")
+        if tail:
+            parts.append(tail)
+
+    text = " ".join(parts).strip()
+    tokens = _content_tokens(text)
+    return text, tokens
+
+def _image_attr_match(profile: QueryProfile, img: Tag, min_cov: float = 0.34) -> Tuple[bool, dict]:
+    """
+    Decide if an <img> is worth considering based only on alt/title/filename/path.
+    Uses coverage against query tokens + optional exact phrase in those attrs.
+    """
+    attr_text, attr_tokens = _image_attr_text_and_tokens(img)
+
+    if not attr_text or not attr_tokens or not profile.any_tokens():
+        return False, {
+            "attr_cov": 0.0,
+            "attr_exact": 0.0,
+            "attr_text": attr_text[:200],
+        }
+
+    cov = _coverage(profile.query_tokens, attr_tokens)
+    exact = 1.0 if (profile.exact_rx and profile.exact_rx.search(attr_text)) else 0.0
+    ok = (exact >= 1.0) or (cov >= min_cov)
+
+    details = {
+        "attr_cov": cov,
+        "attr_exact": exact,
+        "attr_text": attr_text[:200],
+    }
+    return ok, details
+
+def _image_dom_context(img: Tag) -> str:
+    """
+    Gather local HTML text around an image:
+      - parent block (figure/div/p/li)
+      - figcaption if inside <figure>
+      - a couple of previous/next block siblings
+      - fallback to nearest texty ancestor
+    """
+    blocks: List[str] = []
+
+    parent = img.parent if isinstance(img.parent, Tag) else None
+    if parent is not None:
+        blocks.append(_text_of(parent))
+
+        if parent.name and parent.name.lower() == "figure":
+            for cap in parent.find_all("figcaption"):
+                blocks.append(_text_of(cap))
+
+        # up to 2 previous block siblings
+        prev = parent.previous_sibling
+        count = 0
+        while prev is not None and count < 2:
+            if isinstance(prev, Tag):
+                blocks.append(_text_of(prev))
+                count += 1
+            prev = prev.previous_sibling
+
+        # up to 2 next block siblings
+        nxt = parent.next_sibling
+        count = 0
+        while nxt is not None and count < 2:
+            if isinstance(nxt, Tag):
+                blocks.append(_text_of(nxt))
+                count += 1
+            nxt = nxt.next_sibling
+
+    # Fallback: nearest texty ancestor
+    if not any(b.strip() for b in blocks):
+        cur = img
+        hops = 0
+        while cur and isinstance(cur, Tag) and hops < 4:
+            cur = cur.parent
+            hops += 1
+            if cur is not None and cur.name and cur.name.lower() in ("p", "li", "div", "section", "article"):
+                blocks.append(_text_of(cur))
+                break
+
+    text = " ".join(b for b in blocks if b).strip()
+    return text
+
+# ---------- main entry: text hits ----------
 
 def smart_find_hits_in_soup(
     soup: BeautifulSoup,
@@ -272,12 +474,108 @@ def smart_find_hits_in_soup(
             details["sem_score"] = sem_score
             if return_embedding:
                 details["ctx_embedding"] = ctx_emb
-            # light but meaningful filter: we already know text contains the prompt/lemmas,
-            # so we just drop clearly off-context hits
+
+            # --- DEBUG: log every rejection by semantic context ---
             if sem_score < sem_min_score:
+                try:
+                    snip = ctx_text.replace("\n", " ")
+                    if len(snip) > 160:
+                        snip = snip[:160] + "..."
+                except Exception:
+                    snip = ""
+                print(
+                    f"[HIT-REJECT][CTX] sem_score={sem_score:.3f} < threshold={sem_min_score:.3f}  "
+                    f"snippet='{snip}'"
+                )
                 continue
+            # --- end debug block ---
 
         scored.append((n, s, details))
 
     scored.sort(key=lambda x: x[1], reverse=True)
     return scored[:top_k] if top_k else scored
+
+# ---------- second pass: image-driven hits ----------
+
+def smart_find_image_hits_in_soup(
+    soup: BeautifulSoup,
+    base_query: str,
+    lemma_obj: dict,
+    *,
+    min_attr_cov: float = 0.34,        # gating on filename/alt/title coverage
+    min_score: float = 0.55,           # reuse same main score threshold for context
+    encoder: Optional[Any] = None,
+    query_embedding: Optional[Any] = None,
+    sem_min_score: float = 0.42,
+    return_embedding: bool = True
+) -> List[Tuple[Tag, float, dict]]:
+    """
+    Second-pass image hit finder.
+
+    For *every* <img>:
+      1) Check filename/path + alt/title coverage vs query/lemmas.
+         - If coverage is low and no exact phrase -> skip.
+      2) If it passes, collect local DOM text around the image
+         (parent, figcaption, nearby siblings) and build a context window.
+      3) Run the same scoring + optional semantic threshold on that context.
+
+    Returns a ranked list of (img_tag, score, details), with:
+      - attr_cov / attr_exact / attr_text
+      - heading_text / snippet / ctx_text
+      - sem_score / ctx_embedding (if semantic enabled)
+    """
+    profile = QueryProfile(base_query, lemma_obj)
+    if not profile.any_tokens() and not profile.exact_rx:
+        return []
+
+    use_semantic = encoder is not None and query_embedding is not None
+    results: List[Tuple[Tag, float, dict]] = []
+
+    for img in soup.find_all("img"):
+        if not isinstance(img, Tag):
+            continue
+
+        # 1) attribute-level gate (filename/path + alt + title)
+        ok_attr, attr_details = _image_attr_match(profile, img, min_cov=min_attr_cov)
+        if not ok_attr:
+            continue
+
+        # 2) local DOM context around the image
+        raw_ctx = _image_dom_context(img)
+        if not raw_ctx:
+            continue
+
+        heading_tag = _nearest_heading(img)
+        heading_text = _text_of(heading_tag)
+
+        ctx_text = _find_context_window(raw_ctx, base_query, profile)
+        score, score_details = _score_block(profile, ctx_text, heading_text)
+        if score < min_score:
+            continue
+
+        details = dict(attr_details)
+        details.update(score_details)
+
+        # STANDARDIZED CONTEXT METADATA
+        details["source"] = "image_context"
+        details["heading_text"] = heading_text[:120]
+        details["snippet"] = ctx_text[:160]
+        details["ctx_text"] = ctx_text[:240]
+        details["ctx_score"] = score  # unified lexical context score
+
+        # Optional semantic filtering on the context text
+        if use_semantic and ctx_text:
+            ctx_emb = encoder.encode(ctx_text)
+            sem_score = _cosine_sim(query_embedding, ctx_emb)
+            details["sem_score"] = sem_score
+            details["ctx_sem_score"] = sem_score  # alias
+            if return_embedding:
+                details["ctx_embedding"] = ctx_emb
+            if sem_score < sem_min_score:
+                continue
+
+        results.append((img, score, details))
+
+
+    results.sort(key=lambda x: x[1], reverse=True)
+    return results

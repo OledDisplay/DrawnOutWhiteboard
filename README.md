@@ -90,3 +90,140 @@ python main.py --listen 0.0.0.0 --port 8188 --disable-auto-launch --verbose INFO
 get Model1.json from comfy setup and drop it in
 *make sure cfg = 1.4, guidance = 0.9
 
+Setting up PostgreSQL + PGVector on Windows (Docker) for Django
+
+1. Requirements
+
+Docker Desktop installed
+
+Windows PowerShell or CMD
+
+Django installed in your project
+
+No need for StackBuilder, manual PostgreSQL install, or compiling PGVector manually
+
+2. Create the project folder
+
+Create a new folder for your database setup:
+
+db/
+ └─ docker-compose.yml
+
+3. Create docker-compose.yml
+
+Inside the db folder, create this file:
+------------------------------------------------------------
+version: "3.9"
+
+services:
+  postgres:
+    image: pgvector/pgvector:pg17
+    container_name: pgvector_db
+    environment:
+      POSTGRES_USER: vjelev
+      POSTGRES_PASSWORD: mypassword123
+      POSTGRES_DB: project_db
+    ports:
+      - "5433:5432"   # Host port 5433 → container port 5432
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+
+volumes:
+  pgdata:
+------------------------------------------------------------
+Why 5433?
+
+Your Windows machine probably already has PostgreSQL running on 5432, so Docker cannot use it.
+Using 5433 avoids all conflicts.
+
+4. Start PostgreSQL + PGVector
+
+Open PowerShell inside the folder containing docker-compose.yml and run:
+
+docker compose up -d
+
+
+This:
+
+Downloads pgvector/pgvector:pg17
+
+Creates a PostgreSQL server with PGVector built in
+
+Creates:
+
+user: vjelev
+
+password: mypassword123
+
+database: project_db
+
+5. Verify the container is running
+docker ps
+
+
+You should see the pgvector_db container.
+
+6. Test connection with psql
+
+Use psql from your Windows PostgreSQL install:
+
+psql -h localhost -p 5433 -U vjelev -d project_db
+
+
+Enter the password:
+
+mypassword123
+
+
+If it succeeds, you're inside PostgreSQL.
+
+Exit with:
+
+\q
+
+7. Enable PGVector extension
+
+Connect again:
+
+psql -h localhost -p 5433 -U vjelev -d project_db
+
+
+Run:
+
+CREATE EXTENSION IF NOT EXISTS vector;
+\dx
+
+
+You should see vector in the list of installed extensions.
+
+This means PGVector is successfully installed.
+
+8. Configure Django to use this database
+
+In your Django project's settings.py:
+
+DATABASES = {
+    "default": {
+        "ENGINE": "django.db.backends.postgresql",
+        "NAME": "project_db",
+        "USER": "vjelev",
+        "PASSWORD": "mypassword123",
+        "HOST": "localhost",
+        "PORT": "5433",
+    }
+}
+
+9. Install python-pgvector for Django
+pip install pgvector django-pgvector
+
+
+Add to INSTALLED_APPS:
+
+INSTALLED_APPS = [
+    ...
+    "pgvector",
+]
+
+and migrate:
+
+python manage.py migrate
