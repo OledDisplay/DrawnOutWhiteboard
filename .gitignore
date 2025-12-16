@@ -33,6 +33,8 @@ ProccessedImages/
 StrokeVectors/
 Skeletonized/
 FontPngs/
+ClusterRenders/
+ClusterMaps/
 
 # OS stuff
 .DS_Store

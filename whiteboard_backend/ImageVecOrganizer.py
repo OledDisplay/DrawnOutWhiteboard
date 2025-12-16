@@ -166,9 +166,15 @@ def _build_clusters(
 
     # indices of strokes in seed order: big & central first
     indices = np.arange(N, dtype=int)
+
+    # ---- CHANGE: seed shortest -> longest (ties: closer to center).
+    # push degenerate strokes to the back so they don't seed everything.
     seed_order = sorted(
         indices,
-        key=lambda i: (-float(length[i]), float(dist_ctr[i])),
+        key=lambda i: (
+            float(length[i]) if float(length[i]) >= ABS_MIN_STROKE_LEN else 1e9,
+            float(dist_ctr[i]),
+        ),
     )
 
     unassigned = set(indices.tolist())
@@ -268,10 +274,10 @@ def _order_clusters_and_strokes(
         # total stroke length in this cluster
         total_len = float(np.sum(length[idxs]))
 
-        # store: cluster index, -total_len (for descending), distance to center
-        cluster_info.append((ci, -total_len, d_center))
+        # store: cluster index, total_len (for ascending), distance to center
+        cluster_info.append((ci, total_len, d_center))
 
-    # big clusters first, then nearer to center
+    # small clusters first, then nearer to center
     cluster_info.sort(key=lambda t: (t[1], t[2]))
 
     ordered_indices: List[int] = []
@@ -280,10 +286,15 @@ def _order_clusters_and_strokes(
         idxs = clusters[ci]
         if not idxs:
             continue
-        # inside cluster: big, central strokes first
+
+        # ---- CHANGE: inside cluster shortest -> longest (ties: closer to center).
+        # keep degenerate strokes at the back.
         idxs_sorted = sorted(
             idxs,
-            key=lambda i: (-float(length[i]), float(dist_ctr[i])),
+            key=lambda i: (
+                float(length[i]) if float(length[i]) >= ABS_MIN_STROKE_LEN else 1e9,
+                float(dist_ctr[i]),
+            ),
         )
         ordered_indices.extend(idxs_sorted)
 
@@ -344,7 +355,7 @@ def reorder_strokes_in_file(path: Path) -> None:
 
 
 def organize_images():
-    
+
     files = sorted(
         [p for p in JSON_DIR.glob("*.json")],
         key=lambda p: p.name.lower(),
@@ -356,3 +367,5 @@ def organize_images():
     for p in files:
         reorder_strokes_in_file(p)
 
+if "__main__":
+    organize_images()

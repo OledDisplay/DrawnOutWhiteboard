@@ -15,7 +15,7 @@ from pytesseract import Output
 
 #Step 1 of printing - prepare the images
 
-#Takes ready images of diagrams from research. 
+#Takes ready images of diagrams from research.
 #We first find all "text lables" in diagrams and extract and save them with ocr, then paint them over so they dont get ruined in all the proccessing.
 #After that we run grayscale and canny
 #We want to represent thin lines with actual thin lines when drawing on the board, but canny outlines everythin -> we get two lines for one is in some cases
@@ -61,7 +61,7 @@ SAVE_DEBUG_GRAY = False
 # ===== FILL TUNING (For accepting and merging gaps in tiles) =====
 MERGE_LEVEL = ""  # "", "light", "medium", "aggressive"
 
-FILL_HALF_WIDTH = 2.4         # <— allow non-integer half-width for decisions
+FILL_HALF_WIDTH = 2        # <— allow non-integer half-width for decisions
 FILL_BRIDGE_ITERS = 1
 FILL_MIN_CC_AREA = 6
 FILL_DISTANCE_GATE = True
@@ -70,10 +70,10 @@ FILL_DIST_MULT = 1.0
 
 # --- box-based merge knobs ---
 TILE_SIZE         = 32
-MAX_GAP           = 15     
+MAX_GAP           = 15
 GAP_TOLERANCE     = 15.0   # percent ± around center (median after IQR), keep float
 MIN_CANDIDATES    = 2  #at least two gaps between lines in a box to be valid
-MIN_EDGES_IN_TILE = 3  #at least 3 lines in total in a box 
+MIN_EDGES_IN_TILE = 3  #at least 3 lines in total in a box
 
 # Ridge gating knobs
 BAND_MAX_PIX         = 2
@@ -82,6 +82,16 @@ RUN_MIN              = 6
 RUN_INLIER_FRAC      = 0.70
 MAX_NORMAL_DRIFT_DEG = 20.0
 SIDE_CONFIRM         = 2
+
+# ===== COLOR GROUP SPLIT =====
+COLOR_GROUP_PASSES = 11
+
+# thresholds tuned for OpenCV HSV ranges:
+# H: 0..179, S: 0..255, V: 0..255
+COLOR_SAT_LOW   = 35
+COLOR_V_BLACK   = 45
+COLOR_V_WHITE   = 235
+COLOR_V_MIN_CLR = 35
 
 def _resolve_merge_params():
     if MERGE_LEVEL == "light":
@@ -100,6 +110,58 @@ def _resolve_merge_params():
         do_distance_gate=FILL_DISTANCE_GATE,
         orientations=FILL_ORIENTATIONS,
     )
+
+def _basic11_color_masks(img_bgr: np.ndarray):
+    """
+    Returns list[(name:str, mask_bool:np.ndarray)] of 11 disjoint groups:
+      black, white, gray,
+      red, orange, yellow, green, cyan, blue, purple, magenta
+    """
+    hsv = cv2.cvtColor(img_bgr, cv2.COLOR_BGR2HSV)
+    h = hsv[:, :, 0]
+    s = hsv[:, :, 1]
+    v = hsv[:, :, 2]
+
+    masks = []
+
+    # neutrals
+    m_black = (v <= COLOR_V_BLACK)
+    m_white = (s <= COLOR_SAT_LOW) & (v >= COLOR_V_WHITE)
+    m_gray  = (s <= COLOR_SAT_LOW) & (~m_black) & (~m_white)
+
+    masks.append(("black", m_black))
+    masks.append(("white", m_white))
+    masks.append(("gray",  m_gray))
+
+    # chromatic pixels
+    chroma = (s > COLOR_SAT_LOW) & (v > COLOR_V_MIN_CLR)
+
+    # hue bins (OpenCV hue 0..179)
+    # red wraps around
+    m_red     = chroma & ((h <= 10) | (h >= 170))
+    m_orange  = chroma & (h >= 11)  & (h <= 25)
+    m_yellow  = chroma & (h >= 26)  & (h <= 34)
+    m_green   = chroma & (h >= 35)  & (h <= 85)
+    m_cyan    = chroma & (h >= 86)  & (h <= 100)
+    m_blue    = chroma & (h >= 101) & (h <= 130)
+    m_purple  = chroma & (h >= 131) & (h <= 150)
+    m_magenta = chroma & (h >= 151) & (h <= 169)
+
+    masks.append(("red",     m_red))
+    masks.append(("orange",  m_orange))
+    masks.append(("yellow",  m_yellow))
+    masks.append(("green",   m_green))
+    masks.append(("cyan",    m_cyan))
+    masks.append(("blue",    m_blue))
+    masks.append(("purple",  m_purple))
+    masks.append(("magenta", m_magenta))
+
+    return masks
+
+def _apply_mask_to_white(img_bgr: np.ndarray, mask_bool: np.ndarray) -> np.ndarray:
+    out = np.full_like(img_bgr, 255)
+    out[mask_bool] = img_bgr[mask_bool]
+    return out
 
 # =========================================================
 # PREPROCESS + OCR
@@ -377,14 +439,14 @@ def fill_between_outlines_tilewise(
             x1 = min(w, x0 + step)
 
             tile = E_bin[y0:y1, x0:x1]
-            if tile.size == 0: 
+            if tile.size == 0:
                 continue
-            if int(tile.sum()) < MIN_EDGES_IN_TILE: 
+            if int(tile.sum()) < MIN_EDGES_IN_TILE:
                 continue
 
             ridge = _ridge_mask((tile == 0).astype(np.uint8))
             runs = _trace_ridge_runs(ridge)
-            if not runs: 
+            if not runs:
                 continue
 
             all_widths = []
@@ -466,7 +528,7 @@ def fill_between_outlines_tilewise(
                         ang = _angle_between(nv, cand)
                         if ang < best_ang:
                             best_ang = ang; best = (dx, dy)
-                    if best is None: 
+                    if best is None:
                         return False
                     dx, dy = best
                     pos_ok = any(
@@ -624,28 +686,52 @@ def process_one(path: Path):
 
         cleaned = cv2.inpaint(img, mask, INPAINT_RADIUS, cv2.INPAINT_TELEA) if np.any(mask) else img
 
-        edges, gray_used = edge_canny_fine(cleaned)
-        edges = prune_small_dots(edges, area_max=30, circ_min=0.6, skel_len_min=10, use_skeleton=False)
+        # ---- COLOR GROUP PASSES (OCR part above stays intact) ----
+        pass_dir = OUT_DIR / f"processed_{index}"
+        pass_dir.mkdir(parents=True, exist_ok=True)
 
         params = _resolve_merge_params()
-        edges = fill_outlines_pipeline(
-            edges,
-            half_width=float(params["half_width"]),
-            bridge_iters=params["bridge_iters"],
-            clean_area=params["clean_area"],
-            do_distance_gate=params["do_distance_gate"],
-            orientations=params["orientations"],
-        )
+        edges_union = np.zeros((H, W), np.uint8)
+
+        color_masks = _basic11_color_masks(cleaned)
+        if len(color_masks) != COLOR_GROUP_PASSES:
+            color_masks = color_masks[:COLOR_GROUP_PASSES]
+
+        for gname, gmask in color_masks:
+            if SHOW_PROGRESS:
+                ratio = float(np.count_nonzero(gmask)) / float(gmask.size)
+                print(f"[{path.name}] pass={gname} mask_ratio={ratio:.4f}")
+
+            pass_img = _apply_mask_to_white(cleaned, gmask)
+
+            edges, gray_used = edge_canny_fine(pass_img)
+            edges = prune_small_dots(edges, area_max=30, circ_min=0.6, skel_len_min=10, use_skeleton=False)
+
+            edges = fill_outlines_pipeline(
+                edges,
+                half_width=float(params["half_width"]),
+                bridge_iters=params["bridge_iters"],
+                clean_area=params["clean_area"],
+                do_distance_gate=params["do_distance_gate"],
+                orientations=params["orientations"],
+            )
+
+            edges_union = cv2.bitwise_or(edges_union, edges)
+
+            out_img_pass = pass_dir / f"processed_{index}_{gname}.png"
+            out_edges_pass = pass_dir / f"edges_{index}_{gname}.png"
+            cv2.imwrite(str(out_img_pass), pass_img)
+            cv2.imwrite(str(out_edges_pass), edges)
+            if SAVE_DEBUG_GRAY and gray_used is not None:
+                cv2.imwrite(str(pass_dir / f"gray_{index}_{gname}.png"), gray_used)
 
         OUT_DIR.mkdir(parents=True, exist_ok=True)
         out_img = OUT_DIR / f"processed_{index}.png"
         out_edges = OUT_DIR / f"edges_{index}.png"
-        out_json = OUT_DIR / f"processed_{index}_labels.json"
+        out_json = OUT_DIR / f"edges_{index}_labels.json"
 
         cv2.imwrite(str(out_img), cleaned)
-        cv2.imwrite(str(out_edges), edges)
-        if SAVE_DEBUG_GRAY and gray_used is not None:
-            cv2.imwrite(str(OUT_DIR / f"gray_{index}.png"), gray_used)
+        cv2.imwrite(str(out_edges), edges_union)
 
         meta = {
             "image_index": index,
@@ -655,8 +741,11 @@ def process_one(path: Path):
         }
         out_json.write_text(json.dumps(meta, indent=2), encoding="utf-8")
 
+        # optional: also drop a copy into the pass folder for convenience
+        (pass_dir / f"edges_{index}_labels.json").write_text(json.dumps(meta, indent=2), encoding="utf-8")
+
         if SHOW_PROGRESS:
-            print(f"[OK] wrote:\n  {out_img}\n  {out_edges}\n  {out_json}")
+            print(f"[OK] wrote:\n  {out_img}\n  {out_edges}\n  {out_json}\n  {pass_dir}")
 
     except Exception:
         print(f"[ERR] crashed on {path}:\n{traceback.format_exc()}")
@@ -684,3 +773,6 @@ def proccess_images(indir):
 
     for p in imgs:
         process_one(p)
+
+if "__main__":
+    proccess_images(Path(r"ResearchImages\UniqueImages"))

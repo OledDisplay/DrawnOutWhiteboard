@@ -1,0 +1,524 @@
+{
+  "original_name": "edges_9",
+  "image_index": 9,
+  "processed_image": "ProccessedImages\\processed_9.png",
+  "original_image": "ProccessedImages\\processed_9.png",
+  "strokes_json": "StrokeVectors\\edges_9.json",
+  "params": {
+    "stroke_color_bin": 24,
+    "color_distance_thresh": 70.0,
+    "adjacency_gap_px": 22.0,
+    "cluster_crop_margin_px": 4
+  },
+  "clusters": [
+    {
+      "cluster_id": 0,
+      "stroke_indices": [
+        0,
+        2
+      ],
+      "mean_color": {
+        "r": 31,
+        "g": 31,
+        "b": 31
+      },
+      "bbox_img": {
+        "x": 962.9522050094604,
+        "y": 99.93965251922607,
+        "width": 31.13005525970459,
+        "height": 16.120694961547855
+      },
+      "cutout_path": "ClusterRenders\\edges_9\\cluster_000.png"
+    },
+    {
+      "cluster_id": 1,
+      "stroke_indices": [
+        1,
+        3,
+        4,
+        6,
+        7,
+        9,
+        10,
+        11,
+        12,
+        13,
+        14,
+        15,
+        16,
+        17,
+        18,
+        19,
+        20,
+        21,
+        23,
+        24,
+        25,
+        26,
+        27,
+        28,
+        29,
+        30,
+        31,
+        32,
+        33,
+        35,
+        36,
+        37,
+        38,
+        39,
+        40,
+        41,
+        42,
+        43,
+        44,
+        45,
+        46,
+        47,
+        48,
+        49,
+        50,
+        51,
+        52,
+        53,
+        54,
+        55,
+        56,
+        57,
+        58,
+        60,
+        61,
+        64,
+        65,
+        66,
+        67,
+        68,
+        69,
+        70,
+        71,
+        72,
+        73,
+        75,
+        76,
+        77,
+        78,
+        79,
+        80,
+        81,
+        83,
+        84,
+        85,
+        86,
+        88,
+        89,
+        90,
+        91,
+        94,
+        96,
+        97,
+        98,
+        101,
+        103,
+        104,
+        107,
+        108,
+        109,
+        110,
+        113,
+        114,
+        115,
+        116,
+        117,
+        118,
+        119,
+        120,
+        121,
+        122,
+        123,
+        125,
+        126,
+        127,
+        128,
+        129,
+        130,
+        131,
+        132,
+        134,
+        135,
+        136,
+        138,
+        140,
+        141,
+        142,
+        143,
+        144,
+        145,
+        146,
+        147,
+        148,
+        149,
+        150,
+        151,
+        152,
+        153,
+        155,
+        156,
+        157,
+        158,
+        159,
+        160,
+        161,
+        162,
+        163,
+        164,
+        165,
+        166,
+        167,
+        168
+      ],
+      "mean_color": {
+        "r": 184,
+        "g": 159,
+        "b": 149
+      },
+      "bbox_img": {
+        "x": 344.94699752807617,
+        "y": 98.95377051830292,
+        "width": 696.0963685607911,
+        "height": 674.2174228410721
+      },
+      "cutout_path": "ClusterRenders\\edges_9\\cluster_001.png"
+    },
+    {
+      "cluster_id": 2,
+      "stroke_indices": [
+        5
+      ],
+      "mean_color": {
+        "r": 75,
+        "g": 76,
+        "b": 81
+      },
+      "bbox_img": {
+        "x": 876.0,
+        "y": 144.0,
+        "width": 1.0,
+        "height": 1.0
+      },
+      "cutout_path": "ClusterRenders\\edges_9\\cluster_002.png"
+    },
+    {
+      "cluster_id": 3,
+      "stroke_indices": [
+        8
+      ],
+      "mean_color": {
+        "r": 80,
+        "g": 79,
+        "b": 68
+      },
+      "bbox_img": {
+        "x": 730.8716119842529,
+        "y": 162.973295501709,
+        "width": 3.1207305374146017,
+        "height": 1.0934525527953838
+      },
+      "cutout_path": "ClusterRenders\\edges_9\\cluster_003.png"
+    },
+    {
+      "cluster_id": 4,
+      "stroke_indices": [
+        22
+      ],
+      "mean_color": {
+        "r": 19,
+        "g": 19,
+        "b": 19
+      },
+      "bbox_img": {
+        "x": 1002.9419915008544,
+        "y": 246.0,
+        "width": 52.05800849914556,
+        "height": 14.087912719726546
+      },
+      "cutout_path": "ClusterRenders\\edges_9\\cluster_004.png"
+    },
+    {
+      "cluster_id": 5,
+      "stroke_indices": [
+        34
+      ],
+      "mean_color": {
+        "r": 69,
+        "g": 67,
+        "b": 56
+      },
+      "bbox_img": {
+        "x": 542.792427734375,
+        "y": 352.0,
+        "width": 7.284649414062528,
+        "height": 7.104140090942337
+      },
+      "cutout_path": "ClusterRenders\\edges_9\\cluster_005.png"
+    },
+    {
+      "cluster_id": 6,
+      "stroke_indices": [
+        59
+      ],
+      "mean_color": {
+        "r": 216,
+        "g": 105,
+        "b": 96
+      },
+      "bbox_img": {
+        "x": 684.893171875,
+        "y": 412.85899316406255,
+        "width": 10.100868400573745,
+        "height": 11.199023506164451
+      },
+      "cutout_path": "ClusterRenders\\edges_9\\cluster_006.png"
+    },
+    {
+      "cluster_id": 7,
+      "stroke_indices": [
+        62
+      ],
+      "mean_color": {
+        "r": 186,
+        "g": 69,
+        "b": 93
+      },
+      "bbox_img": {
+        "x": 641.0,
+        "y": 413.86131048202515,
+        "width": 6.994040275573752,
+        "height": 5.131195335388213
+      },
+      "cutout_path": "ClusterRenders\\edges_9\\cluster_007.png"
+    },
+    {
+      "cluster_id": 8,
+      "stroke_indices": [
+        63
+      ],
+      "mean_color": {
+        "r": 116,
+        "g": 72,
+        "b": 67
+      },
+      "bbox_img": {
+        "x": 467.8750016784668,
+        "y": 416.91208728027345,
+        "width": 17.124998321533212,
+        "height": 10.11967412185669
+      },
+      "cutout_path": "ClusterRenders\\edges_9\\cluster_008.png"
+    },
+    {
+      "cluster_id": 9,
+      "stroke_indices": [
+        74
+      ],
+      "mean_color": {
+        "r": 29,
+        "g": 27,
+        "b": 31
+      },
+      "bbox_img": {
+        "x": 392.94699752807617,
+        "y": 451.93245711898805,
+        "width": 1.0691879119872851,
+        "height": 1.1255595512389505
+      },
+      "cutout_path": "ClusterRenders\\edges_9\\cluster_009.png"
+    },
+    {
+      "cluster_id": 10,
+      "stroke_indices": [
+        82
+      ],
+      "mean_color": {
+        "r": 176,
+        "g": 176,
+        "b": 176
+      },
+      "bbox_img": {
+        "x": 288.0,
+        "y": 482.0,
+        "width": 6.0,
+        "height": 1.0297630920409802
+      },
+      "cutout_path": "ClusterRenders\\edges_9\\cluster_010.png"
+    },
+    {
+      "cluster_id": 11,
+      "stroke_indices": [
+        87
+      ],
+      "mean_color": {
+        "r": 68,
+        "g": 68,
+        "b": 70
+      },
+      "bbox_img": {
+        "x": 372.94699752807617,
+        "y": 488.93245711898805,
+        "width": 1.0691879119872851,
+        "height": 1.1255595512390073
+      },
+      "cutout_path": "ClusterRenders\\edges_9\\cluster_011.png"
+    },
+    {
+      "cluster_id": 12,
+      "stroke_indices": [
+        92
+      ],
+      "mean_color": {
+        "r": 215,
+        "g": 94,
+        "b": 34
+      },
+      "bbox_img": {
+        "x": 954.8537449874877,
+        "y": 496.95270052719115,
+        "width": 14.26947354888921,
+        "height": 12.134869419097924
+      },
+      "cutout_path": "ClusterRenders\\edges_9\\cluster_012.png"
+    },
+    {
+      "cluster_id": 13,
+      "stroke_indices": [
+        93,
+        99,
+        100,
+        102,
+        105,
+        106,
+        111,
+        112
+      ],
+      "mean_color": {
+        "r": 226,
+        "g": 98,
+        "b": 86
+      },
+      "bbox_img": {
+        "x": 726.7514824218752,
+        "y": 496.79107965850824,
+        "width": 28.47275636291488,
+        "height": 50.34349065399181
+      },
+      "cutout_path": "ClusterRenders\\edges_9\\cluster_013.png"
+    },
+    {
+      "cluster_id": 14,
+      "stroke_indices": [
+        95
+      ],
+      "mean_color": {
+        "r": 183,
+        "g": 18,
+        "b": 0
+      },
+      "bbox_img": {
+        "x": 963.0,
+        "y": 502.0,
+        "width": 3.0,
+        "height": 3.0
+      },
+      "cutout_path": "ClusterRenders\\edges_9\\cluster_014.png"
+    },
+    {
+      "cluster_id": 15,
+      "stroke_indices": [
+        124
+      ],
+      "mean_color": {
+        "r": 73,
+        "g": 69,
+        "b": 59
+      },
+      "bbox_img": {
+        "x": 383.90356347656257,
+        "y": 583.9509913635253,
+        "width": 11.186985771179138,
+        "height": 10.092043388366733
+      },
+      "cutout_path": "ClusterRenders\\edges_9\\cluster_015.png"
+    },
+    {
+      "cluster_id": 16,
+      "stroke_indices": [
+        133
+      ],
+      "mean_color": {
+        "r": 203,
+        "g": 52,
+        "b": 59
+      },
+      "bbox_img": {
+        "x": 674.9419915008544,
+        "y": 617.903548828125,
+        "width": 5.058008499145558,
+        "height": 6.166814346313345
+      },
+      "cutout_path": "ClusterRenders\\edges_9\\cluster_016.png"
+    },
+    {
+      "cluster_id": 17,
+      "stroke_indices": [
+        137
+      ],
+      "mean_color": {
+        "r": 227,
+        "g": 106,
+        "b": 103
+      },
+      "bbox_img": {
+        "x": 649.0,
+        "y": 635.0,
+        "width": 10.267631530761719,
+        "height": 7.057106689453121
+      },
+      "cutout_path": "ClusterRenders\\edges_9\\cluster_017.png"
+    },
+    {
+      "cluster_id": 18,
+      "stroke_indices": [
+        139
+      ],
+      "mean_color": {
+        "r": 43,
+        "g": 42,
+        "b": 45
+      },
+      "bbox_img": {
+        "x": 942.0,
+        "y": 639.0,
+        "width": 1.0,
+        "height": 1.0
+      },
+      "cutout_path": "ClusterRenders\\edges_9\\cluster_018.png"
+    },
+    {
+      "cluster_id": 19,
+      "stroke_indices": [
+        154
+      ],
+      "mean_color": {
+        "r": 126,
+        "g": 71,
+        "b": 37
+      },
+      "bbox_img": {
+        "x": 768.0,
+        "y": 677.9537630081177,
+        "width": 14.057106689453121,
+        "height": 12.177097686767524
+      },
+      "cutout_path": "ClusterRenders\\edges_9\\cluster_019.png"
+    }
+  ]
+}

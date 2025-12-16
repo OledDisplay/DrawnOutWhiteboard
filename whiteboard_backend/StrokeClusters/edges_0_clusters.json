@@ -1,0 +1,734 @@
+{
+  "original_name": "edges_0",
+  "image_index": 0,
+  "processed_image": "ProccessedImages\\processed_0.png",
+  "original_image": "ProccessedImages\\processed_0.png",
+  "strokes_json": "StrokeVectors\\edges_0.json",
+  "params": {
+    "stroke_color_bin": 24,
+    "color_distance_thresh": 70.0,
+    "adjacency_gap_px": 22.0,
+    "cluster_crop_margin_px": 4
+  },
+  "clusters": [
+    {
+      "cluster_id": 0,
+      "stroke_indices": [
+        0,
+        1,
+        2,
+        3,
+        4,
+        5,
+        6,
+        7,
+        8,
+        9,
+        10,
+        11,
+        12,
+        13,
+        15,
+        16,
+        17,
+        18,
+        19,
+        20,
+        21,
+        22,
+        23,
+        24,
+        25,
+        26,
+        27,
+        96,
+        97,
+        98,
+        99,
+        100
+      ],
+      "mean_color": {
+        "r": 200,
+        "g": 199,
+        "b": 196
+      },
+      "bbox_img": {
+        "x": 185.29884231185915,
+        "y": 3.2945894699096683,
+        "width": 466.50341843032845,
+        "height": 450.74305493927005
+      },
+      "cutout_path": "ClusterRenders\\edges_0\\cluster_000.png"
+    },
+    {
+      "cluster_id": 1,
+      "stroke_indices": [
+        14
+      ],
+      "mean_color": {
+        "r": 164,
+        "g": 164,
+        "b": 164
+      },
+      "bbox_img": {
+        "x": 648.0,
+        "y": 235.0,
+        "width": 1.0488671875000364,
+        "height": 3.0
+      },
+      "cutout_path": "ClusterRenders\\edges_0\\cluster_001.png"
+    },
+    {
+      "cluster_id": 2,
+      "stroke_indices": [
+        28
+      ],
+      "mean_color": {
+        "r": 186,
+        "g": 192,
+        "b": 177
+      },
+      "bbox_img": {
+        "x": 544.9199996948242,
+        "y": 513.8837468643188,
+        "width": 3.13710699462888,
+        "height": 2.1938441390991557
+      },
+      "cutout_path": "ClusterRenders\\edges_0\\cluster_002.png"
+    },
+    {
+      "cluster_id": 3,
+      "stroke_indices": [
+        29
+      ],
+      "mean_color": {
+        "r": 185,
+        "g": 191,
+        "b": 178
+      },
+      "bbox_img": {
+        "x": 290.0,
+        "y": 513.9224089965821,
+        "width": 3.1102834854125945,
+        "height": 75.07759100341787
+      },
+      "cutout_path": "ClusterRenders\\edges_0\\cluster_003.png"
+    },
+    {
+      "cluster_id": 4,
+      "stroke_indices": [
+        30
+      ],
+      "mean_color": {
+        "r": 181,
+        "g": 186,
+        "b": 173
+      },
+      "bbox_img": {
+        "x": 543.8823046875,
+        "y": 664.8594210739135,
+        "width": 4.21189936828614,
+        "height": 3.290272285461583
+      },
+      "cutout_path": "ClusterRenders\\edges_0\\cluster_004.png"
+    },
+    {
+      "cluster_id": 5,
+      "stroke_indices": [
+        31
+      ],
+      "mean_color": {
+        "r": 55,
+        "g": 55,
+        "b": 55
+      },
+      "bbox_img": {
+        "x": 985.8110872726439,
+        "y": 549.9511328125001,
+        "width": 5.455982810974206,
+        "height": 11.105525634765513
+      },
+      "cutout_path": "ClusterRenders\\edges_0\\cluster_005.png"
+    },
+    {
+      "cluster_id": 6,
+      "stroke_indices": [
+        32,
+        33
+      ],
+      "mean_color": {
+        "r": 118,
+        "g": 112,
+        "b": 98
+      },
+      "bbox_img": {
+        "x": 888.8924805831908,
+        "y": 561.9157448196411,
+        "width": 27.155314407348556,
+        "height": 38.13725023651125
+      },
+      "cutout_path": "ClusterRenders\\edges_0\\cluster_006.png"
+    },
+    {
+      "cluster_id": 7,
+      "stroke_indices": [
+        34
+      ],
+      "mean_color": {
+        "r": 32,
+        "g": 22,
+        "b": 18
+      },
+      "bbox_img": {
+        "x": 950.9456091308595,
+        "y": 580.2103724975586,
+        "width": 3.0543908691405477,
+        "height": 43.80052311706538
+      },
+      "cutout_path": "ClusterRenders\\edges_0\\cluster_007.png"
+    },
+    {
+      "cluster_id": 8,
+      "stroke_indices": [
+        35
+      ],
+      "mean_color": {
+        "r": 94,
+        "g": 81,
+        "b": 63
+      },
+      "bbox_img": {
+        "x": 950.9485490722657,
+        "y": 580.928334121704,
+        "width": 5.212497108459388,
+        "height": 45.07166587829602
+      },
+      "cutout_path": "ClusterRenders\\edges_0\\cluster_008.png"
+    },
+    {
+      "cluster_id": 9,
+      "stroke_indices": [
+        36
+      ],
+      "mean_color": {
+        "r": 83,
+        "g": 86,
+        "b": 79
+      },
+      "bbox_img": {
+        "x": 288.91313076019287,
+        "y": 588.9132691650391,
+        "width": 6.086869239807129,
+        "height": 79.08673083496092
+      },
+      "cutout_path": "ClusterRenders\\edges_0\\cluster_009.png"
+    },
+    {
+      "cluster_id": 10,
+      "stroke_indices": [
+        37
+      ],
+      "mean_color": {
+        "r": 137,
+        "g": 144,
+        "b": 129
+      },
+      "bbox_img": {
+        "x": 300.9588531799317,
+        "y": 594.9498081054687,
+        "width": 21.04114682006832,
+        "height": 13.099304382324362
+      },
+      "cutout_path": "ClusterRenders\\edges_0\\cluster_010.png"
+    },
+    {
+      "cluster_id": 11,
+      "stroke_indices": [
+        38,
+        39,
+        40
+      ],
+      "mean_color": {
+        "r": 9,
+        "g": 10,
+        "b": 9
+      },
+      "bbox_img": {
+        "x": 857.9999999999999,
+        "y": 600.0,
+        "width": 27.000000000000455,
+        "height": 3.0
+      },
+      "cutout_path": "ClusterRenders\\edges_0\\cluster_011.png"
+    },
+    {
+      "cluster_id": 12,
+      "stroke_indices": [
+        41
+      ],
+      "mean_color": {
+        "r": 165,
+        "g": 168,
+        "b": 159
+      },
+      "bbox_img": {
+        "x": 290.8987489700317,
+        "y": 649.9420615386962,
+        "width": 69.2363398971558,
+        "height": 20.14202678680431
+      },
+      "cutout_path": "ClusterRenders\\edges_0\\cluster_012.png"
+    },
+    {
+      "cluster_id": 13,
+      "stroke_indices": [
+        42
+      ],
+      "mean_color": {
+        "r": 105,
+        "g": 107,
+        "b": 100
+      },
+      "bbox_img": {
+        "x": 352.9353598632813,
+        "y": 667.8184776611328,
+        "width": 193.0646401367187,
+        "height": 0.18152233886746671
+      },
+      "cutout_path": "ClusterRenders\\edges_0\\cluster_013.png"
+    },
+    {
+      "cluster_id": 14,
+      "stroke_indices": [
+        43,
+        50
+      ],
+      "mean_color": {
+        "r": 209,
+        "g": 125,
+        "b": 129
+      },
+      "bbox_img": {
+        "x": 717.8844289779663,
+        "y": 693.8829011917114,
+        "width": 44.223090438842746,
+        "height": 38.22915996551512
+      },
+      "cutout_path": "ClusterRenders\\edges_0\\cluster_014.png"
+    },
+    {
+      "cluster_id": 15,
+      "stroke_indices": [
+        44,
+        57,
+        102
+      ],
+      "mean_color": {
+        "r": 237,
+        "g": 211,
+        "b": 214
+      },
+      "bbox_img": {
+        "x": 733.9535730819701,
+        "y": 704.9056074218751,
+        "width": 20.161491371154966,
+        "height": 25.09439257812494
+      },
+      "cutout_path": "ClusterRenders\\edges_0\\cluster_015.png"
+    },
+    {
+      "cluster_id": 16,
+      "stroke_indices": [
+        45
+      ],
+      "mean_color": {
+        "r": 153,
+        "g": 153,
+        "b": 153
+      },
+      "bbox_img": {
+        "x": 602.0,
+        "y": 705.0,
+        "width": 10.304408424377357,
+        "height": 5.0
+      },
+      "cutout_path": "ClusterRenders\\edges_0\\cluster_016.png"
+    },
+    {
+      "cluster_id": 17,
+      "stroke_indices": [
+        46
+      ],
+      "mean_color": {
+        "r": 195,
+        "g": 195,
+        "b": 195
+      },
+      "bbox_img": {
+        "x": 672.848693359375,
+        "y": 707.8499408111572,
+        "width": 9.207656921386729,
+        "height": 10.193301376342788
+      },
+      "cutout_path": "ClusterRenders\\edges_0\\cluster_017.png"
+    },
+    {
+      "cluster_id": 18,
+      "stroke_indices": [
+        47
+      ],
+      "mean_color": {
+        "r": 114,
+        "g": 114,
+        "b": 114
+      },
+      "bbox_img": {
+        "x": 637.9522050094604,
+        "y": 707.8946953125001,
+        "width": 7.184590217590426,
+        "height": 7.105304687499938
+      },
+      "cutout_path": "ClusterRenders\\edges_0\\cluster_018.png"
+    },
+    {
+      "cluster_id": 19,
+      "stroke_indices": [
+        48,
+        49,
+        56
+      ],
+      "mean_color": {
+        "r": 0,
+        "g": 0,
+        "b": 0
+      },
+      "bbox_img": {
+        "x": 617.0,
+        "y": 714.9999999999999,
+        "width": 45.0,
+        "height": 25.000000000000114
+      },
+      "cutout_path": "ClusterRenders\\edges_0\\cluster_019.png"
+    },
+    {
+      "cluster_id": 20,
+      "stroke_indices": [
+        51,
+        54,
+        69,
+        77,
+        80
+      ],
+      "mean_color": {
+        "r": 203,
+        "g": 168,
+        "b": 156
+      },
+      "bbox_img": {
+        "x": 817.9340369262695,
+        "y": 711.893171875,
+        "width": 92.20563159179687,
+        "height": 114.21845759582516
+      },
+      "cutout_path": "ClusterRenders\\edges_0\\cluster_020.png"
+    },
+    {
+      "cluster_id": 21,
+      "stroke_indices": [
+        52
+      ],
+      "mean_color": {
+        "r": 144,
+        "g": 151,
+        "b": 162
+      },
+      "bbox_img": {
+        "x": 184.99999999999994,
+        "y": 722.0,
+        "width": 8.526512829121202e-14,
+        "height": 3.0
+      },
+      "cutout_path": "ClusterRenders\\edges_0\\cluster_021.png"
+    },
+    {
+      "cluster_id": 22,
+      "stroke_indices": [
+        53,
+        59,
+        60,
+        61,
+        66,
+        74,
+        76
+      ],
+      "mean_color": {
+        "r": 114,
+        "g": 101,
+        "b": 88
+      },
+      "bbox_img": {
+        "x": 740.9569395675658,
+        "y": 722.0,
+        "width": 169.08929742431656,
+        "height": 106.08408832550049
+      },
+      "cutout_path": "ClusterRenders\\edges_0\\cluster_022.png"
+    },
+    {
+      "cluster_id": 23,
+      "stroke_indices": [
+        55
+      ],
+      "mean_color": {
+        "r": 160,
+        "g": 139,
+        "b": 134
+      },
+      "bbox_img": {
+        "x": 83.95174072265627,
+        "y": 718.95571484375,
+        "width": 4.132346529960614,
+        "height": 25.044285156249998
+      },
+      "cutout_path": "ClusterRenders\\edges_0\\cluster_023.png"
+    },
+    {
+      "cluster_id": 24,
+      "stroke_indices": [
+        58
+      ],
+      "mean_color": {
+        "r": 151,
+        "g": 151,
+        "b": 151
+      },
+      "bbox_img": {
+        "x": 633.8416166305542,
+        "y": 747.9428933105469,
+        "width": 9.220015632629384,
+        "height": 10.168736160278286
+      },
+      "cutout_path": "ClusterRenders\\edges_0\\cluster_024.png"
+    },
+    {
+      "cluster_id": 25,
+      "stroke_indices": [
+        62,
+        65,
+        71
+      ],
+      "mean_color": {
+        "r": 4,
+        "g": 5,
+        "b": 9
+      },
+      "bbox_img": {
+        "x": 312.86236816406256,
+        "y": 756.0,
+        "width": 56.13763183593761,
+        "height": 50.106004943847665
+      },
+      "cutout_path": "ClusterRenders\\edges_0\\cluster_025.png"
+    },
+    {
+      "cluster_id": 26,
+      "stroke_indices": [
+        63
+      ],
+      "mean_color": {
+        "r": 81,
+        "g": 84,
+        "b": 93
+      },
+      "bbox_img": {
+        "x": 349.8706083488464,
+        "y": 754.9227830810547,
+        "width": 5.3090847206115654,
+        "height": 11.237831680297745
+      },
+      "cutout_path": "ClusterRenders\\edges_0\\cluster_026.png"
+    },
+    {
+      "cluster_id": 27,
+      "stroke_indices": [
+        64,
+        70,
+        72
+      ],
+      "mean_color": {
+        "r": 25,
+        "g": 27,
+        "b": 32
+      },
+      "bbox_img": {
+        "x": 185.89654824829103,
+        "y": 752.8027379379272,
+        "width": 41.215092020034774,
+        "height": 54.28780313873301
+      },
+      "cutout_path": "ClusterRenders\\edges_0\\cluster_027.png"
+    },
+    {
+      "cluster_id": 28,
+      "stroke_indices": [
+        67,
+        68,
+        73,
+        75,
+        79
+      ],
+      "mean_color": {
+        "r": 202,
+        "g": 164,
+        "b": 155
+      },
+      "bbox_img": {
+        "x": 741.0,
+        "y": 762.0,
+        "width": 64.0,
+        "height": 66.08408832550049
+      },
+      "cutout_path": "ClusterRenders\\edges_0\\cluster_028.png"
+    },
+    {
+      "cluster_id": 29,
+      "stroke_indices": [
+        78
+      ],
+      "mean_color": {
+        "r": 135,
+        "g": 135,
+        "b": 135
+      },
+      "bbox_img": {
+        "x": 82.99999999999999,
+        "y": 813.0,
+        "width": 4.263256414560601e-14,
+        "height": 4.0
+      },
+      "cutout_path": "ClusterRenders\\edges_0\\cluster_029.png"
+    },
+    {
+      "cluster_id": 30,
+      "stroke_indices": [
+        81,
+        82,
+        95
+      ],
+      "mean_color": {
+        "r": 190,
+        "g": 191,
+        "b": 192
+      },
+      "bbox_img": {
+        "x": 36.3767343583107,
+        "y": 923.9074943618773,
+        "width": 462.7066607222557,
+        "height": 176.2130251693727
+      },
+      "cutout_path": "ClusterRenders\\edges_0\\cluster_030.png"
+    },
+    {
+      "cluster_id": 31,
+      "stroke_indices": [
+        83,
+        84,
+        88,
+        89,
+        91,
+        93,
+        104,
+        105
+      ],
+      "mean_color": {
+        "r": 198,
+        "g": 188,
+        "b": 177
+      },
+      "bbox_img": {
+        "x": 82.95272679138182,
+        "y": 946.9517421875,
+        "width": 140.14546137046815,
+        "height": 102.14646528625485
+      },
+      "cutout_path": "ClusterRenders\\edges_0\\cluster_031.png"
+    },
+    {
+      "cluster_id": 32,
+      "stroke_indices": [
+        85,
+        86,
+        87,
+        90,
+        94,
+        106
+      ],
+      "mean_color": {
+        "r": 201,
+        "g": 193,
+        "b": 185
+      },
+      "bbox_img": {
+        "x": 316.95220500946044,
+        "y": 946.9517421875,
+        "width": 140.15004108428963,
+        "height": 103.09318750000011
+      },
+      "cutout_path": "ClusterRenders\\edges_0\\cluster_032.png"
+    },
+    {
+      "cluster_id": 33,
+      "stroke_indices": [
+        92
+      ],
+      "mean_color": {
+        "r": 77,
+        "g": 68,
+        "b": 63
+      },
+      "bbox_img": {
+        "x": 354.0,
+        "y": 1014.9296368255615,
+        "width": 68.058016670227,
+        "height": 4.149836135864348
+      },
+      "cutout_path": "ClusterRenders\\edges_0\\cluster_033.png"
+    },
+    {
+      "cluster_id": 34,
+      "stroke_indices": [
+        101
+      ],
+      "mean_color": {
+        "r": 69,
+        "g": 71,
+        "b": 74
+      },
+      "bbox_img": {
+        "x": 353.95377588272095,
+        "y": 693.0,
+        "width": 3.0924482345581055,
+        "height": 3.046236991882324
+      },
+      "cutout_path": "ClusterRenders\\edges_0\\cluster_034.png"
+    },
+    {
+      "cluster_id": 35,
+      "stroke_indices": [
+        103
+      ],
+      "mean_color": {
+        "r": 14,
+        "g": 16,
+        "b": 14
+      },
+      "bbox_img": {
+        "x": 82.00749412822722,
+        "y": 773.9537630081177,
+        "width": 3.0445813722610637,
+        "height": 2.0924739837646484
+      },
+      "cutout_path": "ClusterRenders\\edges_0\\cluster_035.png"
+    }
+  ]
+}

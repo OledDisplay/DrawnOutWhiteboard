@@ -67,7 +67,7 @@ class _VectorViewerScreenState extends State<VectorViewerScreen>
   int _stepStrokeCount = 0;
 
   static const double _targetResolution = 2000.0; // target max side
-  static const double _basePenWidthPx = 3.0; // logical image px
+  static const double _basePenWidthPx = 4; // logical image px
 
   // ------------ Backend API config ------------
   static const String _apiBaseUrl = 'http://127.0.0.1:8000'; // change if needed
@@ -115,7 +115,7 @@ class _VectorViewerScreenState extends State<VectorViewerScreen>
 
   // UI controllers for loading JSONs (images)
   final TextEditingController _fileNameController =
-      TextEditingController(text: 'edges_0_skeleton.json');
+      TextEditingController(text: 'edges_0.json');
   final TextEditingController _posXController =
       TextEditingController(text: '0');
   final TextEditingController _posYController =
@@ -369,6 +369,58 @@ class _VectorViewerScreenState extends State<VectorViewerScreen>
 
   // ------------------- LOADING & BUILDING (IMAGES) -------------------
 
+  Color _parseStrokeColor(dynamic strokeJson) {
+    if (strokeJson is! Map) return Colors.black;
+
+    // Prefer explicit RGB arrays
+    dynamic rgb = strokeJson['color_rgb'] ??
+        strokeJson['colour_rgb'] ??
+        strokeJson['rgb'] ??
+        strokeJson['color'] ??
+        strokeJson['stroke_color'];
+
+    if (rgb is List && rgb.length >= 3) {
+      double r = (rgb[0] as num).toDouble();
+      double g = (rgb[1] as num).toDouble();
+      double b = (rgb[2] as num).toDouble();
+
+      // Allow 0..1 floats too
+      if (r <= 1.0 && g <= 1.0 && b <= 1.0) {
+        r *= 255.0;
+        g *= 255.0;
+        b *= 255.0;
+      }
+
+      int ri = r.round().clamp(0, 255);
+      int gi = g.round().clamp(0, 255);
+      int bi = b.round().clamp(0, 255);
+      return Color.fromARGB(255, ri, gi, bi);
+    }
+
+    // Hex fallback: "#RRGGBB" / "RRGGBB"
+    final hex = strokeJson['color_hex'] ??
+        strokeJson['colour_hex'] ??
+        strokeJson['hex'];
+    if (hex is String && hex.isNotEmpty) {
+      var s = hex.trim();
+      if (s.startsWith('#')) s = s.substring(1);
+      if (s.length == 6) {
+        final v = int.tryParse(s, radix: 16);
+        if (v != null) return Color(0xFF000000 | v);
+      }
+    }
+
+    // Int fallback: 0xAARRGGBB or 0xRRGGBB
+    final ci = strokeJson['color_int'] ?? strokeJson['colour_int'];
+    if (ci is int) {
+      if ((ci & 0xFF000000) == 0) return Color(0xFF000000 | ci);
+      return Color(ci);
+    }
+
+    return Colors.black;
+  }
+
+
   Future<void> _loadAndRender() async {
     final fileName = _fileNameController.text.trim();
     if (fileName.isEmpty) {
@@ -456,40 +508,41 @@ class _VectorViewerScreenState extends State<VectorViewerScreen>
       _srcWidth = srcWidth;
       _srcHeight = srcHeight;
 
-      if (format == 'bezier_cubic') {
-        for (final s in strokesJson) {
-          if (s is! Map || s['segments'] is! List) continue;
-          final List segsJson = s['segments'] as List;
-          final segs = <CubicSegment>[];
-          for (final seg in segsJson) {
-            if (seg is List && seg.length >= 8) {
-              final p0 = Offset(
-                  (seg[0] as num).toDouble(), (seg[1] as num).toDouble());
-              final c1 = Offset(
-                  (seg[2] as num).toDouble(), (seg[3] as num).toDouble());
-              final c2 = Offset(
-                  (seg[4] as num).toDouble(), (seg[5] as num).toDouble());
-              final p1 = Offset(
-                  (seg[6] as num).toDouble(), (seg[7] as num).toDouble());
-              segs.add(CubicSegment(p0: p0, c1: c1, c2: c2, p1: p1));
-            }
+     if (format == 'bezier_cubic') {
+      for (final s in strokesJson) {
+        if (s is! Map || s['segments'] is! List) continue;
+
+        final color = _parseStrokeColor(s);
+
+        final List segsJson = s['segments'] as List;
+        final segs = <CubicSegment>[];
+        for (final seg in segsJson) {
+          if (seg is List && seg.length >= 8) {
+            final p0 = Offset((seg[0] as num).toDouble(), (seg[1] as num).toDouble());
+            final c1 = Offset((seg[2] as num).toDouble(), (seg[3] as num).toDouble());
+            final c2 = Offset((seg[4] as num).toDouble(), (seg[5] as num).toDouble());
+            final p1 = Offset((seg[6] as num).toDouble(), (seg[7] as num).toDouble());
+            segs.add(CubicSegment(p0: p0, c1: c1, c2: c2, p1: p1));
           }
-          if (segs.isNotEmpty) cubics.add(StrokeCubic(segs));
         }
-      } else {
-        for (final s in strokesJson) {
-          if (s is! Map || s['points'] is! List) continue;
-          final List pts = s['points'] as List;
-          final points = <Offset>[];
-          for (final p in pts) {
-            if (p is List && p.length >= 2) {
-              points.add(
-                  Offset((p[0] as num).toDouble(), (p[1] as num).toDouble()));
-            }
-          }
-          if (points.length >= 2) poly.add(StrokePolyline(points));
-        }
+        if (segs.isNotEmpty) cubics.add(StrokeCubic(segs, color: color));
       }
+    } else {
+      for (final s in strokesJson) {
+        if (s is! Map || s['points'] is! List) continue;
+
+        final color = _parseStrokeColor(s);
+
+        final List pts = s['points'] as List;
+        final points = <Offset>[];
+        for (final p in pts) {
+          if (p is List && p.length >= 2) {
+            points.add(Offset((p[0] as num).toDouble(), (p[1] as num).toDouble()));
+          }
+        }
+        if (points.length >= 2) poly.add(StrokePolyline(points, color: color));
+      }
+    }
 
       _polyStrokes = poly;
       _cubicStrokes = cubics;
@@ -1805,6 +1858,7 @@ class _VectorViewerScreenState extends State<VectorViewerScreen>
         pts: pts,
         basePenWidth: basePenWidth,
         diag: diagSafe,
+        strokeColor: s.color,
       ));
     }
 
@@ -1826,6 +1880,7 @@ class _VectorViewerScreenState extends State<VectorViewerScreen>
         pts: pts,
         basePenWidth: basePenWidth,
         diag: diagSafe,
+        strokeColor: c.color,
       ));
     }
 
@@ -1839,6 +1894,7 @@ class _VectorViewerScreenState extends State<VectorViewerScreen>
     required List<Offset> pts,
     required double basePenWidth,
     required double diag,
+    Color? strokeColor,
   }) {
     final scale = objectScale <= 0 ? 1.0 : objectScale;
 
@@ -1955,6 +2011,7 @@ class _VectorViewerScreenState extends State<VectorViewerScreen>
       jsonName: jsonName,
       objectOrigin: objectOrigin,
       objectScale: objectScale,
+      color: strokeColor ?? Colors.black,
       points: displayPts,
       originalPoints: workPts,
       lengthPx: length,
@@ -1966,6 +2023,7 @@ class _VectorViewerScreenState extends State<VectorViewerScreen>
       drawCostTotal: drawCostTotal,
       drawTimeSec: drawTimeSec,
     );
+
   }
 
   Offset _centroid(List<Offset> pts) {
@@ -2090,8 +2148,16 @@ class _VectorViewerScreenState extends State<VectorViewerScreen>
 
 class StrokePolyline {
   final List<Offset> points;
-  const StrokePolyline(this.points);
+  final Color color;
+  const StrokePolyline(this.points, {this.color = Colors.black});
 }
+
+class StrokeCubic {
+  final List<CubicSegment> segments;
+  final Color color;
+  const StrokeCubic(this.segments, {this.color = Colors.black});
+}
+
 
 class CubicSegment {
   final Offset p0;
@@ -2104,11 +2170,6 @@ class CubicSegment {
     required this.c2,
     required this.p1,
   });
-}
-
-class StrokeCubic {
-  final List<CubicSegment> segments;
-  const StrokeCubic(this.segments);
 }
 
 class GlyphData {
@@ -2134,6 +2195,8 @@ class DrawableStroke {
   final Offset centroid;
   final Rect bounds;
   final double curvatureMetricDeg;
+  final Color color;
+
 
   final List<double> cumGeomLen;
   final List<double> cumDrawCost;
@@ -2161,6 +2224,7 @@ class DrawableStroke {
     required this.cumDrawCost,
     required this.drawCostTotal,
     required this.drawTimeSec,
+    required this.color,
     this.travelTimeBeforeSec = 0.0,
     this.timeWeight = 0.0,
   });
@@ -2308,11 +2372,12 @@ class WhiteboardPainter extends CustomPainter {
     final penW = (basePenWidth / viewScale).clamp(0.5, 10.0);
 
     final paintLine = Paint()
-      ..color = Colors.black
-      ..style = PaintingStyle.stroke
-      ..strokeCap = StrokeCap.round
-      ..strokeJoin = StrokeJoin.round
-      ..strokeWidth = penW;
+    ..color = stroke.color
+    ..style = PaintingStyle.stroke
+    ..strokeCap = StrokeCap.round
+    ..strokeJoin = StrokeJoin.round
+    ..strokeWidth = penW;
+
 
     canvas.drawPath(path, paintLine);
   }

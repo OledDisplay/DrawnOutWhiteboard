@@ -26,11 +26,10 @@ import numpy as np
 #This allows us to then easily measure, decide on line directions and record lines with our vectorizer (look at it next)
 
 
-
 # ===================== PATHS =====================
 BASE = Path(__file__).resolve().parent
-IN_DIR  = BASE / "ProccessedImages"   # input: your already processed images
-OUT_DIR = BASE / "Skeletonized"       # output: skeleton PNGs
+IN_DIR  = BASE / "ProccessedImages"   # input: your already processed images (now includes bundles)
+OUT_DIR = BASE / "Skeletonized"       # output: skeleton PNGs (mirrors bundle structure)
 
 # ===================== KNOBS =====================
 
@@ -51,8 +50,7 @@ BAND_HALF = 0.5
 
 # Thinning passes for strokes / bands (only to make them 1px wide, nothing fancy)
 USE_SKIMAGE = True           # try skimage.thin if available
-MAX_THIN_PASSES = 1          # Zhang–Suen fallback will loop until stable anyway
-
+MAX_THIN_PASSES = None          
 
 # ===================== BASIC HELPERS =====================
 
@@ -63,22 +61,19 @@ def _finite_nd(a: np.ndarray) -> bool:
 # ---------- Binarize from processed image ----------
 def load_foreground(path: Path) -> np.ndarray:
     """
-    Input: grayscale line-art like your processed PNGs (white on black).
+    Input: edges PNGs (0/255 mostly).
     Output: fg 0/1 mask (1 = foreground strokes/shapes).
     """
     img = cv2.imread(str(path), cv2.IMREAD_GRAYSCALE)
     if img is None:
         raise FileNotFoundError(str(path))
 
-    # Otsu to get a clear 0/255 separation
-    _, bw = cv2.threshold(img, 0, 255, cv2.THRESH_BINARY + cv2.THRESH_OTSU)
+    # For edges images: foreground is simply non-zero.
+    fg = (img > 0).astype(np.uint8)
 
-    # Decide which is foreground: minority color is fg
-    white_ratio = float((bw == 255).mean())
-    if white_ratio < 0.5:
-        fg = (bw == 255).astype(np.uint8)
-    else:
-        fg = (bw == 0).astype(np.uint8)
+    # Light close to reconnect tiny breaks (helps missing segments)
+    k = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (3, 3))
+    fg = cv2.morphologyEx(fg, cv2.MORPH_CLOSE, k, iterations=1)
 
     # Drop tiny connected components
     num, lab, stats, _ = cv2.connectedComponentsWithStats(fg, connectivity=8)
@@ -88,6 +83,7 @@ def load_foreground(path: Path) -> np.ndarray:
             out[lab == i] = 1
 
     return out
+
 
 
 # ---------- Thinning (for thin strokes + offset bands) ----------
@@ -164,9 +160,14 @@ def pen_width_skeleton(fg01: np.ndarray, pen_width: float) -> np.ndarray:
             # use thinned version, but *only* inside this component
             out[comp_mask & (thin_all > 0)] = 1
         else:
-            # -------- fat blob: canny-style offset lines --------
-            # we keep a ring at depth ~= pen_width from the border
+             # -------- fat blob: offset ring + taper fallback --------
+            # ring where it exists
             out[comp_mask & (band_mask > 0)] = 1
+
+            # fallback: if taper is thinner than pen_width, ring disappears.
+            # keep centerline there so ends don't vanish.
+            taper_zone = comp_mask & (dist < band_lo) & (thin_all > 0)
+            out[taper_zone] = 1
 
     # one more very light thin pass, just to ensure 1px thickness everywhere
     out = thin_mask(out)
@@ -176,42 +177,48 @@ def pen_width_skeleton(fg01: np.ndarray, pen_width: float) -> np.ndarray:
 
 # ===================== MAIN PIPELINE =====================
 
-def process_one(path: Path, output : Path):
+def process_one(path: Path, out_path: Path):
+    out_path.parent.mkdir(parents=True, exist_ok=True)
 
-    output.mkdir(parents=True, exist_ok=True)
-
-    print(f"[START] {path.name}")
+    print(f"[START] {path}")
     fg = load_foreground(path)
-
     skel = pen_width_skeleton(fg, PEN_WIDTH)
 
     # 0/1 → 0/255 for saving
     img_out = (skel * 255).astype(np.uint8)
-    out_path = output / f"{path.stem}_skeleton.png"
     cv2.imwrite(str(out_path), img_out)
     print(f"[OK]  wrote {out_path}")
 
 
 def skeletonize_images():
-
     import shutil
     if OUT_DIR.exists():
         shutil.rmtree(OUT_DIR)
     OUT_DIR.mkdir(parents=True, exist_ok=True)
 
+    # NEW: recursive search through bundles + top-level.
+    # Pick edge images only; ignore json, processed_xxx images, etc.
+    exts = {".png", ".jpg", ".jpeg", ".bmp", ".tif", ".tiff", ".webp"}
     imgs = sorted(
         [
-            p for p in IN_DIR.glob("*")
-            if p.suffix.lower() in (".png", ".jpg", ".jpeg", ".bmp", ".tif", ".tiff") and "edges" in p.stem.lower()
+            p for p in IN_DIR.rglob("*")
+            if p.is_file()
+            and p.suffix.lower() in exts
+            and "edges" in p.stem.lower()
         ],
-        key=lambda p: p.name.lower(),
+        key=lambda p: str(p).lower(),
     )
-    print(f"[INFO] IN={IN_DIR}  OUT={OUT_DIR}  found={len(imgs)} image(s)")
 
+    print(f"[INFO] IN={IN_DIR}  OUT={OUT_DIR}  found={len(imgs)} image(s)")
     if not imgs:
         print("[!] No images.")
         return
 
     for p in imgs:
-        process_one(p, OUT_DIR)
+        rel = p.relative_to(IN_DIR)              # e.g. processed_12/edges_12_red.png
+        out_path = OUT_DIR / rel                # mirror structure under Skeletonized
+        process_one(p, out_path)
 
+
+if "__main__":
+    skeletonize_images()
