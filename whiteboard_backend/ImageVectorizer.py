@@ -5,7 +5,7 @@ import json
 import math
 import time
 from pathlib import Path
-from typing import List, Tuple
+from typing import List, Tuple, Optional
 
 import cv2
 import numpy as np
@@ -13,68 +13,6 @@ import numpy as np
 import os
 import multiprocessing as mp
 from concurrent.futures import ProcessPoolExecutor, as_completed
-
-
-
-#Step 3 of printing - take our skeletonized image and split it into vectors to draw
-
-#Input  - 1px skeleton PNGs (0 / 255) coming out of our pen-width-aware skeletonizer
-#Output - JSON files with clean, cubic Bezier strokes, ready for drawing / printing
-
-#This is the main image → vector step. Here we take the thin skeleton lines and turn them into strokes that actually make sense to draw
-
-#Step 1 – load + binarize
-#We treat the skeleton PNG as a simple 0/1 mask, and dont do any extra thinning -> thats been pushed out to the skeletonizer :
-
-#Step 2 – graph-based stroke tracing
-#We see the skeleton as a graph:
-#- every foreground pixel is a node,
-#- 8-connected neighbors are edges,
-#- degree map tells us if a pixel is an endpoint of a line, a plain interior point - 2 node, or a junction (intersecting point of lines)
-
-#Tracing logic:
-#As a baseline we  want to break off at SHARP turns to have simpler strokes. But when 2 lines intersect we dont want a false breakoff -> we wanna keep going
-#So we start strokes from all non-degree-2 nodes first (endpoints / junctions),
-#- follow chains of degree-2 pixels straight through (simple interior lines) -> simply walking a line,
-#- at junctions (intersections) we simulate short “look-ahead” walks on all branches and scores them by:
-#   * how straight they are (deflection angle),
-#   * how smooth they are (local curvature),
-#   * how long they run.
-#This allows us to continue on a valid path, and leave the other sharp degreee breakoffs behind, not causing trouble
-
-#Second pass:
-#- after endpoints/junctions, we run again starting from pure degree-2 loops to pick up closed shapes like circles that never hit an endpoint.
-
-#Step 3 – corner-aware segmentation 
-#Here we have ready traced lines and we ACTUALLY start splitting their inner sharp turns into seperate strokes
-#We do this by:
-#- computing a smoothed direction angle along the polyline in a small window,
-#- measuring how much the direction changes between samples (curvature),
-#- scanning forward and grouping “turn regions” over several indices.
-
-#Step 4 – Douglas–Peucker simplification
-#Now each stroke is still a polyline with potentially too many points ->
-#We want to give more opurtunity to the rendering engine, and not just have many pixels to draw
-#We run a conservative
-#We never touch indices where the direction changes, so curves stay intact;
-
-#Step 5 – merge small strokes into neighbours
-#The vectorizer tends to create lots of tiny strokes around bigger ones and we end up with a crazy amount of strokes
-#*optimizing the walk and breakoff logic to prevent this is just not worth it, considering how difficult i'd be 
-#To make drawing cleaner and reduce overhead we try to merge small strokes together, and with their natural bigger neighbors
-
-#Step 5b – coverage safety pass
-#All of the earlier logic sometimes drops some strokes, so we keep a hard pixel record.
-#If any of the pixels have been left unasigned we walk them to turn them into strokes
-
-#Step 6 – Catmull–Rom → cubic Bezier conversion
-#At this point we have clean polylines (list of [x, y] points). We convert them into
-#cubic Bezier segments, which are nicer to render and animate:
-#- use centripetal Catmull–Rom splines (alpha = 0.5) to estimate a smooth curve
-#  passing through the sample points,
-#- for each segment between Pi and Pi+1 we compute control points from local tangents
-#  and emit [x0, y0, cx1, cy1, cx2, cy2, x1, y1].
-
 
 from StrokeBundleMerger import merge_polyline_collections
 
@@ -94,7 +32,7 @@ IN_DIR = BASE / "Skeletonized"
 OUT_DIR = BASE / "StrokeVectors"
 
 # ------------------- GLOBAL KNOBS -------------------
-LEFTOVER_MIN_CC_PIXELS = 0   
+LEFTOVER_MIN_CC_PIXELS = 0
 BLUR_BEFORE_BIN = 0            # 0 off, else odd (e.g., 3)
 
 CATMULL_ALPHA = 0.5            # centripetal Catmull–Rom
@@ -137,7 +75,7 @@ MERGE_DIST_MAX             = 10.0    # px
 MERGE_ANGLE_MAX            = 90.0  # deg – max angle at join to allow merge
 
 #POINT SIMPLIFICATION
-SIMPLIFY_EPS_PX = 0.4 
+SIMPLIFY_EPS_PX = 0.4
 
 # 8-connected neighbor offsets
 NEIGHBORS_8 = [
@@ -145,6 +83,29 @@ NEIGHBORS_8 = [
     ( 0, -1),          ( 0, 1),
     ( 1, -1), ( 1, 0), ( 1, 1),
 ]
+
+# ------------------- COLOR GROUP ID -------------------
+COLOR_ORDER_LIGHT_TO_DARK = [
+    "white",
+    "yellow",
+    "orange",
+    "cyan",
+    "green",
+    "magenta",
+    "red",
+    "blue",
+    "purple",
+    "gray",
+    "black",
+]
+
+def _color_group_id_from_color_name(name: str) -> int:
+    n = (name or "").strip().lower()
+    try:
+        return int(COLOR_ORDER_LIGHT_TO_DARK.index(n) + 1)  # 1..11
+    except ValueError:
+        return 0
+
 
 # ------------------- FINITE CHECKS -------------------
 
@@ -720,7 +681,7 @@ def _merge_small_strokes(polys: List[np.ndarray], diag: float) -> List[np.ndarra
     angle_thresh = MERGE_ANGLE_MAX
 
     tile = int(max(4.0, dist_thresh * 2.0))
-    grid: Dict[Tuple[int, int], set] = {}  # (tx,ty) -> set(stroke_index)
+    grid = {}  # (tx,ty) -> set(stroke_index)
     active = [True] * n
 
     s_start = [None] * n
@@ -728,7 +689,6 @@ def _merge_small_strokes(polys: List[np.ndarray], diag: float) -> List[np.ndarra
     t_start = [None] * n
     t_end   = [None] * n
 
-    # track which cells each stroke is indexed in (so we can remove it)
     stroke_cells: List[set] = [set() for _ in range(n)]
 
     def _cell_for_pt(pt):
@@ -752,7 +712,6 @@ def _merge_small_strokes(polys: List[np.ndarray], diag: float) -> List[np.ndarra
         stroke_cells[idx].add(key)
 
     def recache(idx):
-        # remove old entries first (critical for performance)
         _deindex(idx)
 
         p = merged[idx]
@@ -776,7 +735,6 @@ def _merge_small_strokes(polys: List[np.ndarray], diag: float) -> List[np.ndarra
         _index_endpoint(idx, a)
         _index_endpoint(idx, b)
 
-    # build index
     for i in range(n):
         if merged[i] is None or merged[i].shape[0] < 2:
             active[i] = False
@@ -834,8 +792,6 @@ def _merge_small_strokes(polys: List[np.ndarray], diag: float) -> List[np.ndarra
             bt0 = t_start[j]
             bt1 = t_end[j]
 
-            # use squared distances (avoid sqrt in hot loop)
-            # 1) big_end -> small_start
             dx = float(b1[0] - s0[0]); dy = float(b1[1] - s0[1])
             d2 = dx*dx + dy*dy
             if d2 <= dist2_thresh:
@@ -851,7 +807,6 @@ def _merge_small_strokes(polys: List[np.ndarray], diag: float) -> List[np.ndarra
                             best_target_j = j
                             best_new_poly = new
 
-            # 2) big_end -> small_end (reverse small)
             dx = float(b1[0] - s1[0]); dy = float(b1[1] - s1[1])
             d2 = dx*dx + dy*dy
             if d2 <= dist2_thresh:
@@ -868,7 +823,6 @@ def _merge_small_strokes(polys: List[np.ndarray], diag: float) -> List[np.ndarra
                             best_target_j = j
                             best_new_poly = new
 
-            # 3) small_end -> big_start
             dx = float(s1[0] - b0[0]); dy = float(s1[1] - b0[1])
             d2 = dx*dx + dy*dy
             if d2 <= dist2_thresh:
@@ -884,7 +838,6 @@ def _merge_small_strokes(polys: List[np.ndarray], diag: float) -> List[np.ndarra
                             best_target_j = j
                             best_new_poly = new
 
-            # 4) small_start -> big_start (reverse small)
             dx = float(s0[0] - b0[0]); dy = float(s0[1] - b0[1])
             d2 = dx*dx + dy*dy
             if d2 <= dist2_thresh:
@@ -1091,7 +1044,7 @@ def _catmull_rom_to_beziers(pts: np.ndarray, alpha=0.5) -> List[List[float]]:
 
 # ------------------- PROCESS SINGLE -------------------
 
-def _process_single_to_data(path: Path) -> dict:
+def _process_single_to_data(path: Path, color_group_id: int = 0) -> dict:
     fg = _load_edges_binary(path)
     H, W = fg.shape
     diag = math.hypot(W, H)
@@ -1156,7 +1109,7 @@ def _process_single_to_data(path: Path) -> dict:
                     segs.append(seg)
             beziers = segs
         if beziers:
-            strokes.append({"segments": beziers})
+            strokes.append({"segments": beziers, "color_group_id": int(color_group_id)})
 
     t1 = time.time()
 
@@ -1225,7 +1178,9 @@ def _process_single_to_polylines(path: Path) -> Tuple[int, int, List[np.ndarray]
 
 
 def _process_single(path: Path, output: Path) -> Tuple[str, dict]:
-    data = _process_single_to_data(path)
+    cname = _parse_color_name_from_stem(path.stem)
+    gid = _color_group_id_from_color_name(cname)
+    data = _process_single_to_data(path, color_group_id=gid)
     output.mkdir(parents=True, exist_ok=True)
     out_json = output / f"{path.stem}.json"
     out_json.write_text(json.dumps(data, indent=2), encoding="utf-8")
@@ -1274,17 +1229,17 @@ def _process_one_bundle_dir(bdir_str: str, out_dir_str: str) -> Tuple[str, dict]
     if base_W is None or base_H is None:
         return (bdir.name, {"skipped": True, "reason": "no valid passes"})
 
-    merged_polys = merge_polyline_collections(collections, width=base_W, height=base_H)
+    merged_items = merge_polyline_collections(collections, width=base_W, height=base_H)
 
-    # Convert merged polylines -> bezier strokes once
+    # Convert merged polylines -> bezier strokes once (keep color_group_id from merger)
     strokes = []
-    for poly in merged_polys:
+    for poly, gid in merged_items:
         if poly is None or poly.shape[0] < 2:
             continue
         beziers = _catmull_rom_to_beziers(poly, alpha=CATMULL_ALPHA)
         if not beziers:
             continue
-        strokes.append({"segments": beziers})
+        strokes.append({"segments": beziers, "color_group_id": int(gid)})
 
     out = {
         "version": 15,
@@ -1353,8 +1308,6 @@ def vectorize_images():
 
             print(f"[INFO] bundle parallel: workers={workers}")
 
-            # Important: Windows needs proper __main__ guard (fixed below).
-            # Also: keep OpenCV threads low per process (CV2_THREADS_PER_PROCESS).
             futures = []
             with ProcessPoolExecutor(max_workers=workers) as ex:
                 for bdir in bundle_dirs:
@@ -1368,7 +1321,6 @@ def vectorize_images():
                         print(f"[OK] {bname}: curves={stats['curves']} passes={stats['passes']} "
                               f"pass_polys={stats['pass_total_polys']} time={stats['time_sec']}s")
         else:
-            # sequential fallback (your old behavior)
             for bdir in bundle_dirs:
                 bname, stats = _process_one_bundle_dir(str(bdir), str(OUT_DIR))
                 if stats.get("skipped"):
@@ -1384,7 +1336,6 @@ def vectorize_images():
               f"time={meta['stats']['time_sec']}s")
 
 
-        
 if __name__ == "__main__":
     mp.freeze_support()  # Windows-safe for ProcessPool
     try:
@@ -1392,4 +1343,3 @@ if __name__ == "__main__":
     except Exception:
         pass
     vectorize_images()
-

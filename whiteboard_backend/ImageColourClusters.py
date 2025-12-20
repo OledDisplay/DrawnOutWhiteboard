@@ -52,13 +52,20 @@ def color_rank(name: str) -> int:
 # CONFIG (simple + blunt)
 # ============================
 # “blanket threshold” in image pixels (bbox-to-bbox distance)
-GROUP_RADIUS_PX = 30.0
+GROUP_RADIUS_PX = 10.0
 
 # spatial hash cell size; should be >= radius so neighbors are local
 GRID_CELL_PX = 48.0
 
 # crop padding (image pixels)
 CLUSTER_CROP_PAD = 8
+
+# --- color bit-shift simplification (back again) ---
+# Quantize RGB by shifting right (e.g. 4 => 16 bins per channel).
+RGB_Q_SHIFT = 3
+
+# If a stroke is missing color_id, do NOT guess its color by RGB unless you flip this.
+ALLOW_FALLBACK_COLOR_GUESS = False
 
 
 # ============================
@@ -180,7 +187,56 @@ def _stroke_bbox_from_polyline(stroke: Dict[str, Any]) -> Optional[Tuple[float,f
         return None
     return (min(xs), min(ys), max(xs), max(ys))
 
-def _stroke_color_name(stroke: Dict[str, Any]) -> str:
+def _stroke_rgb(stroke: Dict[str, Any]) -> Optional[Tuple[int,int,int]]:
+    rgb = stroke.get("color_rgb")
+    if isinstance(rgb, list) and len(rgb) >= 3:
+        try:
+            r, g, b = int(rgb[0]), int(rgb[1]), int(rgb[2])
+            r = max(0, min(255, r))
+            g = max(0, min(255, g))
+            b = max(0, min(255, b))
+            return (r, g, b)
+        except Exception:
+            return None
+
+    hx = stroke.get("color_hex")
+    if isinstance(hx, str) and re.match(r"^#?[0-9a-fA-F]{6}$", hx.strip()):
+        h = hx.strip().lstrip("#")
+        try:
+            return (int(h[0:2], 16), int(h[2:4], 16), int(h[4:6], 16))
+        except Exception:
+            return None
+
+    return None
+
+def _quantize_rgb(rgb: Tuple[int,int,int], shift: int) -> Tuple[int,int,int]:
+    # channel bin index (0..15 if shift==4)
+    rq = (rgb[0] >> shift)
+    gq = (rgb[1] >> shift)
+    bq = (rgb[2] >> shift)
+    # expand back to a representative 8-bit value (upper bits preserved)
+    return ((rq << shift), (gq << shift), (bq << shift))
+
+def _quant_key_rgb(rgb: Tuple[int,int,int], shift: int) -> int:
+    rq = (rgb[0] >> shift) & 0xFF
+    gq = (rgb[1] >> shift) & 0xFF
+    bq = (rgb[2] >> shift) & 0xFF
+    # 12-bit style key when shift==4 (4 bits per channel)
+    return (rq << 8) | (gq << 4) | bq
+
+def _stroke_color_id(stroke: Dict[str, Any]) -> Optional[int]:
+    # accept a few likely field names (your vectorizer/merger defines the real one)
+    for k in ("color_id", "color_group_id", "color_pass_id", "pass_id", "source_color_id"):
+        v = stroke.get(k)
+        if isinstance(v, bool):
+            continue
+        if isinstance(v, int):
+            return int(v)
+        if isinstance(v, str) and v.strip().isdigit():
+            return int(v.strip())
+    return None
+
+def _stroke_color_name_fallback(stroke: Dict[str, Any]) -> str:
     """
     Prefer explicit 'color_name' if present.
     Otherwise fall back to approximate mapping from color_hex / color_rgb.
@@ -189,21 +245,10 @@ def _stroke_color_name(stroke: Dict[str, Any]) -> str:
     if isinstance(cn, str) and cn.strip():
         return cn.strip().lower()
 
-    # If you already store per-stroke hex/rgb, use it.
-    hx = stroke.get("color_hex")
-    rgb = stroke.get("color_rgb")
-
-    # Very dumb fallback: map by dominant channel + brightness.
-    # (This is only used if you didn't store color_name, so keep it simple.)
-    if isinstance(rgb, list) and len(rgb) >= 3:
-        r, g, b = int(rgb[0]), int(rgb[1]), int(rgb[2])
-    elif isinstance(hx, str) and re.match(r"^#?[0-9a-fA-F]{6}$", hx.strip()):
-        h = hx.strip().lstrip("#")
-        r = int(h[0:2], 16)
-        g = int(h[2:4], 16)
-        b = int(h[4:6], 16)
-    else:
+    rgb = _stroke_rgb(stroke)
+    if rgb is None:
         return "unknown"
+    r, g, b = rgb
 
     # brightness
     v = (r + g + b) / 3.0
@@ -332,7 +377,7 @@ def process_one(processed_img_path: Path) -> None:
 
     # Precompute bbox per stroke in IMAGE coords
     bboxes_img: List[Tuple[float,float,float,float]] = []
-    colors: List[str] = []
+    color_ids_raw: List[Optional[int]] = []
 
     for s in strokes:
         if fmt == "bezier_cubic":
@@ -342,19 +387,58 @@ def process_one(processed_img_path: Path) -> None:
 
         if bb is None:
             bboxes_img.append((0.0,0.0,0.0,0.0))
-            colors.append(_stroke_color_name(s))
+        else:
+            x0,y0,x1,y1 = bb
+            bboxes_img.append((x0*scale_x, y0*scale_y, x1*scale_x, y1*scale_y))
+
+        color_ids_raw.append(_stroke_color_id(s))
+
+    # detect 0-based ids (0..10) vs 1-based (1..11)
+    ids_present = [i for i in color_ids_raw if isinstance(i, int)]
+    zero_based = False
+    if ids_present:
+        mn = min(ids_present)
+        mx = max(ids_present)
+        # if 0 appears and 11 does not, assume 0..10 scheme
+        if mn == 0 and mx <= 10:
+            zero_based = True
+
+    # Normalize to 1..11, and map to names
+    color_ids: List[int] = []
+    color_names: List[str] = []
+    for s, cid in zip(strokes, color_ids_raw):
+        if cid is None:
+            if ALLOW_FALLBACK_COLOR_GUESS:
+                cname = _stroke_color_name_fallback(s)
+                # map name -> id if possible
+                if cname in COLOR_ORDER_LIGHT_TO_DARK:
+                    nid = COLOR_ORDER_LIGHT_TO_DARK.index(cname) + 1
+                    color_ids.append(nid)
+                    color_names.append(cname)
+                else:
+                    color_ids.append(0)
+                    color_names.append("unknown")
+            else:
+                color_ids.append(0)
+                color_names.append("unknown")
             continue
 
-        x0,y0,x1,y1 = bb
-        bboxes_img.append((x0*scale_x, y0*scale_y, x1*scale_x, y1*scale_y))
-        colors.append(_stroke_color_name(s))
+        nid = int(cid) + 1 if zero_based else int(cid)
+        if 1 <= nid <= 11:
+            cname = COLOR_ORDER_LIGHT_TO_DARK[nid - 1]
+            color_ids.append(nid)
+            color_names.append(cname)
+        else:
+            color_ids.append(0)
+            color_names.append("unknown")
 
-    # Build clusters per color, no merging
+    # Build clusters per color_id, no merging
     cluster_entries: List[Dict[str, Any]] = []
     cluster_id = 0
 
-    for cname in COLOR_ORDER_LIGHT_TO_DARK:
-        idxs = [i for i, c in enumerate(colors) if c == cname]
+    for cid in range(1, 12):
+        cname = COLOR_ORDER_LIGHT_TO_DARK[cid - 1]
+        idxs = [i for i, v in enumerate(color_ids) if v == cid]
         if not idxs:
             continue
 
@@ -380,15 +464,40 @@ def process_one(processed_img_path: Path) -> None:
             crop_path = CLUSTER_RENDER_DIR / out_name
             img_pil.crop((x0p, y0p, x1p, y1p)).save(crop_path)
 
-            cluster_entries.append({
+            # optional: compute quantized mean color if strokes have color_rgb/color_hex already
+            rgbs = []
+            for si in g:
+                rgb = _stroke_rgb(strokes[si])
+                if rgb is not None:
+                    rgbs.append(rgb)
+
+            mean_rgb = None
+            mean_rgb_q = None
+            color_key = None
+            if rgbs:
+                arr = np.array(rgbs, dtype=np.float32)
+                m = np.mean(arr, axis=0)
+                mean_rgb = (int(m[0]), int(m[1]), int(m[2]))
+                mean_rgb_q = _quantize_rgb(mean_rgb, RGB_Q_SHIFT)
+                color_key = int(_quant_key_rgb(mean_rgb, RGB_Q_SHIFT))
+
+            entry: Dict[str, Any] = {
                 "cluster_id": cluster_id,
+                "color_id": int(cid),
                 "color_name": cname,
                 "source_processed_image": processed_img_path.name,
                 "source_vectors_json": vectors_path.name,
                 "stroke_indexes": [int(i) for i in g],
                 "bbox_xyxy": [int(x0p), int(y0p), int(x1p), int(y1p)],
                 "crop_file": out_name,
-            })
+            }
+            if mean_rgb is not None:
+                entry["mean_rgb"] = [int(mean_rgb[0]), int(mean_rgb[1]), int(mean_rgb[2])]
+                entry["mean_rgb_quant"] = [int(mean_rgb_q[0]), int(mean_rgb_q[1]), int(mean_rgb_q[2])]
+                entry["mean_rgb_quant_shift"] = int(RGB_Q_SHIFT)
+                entry["mean_color_key"] = int(color_key)
+
+            cluster_entries.append(entry)
             cluster_id += 1
 
     cluster_map = {
@@ -398,6 +507,8 @@ def process_one(processed_img_path: Path) -> None:
         "image_size": [int(w_img), int(h_img)],
         "group_radius_px": float(GROUP_RADIUS_PX),
         "colors_order": COLOR_ORDER_LIGHT_TO_DARK,
+        "color_id_range": [1, 11],
+        "rgb_quant_shift": int(RGB_Q_SHIFT),
         "clusters": cluster_entries,
     }
 

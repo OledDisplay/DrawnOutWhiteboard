@@ -59,6 +59,12 @@ def color_rank(name: str) -> int:
     except ValueError:
         return 999
 
+def color_group_id(name: str) -> int:
+    r = color_rank(name)
+    if 0 <= r < len(COLOR_ORDER_LIGHT_TO_DARK):
+        return int(r + 1)  # 1..11
+    return 0
+
 
 # ------------------- SIMPLE TRACE FOR CUT RESULTS -------------------
 NEIGHBORS_8 = [
@@ -332,13 +338,14 @@ class _TileIndex:
 class PolyRec:
     poly: np.ndarray
     rank: int
+    group_id: int
     bbox: Tuple[int,int,int,int]
     roi: np.ndarray
     roi_dil: np.ndarray
     pix: int
 
 
-def _build_poly_rec(poly: np.ndarray, rank: int, W: int, H: int) -> Optional[PolyRec]:
+def _build_poly_rec(poly: np.ndarray, rank: int, group_id: int, W: int, H: int) -> Optional[PolyRec]:
     if poly is None or poly.shape[0] < 2:
         return None
 
@@ -356,6 +363,7 @@ def _build_poly_rec(poly: np.ndarray, rank: int, W: int, H: int) -> Optional[Pol
     return PolyRec(
         poly=poly.astype(np.float32, copy=False),
         rank=int(rank),
+        group_id=int(group_id),
         bbox=bbox,
         roi=roi,
         roi_dil=roi_dil,
@@ -369,20 +377,21 @@ def merge_polyline_collections(
     collections: List[Tuple[str, List[np.ndarray]]],
     width: int,
     height: int,
-) -> List[np.ndarray]:
+) -> List[Tuple[np.ndarray, int]]:
     """
     Input:  list of (color_name, polylines)
-    Output: merged polylines (kept order light->dark, minus contained/cut duplicates)
+    Output: merged polylines + their originating color_group_id (1..11)
     """
     W = int(width)
     H = int(height)
 
     # Flatten and order by color rank (light->dark)
-    pending: List[Tuple[int, np.ndarray]] = []
+    pending: List[Tuple[int, int, np.ndarray]] = []
     for cname, polys in collections:
         r = color_rank(cname)
+        gid = color_group_id(cname)
         for p in polys or []:
-            pending.append((r, p))
+            pending.append((r, gid, p))
     pending.sort(key=lambda x: x[0])
 
     active: Dict[int, PolyRec] = {}
@@ -409,7 +418,7 @@ def merge_polyline_collections(
         idx.remove(sid, rec.bbox)
         active.pop(sid, None)
 
-    def replace_id_with_polys(sid: int, polys: List[np.ndarray], rank: int):
+    def replace_id_with_polys(sid: int, polys: List[np.ndarray], rank: int, group_id: int):
         try:
             pos = order.index(sid)
         except ValueError:
@@ -422,7 +431,7 @@ def merge_polyline_collections(
         remove_id(sid)
         if pos is None:
             for p in polys:
-                pr = _build_poly_rec(p, rank, W, H)
+                pr = _build_poly_rec(p, rank, group_id, W, H)
                 if pr is not None:
                     add_rec(pr)
             return
@@ -430,7 +439,7 @@ def merge_polyline_collections(
         order.pop(pos)
         insert_pos = pos
         for p in polys:
-            pr = _build_poly_rec(p, rank, W, H)
+            pr = _build_poly_rec(p, rank, group_id, W, H)
             if pr is not None:
                 add_rec(pr, insert_at=insert_pos)
                 insert_pos += 1
@@ -465,8 +474,8 @@ def merge_polyline_collections(
 
         return best_id, best_ov, best_ratio
 
-    for r, poly in pending:
-        rec = _build_poly_rec(poly, r, W, H)
+    for r, gid, poly in pending:
+        rec = _build_poly_rec(poly, r, gid, W, H)
         if rec is None:
             continue
 
@@ -524,7 +533,7 @@ def merge_polyline_collections(
                     pieces = _roi_to_polys(new_roi, rec.bbox)
                     rec = None
                     for p in pieces:
-                        pr = _build_poly_rec(p, r, W, H)
+                        pr = _build_poly_rec(p, r, gid, W, H)
                         if pr is not None:
                             add_rec(pr)
                     break
@@ -538,7 +547,7 @@ def merge_polyline_collections(
                     if not pieces:
                         remove_id(sid)
                         continue
-                    replace_id_with_polys(sid, pieces, other.rank)
+                    replace_id_with_polys(sid, pieces, other.rank, other.group_id)
                     continue
 
             break
@@ -546,11 +555,11 @@ def merge_polyline_collections(
         if rec is not None:
             add_rec(rec)
 
-    out: List[np.ndarray] = []
+    out: List[Tuple[np.ndarray, int]] = []
     for sid in order:
         rr = active.get(sid)
         if rr is None:
             continue
-        out.append(rr.poly)
+        out.append((rr.poly, int(rr.group_id)))
 
     return out
