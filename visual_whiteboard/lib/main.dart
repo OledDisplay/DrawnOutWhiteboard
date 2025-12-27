@@ -115,7 +115,7 @@ class _VectorViewerScreenState extends State<VectorViewerScreen>
 
   // UI controllers for loading JSONs (images)
   final TextEditingController _fileNameController =
-      TextEditingController(text: 'edges_0.json');
+      TextEditingController(text: 'processed_4.json');
   final TextEditingController _posXController =
       TextEditingController(text: '0');
   final TextEditingController _posYController =

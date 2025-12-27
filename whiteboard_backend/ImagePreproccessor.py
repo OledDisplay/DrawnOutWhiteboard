@@ -9,8 +9,6 @@ import traceback
 import re
 import os
 from pathlib import Path
-import pytesseract
-from pytesseract import Output
 
 
 #Step 1 of printing - prepare the images
@@ -26,19 +24,13 @@ from pytesseract import Output
 #The true results are in the fine canny and other settings tweaks!
 
 
-# ---------- Tesseract path (Windows) ----------
-pytesseract.pytesseract.tesseract_cmd = r"C:\\Program Files\\Tesseract-OCR\\tesseract.exe"
-
 # ===== SETTINGS =====
 BASE = Path(__file__).resolve().parent
-IN_DIR = BASE / r"ResearchImages/UniqueImages"
+
+# INPUT NOW COMES FROM PROCCESSEDIMAGES (OCR ALREADY DONE BY imagetext.py)
+IN_DIR = BASE / r"ProccessedImages"
 OUT_DIR = BASE / r"ProccessedImages"
 
-MIN_CONF = 10
-PAD = 2
-INPAINT_RADIUS = 2.7
-CLAHE_CLIP = 2.5
-MIN_SIZE = 5
 SHOW_PROGRESS = True
 
 # Preprocess tweaks (basic)
@@ -93,6 +85,7 @@ COLOR_V_BLACK   = 45
 COLOR_V_WHITE   = 235
 COLOR_V_MIN_CLR = 35
 
+
 def _resolve_merge_params():
     if MERGE_LEVEL == "light":
         return dict(half_width=2.0, bridge_iters=1, clean_area=6,
@@ -110,6 +103,7 @@ def _resolve_merge_params():
         do_distance_gate=FILL_DISTANCE_GATE,
         orientations=FILL_ORIENTATIONS,
     )
+
 
 def _basic11_color_masks(img_bgr: np.ndarray):
     """
@@ -158,13 +152,15 @@ def _basic11_color_masks(img_bgr: np.ndarray):
 
     return masks
 
+
 def _apply_mask_to_white(img_bgr: np.ndarray, mask_bool: np.ndarray) -> np.ndarray:
     out = np.full_like(img_bgr, 255)
     out[mask_bool] = img_bgr[mask_bool]
     return out
 
+
 # =========================================================
-# PREPROCESS + OCR
+# PREPROCESS (NO OCR)
 # =========================================================
 def preprocess(img_bgr):
     h, w = img_bgr.shape[:2]
@@ -172,48 +168,9 @@ def preprocess(img_bgr):
     if short < UPSCALE_TRIGGER:
         new_w, new_h = int(w * UPSCALE_FACTOR), int(h * UPSCALE_FACTOR)
         img_bgr = cv2.resize(img_bgr, (new_w, new_h), interpolation=cv2.INTER_CUBIC)
-        h, w = img_bgr.shape[:2]
 
-    gray = cv2.cvtColor(img_bgr, cv2.COLOR_BGR2GRAY)
-    gray = cv2.normalize(gray, None, 0, 255, cv2.NORM_MINMAX)
+    return img_bgr
 
-    clahe = cv2.createCLAHE(clipLimit=CLAHE_CLIP, tileGridSize=(8, 8))
-    gray = clahe.apply(gray)
-
-    if BILATERAL_D > 0:
-        gray = cv2.bilateralFilter(gray, d=BILATERAL_D,
-                                   sigmaColor=BILATERAL_SC,
-                                   sigmaSpace=BILATERAL_SS)
-
-    blurred = cv2.GaussianBlur(gray, (0, 0), 1.0)
-    gray = cv2.addWeighted(gray, 1.0 + UNSHARP_AMOUNT, blurred, -UNSHARP_AMOUNT, 0)
-
-    gray = cv2.copyMakeBorder(
-        gray, BORDER_PAD, BORDER_PAD, BORDER_PAD, BORDER_PAD,
-        borderType=cv2.BORDER_CONSTANT, value=255
-    )
-    return img_bgr, gray
-
-def ocr_tesseract(img_gray):
-    data = pytesseract.image_to_data(img_gray, output_type=Output.DICT)
-    n = len(data["text"])
-    boxes = []
-    for i in range(n):
-        txt = (data["text"][i] or "").strip()
-        if not txt:
-            continue
-        try:
-            conf = float(data["conf"][i])
-        except Exception:
-            continue
-        if conf < MIN_CONF:
-            continue
-        x = int(data["left"][i]); y = int(data["top"][i])
-        w = int(data["width"][i]); h = int(data["height"][i])
-        if w < MIN_SIZE or h < MIN_SIZE:
-            continue
-        boxes.append((txt, conf, x, y, w, h))
-    return boxes
 
 # =========================================================
 # CANNY
@@ -241,6 +198,7 @@ def edge_canny_fine(img_bgr,
         edges = cv2.morphologyEx(edges, cv2.MORPH_CLOSE, k)
 
     return edges, gray
+
 
 # =========================================================
 # CLEAN NOISE (kept; separate from ridge output)
@@ -295,6 +253,7 @@ def prune_small_dots(edges_bin: np.ndarray,
         out[lab == i] = 255
     return out
 
+
 def bridge_gaps_1px(edges: np.ndarray, iters: int = 1) -> np.ndarray:
     E = (edges > 0).astype(np.uint8) * 255
     k_h  = np.array([[0,0,0],[1,0,1],[0,0,0]], np.uint8)
@@ -311,6 +270,7 @@ def bridge_gaps_1px(edges: np.ndarray, iters: int = 1) -> np.ndarray:
         for k in (k_h, k_v, k_d1, k_d2):
             E = _bridge_once(E, k)
     return E
+
 
 # =========================================================
 # TILE-BASED GAP-AVERAGE FILL (RIDGE RUNS ONLY)
@@ -334,6 +294,7 @@ def _scan_corridor(E_bin: np.ndarray, x: int, y: int, dx: int, dy: int, max_gap:
     if width < 2 or width > max_gap: return 0
     return width
 
+
 def _scan_corridor_width_and_normal(E_bin: np.ndarray, x: int, y: int, dirs: list, max_gap: int):
     """Return (best_width [int], nx, ny [float unit normal])."""
     best_w = 0
@@ -346,12 +307,14 @@ def _scan_corridor_width_and_normal(E_bin: np.ndarray, x: int, y: int, dirs: lis
             best_n = (dx / nlen, dy / nlen) if nlen > 0 else (0.0, 0.0)
     return float(best_w), best_n  # <- width as float for decision path
 
+
 def _ridge_mask(tile_inv: np.ndarray) -> np.ndarray:
     """Ridge = local maxima of distance transform in 3x3 neighborhood."""
     dist = cv2.distanceTransform(tile_inv, cv2.DIST_L2, 3).astype(np.float32)
     mx = cv2.dilate(dist, np.ones((3, 3), np.uint8))
     ridge = (dist >= (mx - 1e-6)) & (dist > 0)
     return ridge
+
 
 def _trace_ridge_runs(ridge_bool: np.ndarray):
     """Return list of runs (list of (y,x)) over ridge pixels by greedy chaining."""
@@ -395,10 +358,12 @@ def _trace_ridge_runs(ridge_bool: np.ndarray):
         runs.append(run)
     return runs
 
+
 def _angle_between(n1, n2):
     dot = float(n1[0]*n2[0] + n1[1]*n2[1])
     dot = max(-1.0, min(1.0, dot))
     return float(np.degrees(np.arccos(dot)))
+
 
 def fill_between_outlines_tilewise(
     E_edges: np.ndarray,
@@ -555,6 +520,7 @@ def fill_between_outlines_tilewise(
     out = np.clip(E_bin + fill, 0, 1).astype(np.uint8) * 255
     return out
 
+
 # =========================================================
 # SMALL HOLE (uses float half_width)
 # =========================================================
@@ -575,6 +541,7 @@ def small_hole_fill_near_edges(E: np.ndarray, half_width: float) -> np.ndarray:
 
     res = (filled & (~src) & (gate * 255).astype(np.uint8))
     return res
+
 
 # =========================================================
 # PIPELINE
@@ -605,6 +572,7 @@ def fill_outlines_pipeline(edge_like_img: np.ndarray,
     E3 = cv2.bitwise_or(E2, near)
     return E3
 
+
 # ============== OUTPUT INDEXING + PIPELINE ==============
 def _get_next_index() -> int:
     OUT_DIR.mkdir(parents=True, exist_ok=True)
@@ -622,10 +590,22 @@ def _get_next_index() -> int:
         n += 1
     return n
 
+
+def _extract_index_from_name(name: str) -> int:
+    m = re.match(r'^(?:proccessed|processed)_(\d+)\.(png|jpg|jpeg|bmp|tif|tiff|webp)$', name.lower())
+    if not m:
+        return -1
+    try:
+        return int(m.group(1))
+    except Exception:
+        return -1
+
+
 def process_one(path: Path):
     try:
         if SHOW_PROGRESS:
             print(f"[START] {path}")
+
         img0 = cv2.imread(str(path), cv2.IMREAD_UNCHANGED)
         if img0 is None:
             print(f"[WARN] cannot read {path}")
@@ -634,64 +614,33 @@ def process_one(path: Path):
         # --- FIXED: keep original pixels, only turn fully transparent into white ---
         if img0.ndim == 3 and img0.shape[2] == 4:  # BGRA / RGBA
             b, g, r, a = cv2.split(img0)
-
-            # start from original RGB
             rgb = cv2.merge([b, g, r])
-
-            # treat only *fully* transparent pixels as background
-            # if you want, you can use a small threshold instead of == 0
-            mask = (a == 0)   # or (a < 5) if some files use near-zero
-
+            mask = (a == 0)
             if np.any(mask):
                 rgb[mask] = [255, 255, 255]
-
-            img0 = rgb  # 3-channel BGR, no alpha
+            img0 = rgb
 
         elif img0.ndim == 2:
-            # grayscale -> BGR
             img0 = cv2.cvtColor(img0, cv2.COLOR_GRAY2BGR)
 
         elif img0.ndim == 3 and img0.shape[2] == 3:
-            # already BGR
             pass
 
         else:
-            # weird shape → fall back to normal color read
             img0 = cv2.imread(str(path), cv2.IMREAD_COLOR)
 
-        index = _get_next_index()
+        # Prefer stable index if filename already has one; otherwise allocate a new one.
+        idx_from_name = _extract_index_from_name(path.name)
+        index = idx_from_name if idx_from_name >= 0 else _get_next_index()
 
-        img, gray = preprocess(img0)
-        H, W = img.shape[:2]
+        cleaned = preprocess(img0)
+        H, W = cleaned.shape[:2]
 
-        boxes_bordered = ocr_tesseract(gray)
-        if SHOW_PROGRESS:
-            print(f"[{path.name}] OCR boxes: {len(boxes_bordered)}")
-
-        mask = np.zeros((H, W), np.uint8)
-        labels = []
-        for text, conf, x, y, w, h in boxes_bordered:
-            x -= BORDER_PAD; y -= BORDER_PAD
-            x1 = max(0, x - PAD); y1 = max(0, y - PAD)
-            x2 = min(W, x + w + PAD); y2 = min(H, y + h + PAD)
-            if x2 <= x1 or y2 <= y1:
-                continue
-            cv2.rectangle(mask, (x1, y1), (x2, y2), 255, -1)
-            labels.append({
-                "text": text,
-                "confidence": round(conf / 100.0, 3),
-                "x": int(x1), "y": int(y1),
-                "width": int(x2 - x1), "height": int(y2 - y1)
-            })
-
-        cleaned = cv2.inpaint(img, mask, INPAINT_RADIUS, cv2.INPAINT_TELEA) if np.any(mask) else img
-
-        # ---- COLOR GROUP PASSES (OCR part above stays intact) ----
+        # ---- COLOR GROUP PASSES ----
         pass_dir = OUT_DIR / f"processed_{index}"
         pass_dir.mkdir(parents=True, exist_ok=True)
 
         params = _resolve_merge_params()
-        edges_union = np.zeros((H, W), np.uint8)
 
         color_masks = _basic11_color_masks(cleaned)
         if len(color_masks) != COLOR_GROUP_PASSES:
@@ -716,8 +665,6 @@ def process_one(path: Path):
                 orientations=params["orientations"],
             )
 
-            edges_union = cv2.bitwise_or(edges_union, edges)
-
             out_img_pass = pass_dir / f"processed_{index}_{gname}.png"
             out_edges_pass = pass_dir / f"edges_{index}_{gname}.png"
             cv2.imwrite(str(out_img_pass), pass_img)
@@ -726,43 +673,32 @@ def process_one(path: Path):
                 cv2.imwrite(str(pass_dir / f"gray_{index}_{gname}.png"), gray_used)
 
         OUT_DIR.mkdir(parents=True, exist_ok=True)
+
+        # Keep only processed full image output (NO full edges.png anymore)
         out_img = OUT_DIR / f"processed_{index}.png"
-        out_edges = OUT_DIR / f"edges_{index}.png"
-        out_json = OUT_DIR / f"edges_{index}_labels.json"
-
         cv2.imwrite(str(out_img), cleaned)
-        cv2.imwrite(str(out_edges), edges_union)
-
-        meta = {
-            "image_index": index,
-            "original_name": path.name,
-            "resolution": {"width": W, "height": H},
-            "labels": labels,
-        }
-        out_json.write_text(json.dumps(meta, indent=2), encoding="utf-8")
-
-        # optional: also drop a copy into the pass folder for convenience
-        (pass_dir / f"edges_{index}_labels.json").write_text(json.dumps(meta, indent=2), encoding="utf-8")
 
         if SHOW_PROGRESS:
-            print(f"[OK] wrote:\n  {out_img}\n  {out_edges}\n  {out_json}\n  {pass_dir}")
+            print(f"[OK] wrote:\n  {out_img}\n  {pass_dir}")
 
     except Exception:
         print(f"[ERR] crashed on {path}:\n{traceback.format_exc()}")
 
-def proccess_images(indir):
+
+def proccess_images(indir: Path):
     print(f"[INFO] IN_DIR={indir}")
     print(f"[INFO] OUT_DIR={OUT_DIR}")
 
-    import shutil
-    if OUT_DIR.exists():
-        shutil.rmtree(OUT_DIR)
     OUT_DIR.mkdir(parents=True, exist_ok=True)
 
     imgs = sorted(
-        [p for p in indir.glob("*") if p.suffix.lower() in (
-            ".png", ".jpg", ".jpeg", ".bmp", ".tif", ".tiff", ".webp"
-        )],
+        [
+            p for p in indir.glob("*")
+            if p.is_file()
+            and p.suffix.lower() in (".png", ".jpg", ".jpeg", ".bmp", ".tif", ".tiff", ".webp")
+            and not p.name.lower().startswith("edges_")
+            and not p.name.lower().startswith("gray_")
+        ],
         key=lambda p: p.name.lower(),
     )
 
@@ -775,4 +711,4 @@ def proccess_images(indir):
         process_one(p)
 
 if "__main__":
-    proccess_images(Path(r"ResearchImages\UniqueImages"))
+    proccess_images(IN_DIR)
