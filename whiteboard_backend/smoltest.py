@@ -47,7 +47,7 @@ MODEL_ID = "HuggingFaceTB/SmolVLM2-500M-Video-Instruct"
 GPU_INDEX = 0
 FORCE_CPU = False
 
-QUANT_MODE = "4bit"  # "4bit" | "8bit" | "none"
+QUANT_MODE = None # "4bit" | "8bit" | "none"
 INT8_CPU_OFFLOAD = False  # only relevant if QUANT_MODE=="8bit"
 
 
@@ -64,10 +64,10 @@ BATCH_SIZE = 5
 # ============================
 # ONE composite image = two square panels side-by-side.
 # PANEL_EDGE = PROC_LONGEST_EDGE//2
-PROC_LONGEST_EDGE = 768  # composite max side; panels ~384 each
+PROC_LONGEST_EDGE = 1000 # composite max side; panels ~384 each
 
 SUGGESTION_LIMIT = 20
-MAX_NEW_TOKENS = 20
+MAX_NEW_TOKENS = 30
 DO_SAMPLE = False
 
 RECT_THICKNESS_PX = 2
@@ -333,41 +333,46 @@ def build_prompt(
         sug_text = "(none)"
 
     return (
-        "You are given one combined image featuring two unique images on the left and right half.\n"
-        "On the LEFT 50% is a cropped area featuring an object you have to recognize.\n"
-        "Only the most essential Colour Chanel has Colour (others grayscaled), so focus on non gray pixels and their close surroundings.\n"
-        "On the RIGHT 50% is the FULL IMAGE the crop comes from, with a RED rectangle surrounding where the crop area appears inside it.\n"
-        "The full image holds semantic meaning so analyze it for context on the crop.\n"
-        "Look at the full Colour version of the crop in the full image.\n"
-        f"- True coordinates of bbox for the crop inside the full image: {bbox_right_resized_xyxy}\n"
-        f"Weak color hint for labeling context: {colour_txt}\n"
-        "Here's a list of strong suggested labels for the crop OBJECT:\n"
+        "Here is a combined image featuring two unique images on the left and right.\n"
+        "On the LEFT is a cropped photo containing an object to identify.\n"
+        "In it, only the most esential colour is left, the others - grayscaled\n"
+        "On the RIGHT is the FULL IMAGE the crop comes from, with a RED rectangle surrounding the crop area.\n"
+        "Analyze the full image + coloured crop for context.\n"
+        "HERE'S A LIST OF SUGGESTED LABLES YOU CAN COMBINE, PICK AND GET FURTHER CONTEXT FROM:\n"
+        "---"
         f"{sug_text}\n"
-        "You are free to generate a better lable minding the context of the suggested labels.\n"
-        "The crop area lacks heavy semantic meaning so you should utilize all available resources for a final statement.\n"
-        "Sometimes the crop will be trash so if all fails you are allowed to reject, but that mustn't be an easy descision.\n\n"
-        "Return this filled json (ONLY JSON):\n"
-        "{\n"
-        "  \"decision\": \"accept\"|\"reject\",\n"
-        "  \"label\": string|null,\n"
-        "  \"confidence\": 0-1,\n"
-        "  \"reason\": \"<=8 words\"\n"
-        "}\n"
+        "---"
+        "In the rare cases the crop is trash - reject.\n\n"
+        "DECIDE WHAT THE CROP OBJECT IS AND PRODUCE A DESCRIPTIVE PHRASE (LABEL)\n\n"
+        "RETURN IN THIS JSON FORMAT"
+        "{\"decision\":\"accept/reject\",\"label\":\"<2-6 word label>/null\"}\n"
     )
 
 
 def extract_json_object(text: str) -> Optional[Dict[str, Any]]:
     if not isinstance(text, str):
         return None
+
     s = text.strip()
-    i = s.find("{")
-    j = s.rfind("}")
-    if i < 0 or j <= i:
+    start = s.find("{")
+    if start < 0:
         return None
-    try:
-        return json.loads(s[i:j+1])
-    except Exception:
-        return None
+
+    depth = 0
+    for i in range(start, len(s)):
+        ch = s[i]
+        if ch == "{":
+            depth += 1
+        elif ch == "}":
+            depth -= 1
+            if depth == 0:
+                chunk = s[start:i+1]
+                try:
+                    return json.loads(chunk)
+                except Exception:
+                    return None
+    return None
+
 
 
 # ============================
@@ -654,11 +659,10 @@ def main() -> None:
                     bbox_resized[3] + full_pad_y,
                 ]
 
-                full_res = resized_full_base.copy()
-                _draw_red_rect_pil(full_res, bbox_resized, thickness=RECT_THICKNESS_PX)
+                # right_panel_base is already a square with the resized full image pasted at pad_x/pad_y
+                right_panel_sq = right_panel_base.copy()
+                _draw_red_rect_pil(right_panel_sq, bbox_panel, thickness=RECT_THICKNESS_PX)
 
-                right_panel_sq = Image.new("RGB", (PANEL_EDGE, PANEL_EDGE), (0, 0, 0))
-                right_panel_sq.paste(full_res, (full_pad_x, full_pad_y))
 
                 composite = _make_composite(left_panel_sq, right_panel_sq)
 
@@ -671,20 +675,19 @@ def main() -> None:
                     suggestions=suggestions,
                 )
 
-                try:
-                    msg = [{
+                # SmolVLM2 expects chat-template formatting (role/content with image+text).
+                # One "conversation" per sample; batching is a list of conversations.
+                conv = [
+                    {
                         "role": "user",
                         "content": [
-                            {"type": "image"},
+                            {"type": "image", "image": composite},  # PIL.Image is supported
                             {"type": "text", "text": prompt_text},
                         ],
-                    }]
-                    prompt_str = processor.apply_chat_template(msg, add_generation_prompt=True, tokenize=False)
-                except Exception:
-                    prompt_str = prompt_text
+                    }
+                ]
+                texts_batch.append(conv)
 
-                texts_batch.append(prompt_str)
-                images_batch.append([composite])
 
                 meta_batch.append({
                     "ci": ci,
@@ -703,13 +706,14 @@ def main() -> None:
             # Batch encode -> move -> generate
             t1 = time.time()
             try:
-                inputs = processor(
-                    text=texts_batch,
-                    images=images_batch,
+                inputs = processor.apply_chat_template(
+                    texts_batch,                 # list of conversations
+                    add_generation_prompt=True,
+                    tokenize=True,
+                    return_dict=True,
                     return_tensors="pt",
-                    padding=True,       # required for batching text
-                    truncation=True,
-                )
+                ).to(device, dtype=DTYPE)
+
 
                 for k, v in list(inputs.items()):
                     if torch.is_tensor(v):
@@ -721,8 +725,17 @@ def main() -> None:
                 with torch.inference_mode():
                     out_ids = model.generate(**inputs, **gen_kwargs)
 
-                texts_out = processor.batch_decode(out_ids, skip_special_tokens=True)
+                # Decode ONLY the generated continuation (not the prompt).
+                # generate() returns [prompt + new_tokens] by default.
+                if "input_ids" in inputs and torch.is_tensor(inputs["input_ids"]):
+                    prompt_len = int(inputs["input_ids"].shape[1])
+                    gen_only_ids = out_ids[:, prompt_len:]
+                else:
+                    gen_only_ids = out_ids
+
+                texts_out = processor.batch_decode(gen_only_ids, skip_special_tokens=True)
                 dt_batch = time.time() - t1
+
 
             except Exception as e:
                 if torch.cuda.is_available() and not FORCE_CPU:
