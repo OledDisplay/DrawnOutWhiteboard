@@ -595,6 +595,223 @@ def collect_links_with_modals_sync(page, expand=True, max_modal_clicks=6, **kwar
 
 
 
+# =========================
+# NEW: Playwright reuse (Stage 2)
+# =========================
+class _PlaywrightReuse:
+    """
+    One Playwright browser/context reused across many fetches.
+    Used by Stage 2 only (unless you pass it elsewhere).
+    """
+    def __init__(self, headless: bool = True):
+        try:
+            from playwright.sync_api import sync_playwright
+        except Exception:
+            self._ok = False
+            self._p = None
+            self.browser = None
+            self.ctx = None
+            return
+
+        self._ok = True
+        self._p = sync_playwright().start()
+        self.browser = self._p.chromium.launch(headless=headless)
+        self.ctx = self.browser.new_context()
+
+    def ok(self) -> bool:
+        return bool(self._ok and self.browser and self.ctx)
+
+    def new_page(self, timeout_ms: int):
+        page = self.ctx.new_page()
+        page.set_default_timeout(timeout_ms)
+        return page
+
+    def close(self):
+        if not self._ok:
+            return
+        try:
+            if self.ctx:
+                self.ctx.close()
+        except Exception:
+            pass
+        try:
+            if self.browser:
+                self.browser.close()
+        except Exception:
+            pass
+        try:
+            if self._p:
+                self._p.stop()
+        except Exception:
+            pass
+
+
+# =========================
+# NEW: Terminal index helpers (json + embeddings)
+# =========================
+def _short_url(u: str, max_len: int = 90) -> str:
+    try:
+        p = urlparse(u)
+        tail = (p.path or "/").rstrip("/").split("/")[-1] or "/"
+        host = p.hostname or ""
+        s = f"{host}/{tail}"
+    except Exception:
+        s = (u or "")
+    if len(s) <= max_len:
+        return s
+    return s[: max_len - 3] + "..."
+
+def _last_path_part(u: str) -> str:
+    try:
+        p = urlparse(u)
+        segs = [s for s in (p.path or "").split("/") if s]
+        return segs[-1] if segs else ""
+    except Exception:
+        return ""
+
+def _normalize_for_embed(s: str) -> str:
+    s = (s or "").lower()
+    s = s.replace("-", " ").replace("_", " ")
+    s = re.sub(r"\s+", " ", s).strip()
+    return s
+
+def _url_key_for_embed(u: str) -> str:
+    return _normalize_for_embed(_last_path_part(u))
+
+def _norm_vec(v):
+    import numpy as np
+    if v is None:
+        return None
+    a = np.asarray(v, dtype=np.float32)
+    n = float(np.linalg.norm(a))
+    if n <= 0:
+        return a
+    return a / n
+
+def _registrable_of(url: str) -> str:
+    try:
+        host = (urlparse(url).hostname or "").lower()
+        t = tldextract.extract(host)
+        return ".".join([t.domain, t.suffix]) if t.suffix else t.domain
+    except Exception:
+        return ""
+
+def _load_json(path: str) -> dict:
+    try:
+        with open(path, "r", encoding="utf-8") as f:
+            return json.load(f) or {}
+    except Exception:
+        return {}
+
+def _save_json_atomic(path: str, data: dict) -> None:
+    try:
+        os.makedirs(os.path.dirname(path), exist_ok=True)
+        tmp = path + ".tmp"
+        with open(tmp, "w", encoding="utf-8") as f:
+            json.dump(data, f, indent=2, ensure_ascii=False)
+        try:
+            os.replace(tmp, path)
+        except Exception:
+            with open(path, "w", encoding="utf-8") as f:
+                json.dump(data, f, indent=2, ensure_ascii=False)
+    except Exception as e:
+        dbg(f"[IDX][SAVE][ERR] {path} -> {e}")
+
+def _load_all_terminal_indexes_for_subject(subj: str) -> list[dict]:
+    """
+    Read ALL source json files and return all terminal indexes stored under subj.
+    Each returned dict is enriched with:
+      - _source_name
+      - _json_path
+      - _source_url (if present)
+    """
+    out = []
+    try:
+        for filename in os.listdir(SOURCE_PATH):
+            if not filename.endswith(".json"):
+                continue
+            jpath = os.path.join(SOURCE_PATH, filename)
+            data = _load_json(jpath)
+            ti = (data.get("TerminalIndexes") or {})
+            arr = ti.get(subj) or []
+            if not isinstance(arr, list) or not arr:
+                continue
+            src_name = Path(filename).stem
+            src_url = data.get("url")
+            for idx in arr:
+                if not isinstance(idx, dict):
+                    continue
+                d = dict(idx)
+                d["_source_name"] = src_name
+                d["_json_path"] = jpath
+                d["_source_url"] = src_url
+                out.append(d)
+    except Exception as e:
+        dbg(f"[IDX][LOAD_ALL][ERR] subj={subj} -> {e}")
+    return out
+
+def _persist_terminal_indexes_to_source(source_name: str, subj: str, new_indexes: list[dict]) -> None:
+    """
+    Save indexes into THIS source's json under TerminalIndexes[subj].
+    If entry_url already exists, update if terminal_count improved or centroid exists.
+    """
+    if not new_indexes:
+        return
+
+    json_path = os.path.join(SOURCE_PATH, f"{source_name}.json")
+    data = _load_json(json_path)
+    data.setdefault("TerminalIndexes", {})
+    data["TerminalIndexes"].setdefault(subj, [])
+
+    existing = data["TerminalIndexes"][subj]
+    if not isinstance(existing, list):
+        existing = []
+        data["TerminalIndexes"][subj] = existing
+
+    # index by entry_url
+    by_entry = {}
+    for i, it in enumerate(existing):
+        if isinstance(it, dict) and it.get("entry_url"):
+            by_entry[clean_url(it["entry_url"])] = (i, it)
+
+    added = 0
+    updated = 0
+
+    for idx in new_indexes:
+        if not isinstance(idx, dict):
+            continue
+        entry = clean_url(idx.get("entry_url") or "")
+        terms = idx.get("terminal_urls") or []
+        cnt = int(idx.get("terminal_count") or len(terms) or 0)
+
+        if not entry or cnt <= 0:
+            continue
+
+        if entry in by_entry:
+            pos, cur = by_entry[entry]
+            cur_cnt = int(cur.get("terminal_count") or 0)
+            # update if better
+            if cnt > cur_cnt or (idx.get("centroid_embedding") and not cur.get("centroid_embedding")):
+                existing[pos] = idx
+                updated += 1
+        else:
+            existing.append(idx)
+            added += 1
+
+    # keep it bounded (avoid unbounded growth)
+    MAX_PER_SUBJ = 20
+    if len(existing) > MAX_PER_SUBJ:
+        # keep highest terminal_count first
+        existing.sort(key=lambda d: int((d or {}).get("terminal_count") or 0), reverse=True)
+        data["TerminalIndexes"][subj] = existing[:MAX_PER_SUBJ]
+
+    _save_json_atomic(json_path, data)
+    dbg(f"[IDX][SAVE] source={source_name} subj='{subj}' added={added} updated={updated} total_now={len(data['TerminalIndexes'][subj])}")
+
+
+# =========================
+# MODIFIED: js_capable_fetch (Playwright reuse)
+# =========================
 def js_capable_fetch(
     url: str,
     timeout_ms: int = 15000,
@@ -605,6 +822,8 @@ def js_capable_fetch(
     min_text_chars: int = 1200,
     min_p_tags: int = 3,
     min_anchors_hint: int = 8,
+    # NEW: reuse one Playwright browser/context
+    pw: "_PlaywrightReuse | None" = None,
 ) -> Tuple[str | None, List[str], str]:
     """
     Fetch a page and return (html, anchors, via).
@@ -621,7 +840,6 @@ def js_capable_fetch(
       - 'via' indicates which path was used: "playwright:full", "playwright:light", "requests", or "requests:light".
     """
     from typing import Tuple, List, Optional
-    import re
     import requests
     from bs4 import BeautifulSoup
     from urllib.parse import urljoin
@@ -642,7 +860,7 @@ def js_capable_fetch(
             r = requests.get(u, headers=UA, timeout=timeout_ms / 1000)
             r.raise_for_status()
             ct = (r.headers.get("Content-Type") or "").lower()
-            if "html" not in ct and "xml" not in ct:  # allow a few servers that mislabel
+            if "html" not in ct and "xml" not in ct:
                 return None, [], "requests"
             html = r.text
             soup = BeautifulSoup(html, "html.parser")
@@ -660,7 +878,7 @@ def js_capable_fetch(
     # ---- js_mode: none (requests + BS4) ----
     if js_mode == "none":
         html, anchors, _ = _requests_fetch(url)
-        dbg(f"[JSFETCH][requests] {url} ok anchors={len(anchors)} html_len={len(html or '')}")
+        dbg(f"[JSFETCH][requests] {_short_url(url)} anchors={len(anchors)} html_len={len(html or '')}")
         return html, anchors, "requests"
 
     # ---- js_mode: smart-light (requests-first; fallback to playwright:light) ----
@@ -670,16 +888,42 @@ def js_capable_fetch(
             soup = BeautifulSoup(html, "html.parser")
             text_len = len(soup.get_text(" ", strip=True))
             p_tags = len(soup.find_all("p"))
-            # If page already looks textful enough, keep requests result
             if (text_len >= min_text_chars and p_tags >= min_p_tags) or len(anchors) >= min_anchors_hint:
-                dbg(f"[JSFETCH][requests:light] {url} ok anchors={len(anchors)} html_len={len(html)} "
-                    f"(text_len={text_len}, p_tags={p_tags})")
+                dbg(f"[JSFETCH][requests:light] {_short_url(url)} anchors={len(anchors)} (text={text_len}, p={p_tags})")
                 return html, anchors, "requests:light"
             else:
-                dbg(f"[JSFETCH][requests:light][fallback] {url} text_len={text_len} p_tags={p_tags} anchors={len(anchors)}")
+                dbg(f"[JSFETCH][requests:light→pw] {_short_url(url)} (text={text_len}, p={p_tags}, a={len(anchors)})")
 
-        # Fallback to Playwright light
+        # fallback to Playwright light (reused if pw provided)
         try:
+            from urllib.parse import urljoin
+
+            if pw is not None and pw.ok():
+                page = pw.new_page(timeout_ms)
+                try:
+                    page.goto(url, wait_until="domcontentloaded")
+                    try:
+                        page.wait_for_load_state("networkidle", timeout=timeout_ms // 2)
+                    except Exception:
+                        pass
+                    if wait_selector:
+                        try:
+                            page.wait_for_selector(wait_selector, state="attached", timeout=timeout_ms // 2)
+                        except Exception:
+                            pass
+
+                    anchors_pw = collect_links_with_modals_sync(page, expand=False, max_modal_clicks=0)
+                    anchors_pw = [urljoin(url, a) for a in anchors_pw if a]
+                    html_pw = page.content()
+                    dbg(f"[JSFETCH][playwright:light] {_short_url(url)} anchors={len(anchors_pw)} html_len={len(html_pw)}")
+                    return html_pw, anchors_pw, "playwright:light"
+                finally:
+                    try:
+                        page.close()
+                    except Exception:
+                        pass
+
+            # non-reuse path
             from playwright.sync_api import sync_playwright
             with sync_playwright() as p:
                 browser = p.chromium.launch(headless=True)
@@ -698,11 +942,7 @@ def js_capable_fetch(
                     except Exception:
                         pass
 
-                anchors_pw = collect_links_with_modals_sync(
-                    page,
-                    expand=False,
-                    max_modal_clicks=0
-                )
+                anchors_pw = collect_links_with_modals_sync(page, expand=False, max_modal_clicks=0)
                 anchors_pw = [urljoin(url, a) for a in anchors_pw if a]
                 html_pw = page.content()
 
@@ -712,20 +952,51 @@ def js_capable_fetch(
                     pass
                 browser.close()
 
-                dbg(f"[JSFETCH][playwright:light] {url} ok anchors={len(anchors_pw)} html_len={len(html_pw)}")
+                dbg(f"[JSFETCH][playwright:light] {_short_url(url)} anchors={len(anchors_pw)} html_len={len(html_pw)}")
                 return html_pw, anchors_pw, "playwright:light"
 
-        except ImportError:
-            dbg("[JSFETCH] Playwright not installed (smart-light fallback).")
         except Exception as e:
-            dbg(f"[JSFETCH][playwright][smart-light] failed for {url}: {e}")
+            dbg(f"[JSFETCH][playwright][smart-light] failed for {_short_url(url)}: {e}")
 
-        # If everything fails:
         return html, anchors, "requests:light" if html else (None, [], "none")
 
     # ---- js_mode: full/light (Playwright) ----
     expand = (js_mode == "full")
     try:
+        from urllib.parse import urljoin
+
+        if pw is not None and pw.ok():
+            page = pw.new_page(timeout_ms)
+            try:
+                page.goto(url, wait_until="domcontentloaded")
+                try:
+                    page.wait_for_load_state("networkidle", timeout=timeout_ms // 2)
+                except Exception:
+                    pass
+                if wait_selector:
+                    try:
+                        page.wait_for_selector(wait_selector, state="attached", timeout=timeout_ms // 2)
+                    except Exception:
+                        pass
+
+                anchors = collect_links_with_modals_sync(
+                    page,
+                    expand=expand,
+                    max_modal_clicks=(max_modal_clicks if expand else 0)
+                )
+                anchors = [urljoin(url, a) for a in anchors if a]
+                html = page.content()
+
+                mode_tag = f"playwright:{'full' if expand else 'light'}"
+                dbg(f"[JSFETCH][{mode_tag}] {_short_url(url)} anchors={len(anchors)} html_len={len(html)}")
+                return html, anchors, mode_tag
+            finally:
+                try:
+                    page.close()
+                except Exception:
+                    pass
+
+        # non-reuse path
         from playwright.sync_api import sync_playwright
         with sync_playwright() as p:
             browser = p.chromium.launch(headless=True)
@@ -749,7 +1020,7 @@ def js_capable_fetch(
                 expand=expand,
                 max_modal_clicks=(max_modal_clicks if expand else 0)
             )
-            anchors = [urljoin(url, a) for a in anchors if a]  # absolutize
+            anchors = [urljoin(url, a) for a in anchors if a]
             html = page.content()
 
             try:
@@ -759,15 +1030,14 @@ def js_capable_fetch(
             browser.close()
 
             mode_tag = f"playwright:{'full' if expand else 'light'}"
-            dbg(f"[JSFETCH][{mode_tag}] {url} ok anchors={len(anchors)} html_len={len(html)}")
+            dbg(f"[JSFETCH][{mode_tag}] {_short_url(url)} anchors={len(anchors)} html_len={len(html)}")
             return html, anchors, mode_tag
 
-    except ImportError:
-        dbg("[JSFETCH] Playwright not installed.")
     except Exception as e:
-        dbg(f"[JSFETCH][playwright] failed for {url}: {e}")
+        dbg(f"[JSFETCH][playwright] failed for {_short_url(url)}: {e}")
 
     return None, [], "none"
+
 
 
 
@@ -1558,8 +1828,11 @@ def _dbg_hit_reason(url, node, rx):
 # =========================
 # NEW STAGE 2: Drill-by-parent with inline text search + image pick
 # =========================
+# =========================
+# MODIFIED: Stage 2 drill + search + images
+# =========================
 def stage2_drill_search_and_images(
-    roots: list[str],
+    roots: list[str] | dict,
     base_query: str,
     lemma_obj: dict,
     hard_image_cap: int,
@@ -1568,11 +1841,34 @@ def stage2_drill_search_and_images(
     anchors_cache: dict,
     global_image_cap: int | None = None,
     per_hit_cap: Optional[int] = None,
-    fatigue_limit: int = 25,   # trigger only *after first image*, after 25 dry pages
+    fatigue_limit: int = 25,
     encoder: Optional[Any] = None,
     query_embedding: Optional[Any] = None,
     prompt_embedding: Optional[Any] = None,
+
+    # NEW: URL scoring control
+    url_sort_k: int = 65,  # requested: 50-75 → default 65
+
+    # NEW: terminal index seeding + production
+    terminal_index_seed: Optional[dict] = None,       # {"entry_url":..., "terminal_urls":[...], ...}
+    terminal_index_collector: Optional[list] = None,  # list to append produced indexes
+    terminal_index_min_terminals: int = 25,           # requested: ~20-30
+    terminal_index_use_threshold: float = 0.35,       # "mid threshold" for using stored index
+    terminal_index_promote_threshold: float = 0.28,   # threshold for saving a detected index
+
+    # NEW: context for persisted index records
+    subject: Optional[str] = None,
+    source_name: Optional[str] = None,
 ) -> list[str]:
+    """
+    Stage 2:
+      - reuses ONE Playwright browser/context
+      - sorts outgoing URLs by prompt similarity using ONLY last URL segment
+      - optionally uses a stored terminal index first
+      - records/promotes new terminal indexes (centroid from terminal URLs only)
+    """
+    import numpy as np
+
     phrase_rxs, _ = _compile_phrase_regexes_adapter(base_query, lemma_obj)
 
     class _NextRoot(BaseException): pass
@@ -1580,19 +1876,107 @@ def stage2_drill_search_and_images(
 
     saved_paths: list[str] = []
 
+    # normalize roots input (your code sometimes passes dict)
+    if isinstance(roots, dict):
+        roots_list = list(roots.keys())
+    else:
+        roots_list = list(roots or [])
+
+    # playwight reuse for all Stage 2 fetches
+    pw = _PlaywrightReuse(headless=True)
+
+    # normalized prompt vec for URL scoring / index matching
+    prompt_vec = _norm_vec(prompt_embedding if prompt_embedding is not None else query_embedding)
+
+    # URL-key embedding cache (keys repeat a lot)
+    key_emb_cache: dict[str, np.ndarray] = {}
+
     def _global_cap_hit() -> bool:
         return global_image_cap is not None and len(saved_paths) >= global_image_cap
+
+    def _embed_keys_batch(keys: list[str]) -> None:
+        if encoder is None:
+            return
+        missing = [k for k in keys if k and k not in key_emb_cache]
+        if not missing:
+            return
+        # batch encode missing
+        try:
+            embs = encoder.encode(missing, normalize_embeddings=True)
+            for k, e in zip(missing, embs):
+                key_emb_cache[k] = np.asarray(e, dtype=np.float32)
+        except Exception as e:
+            dbg(f"[S2][URL_EMBED][ERR] batch={len(missing)} -> {e}")
+
+    def _score_and_sort_urls(urls: list[str], *, k: int) -> list[str]:
+        """
+        Sort URLs by similarity(prompt_vec, embed(last_path_part(url))).
+        Keep top-k. If encoder/prompt missing, just dedupe and truncate.
+        """
+        urls = ordered_dedupe([u for u in urls if u])
+        if not urls:
+            return []
+
+        if encoder is None or prompt_vec is None:
+            return urls[:k] if k and len(urls) > k else urls
+
+        keys = [_url_key_for_embed(u) for u in urls]
+        _embed_keys_batch([k for k in keys if k])
+
+        scores = []
+        for u, key in zip(urls, keys):
+            e = key_emb_cache.get(key)
+            if e is None:
+                scores.append((0.0, u, key))
+            else:
+                s = float(np.dot(prompt_vec, e))
+                scores.append((s, u, key))
+
+        scores.sort(key=lambda x: x[0], reverse=True)
+        top = scores[:k] if k and len(scores) > k else scores
+
+        # compact debug: show top 8 once in a while (not spammy)
+        if DEBUG:
+            show = top[:8]
+            dbg("[S2][URL_SORT] top:")
+            for s, u, key in show:
+                dbg(f"   ↳ score={s:.3f} key='{key}' url={_short_url(u)}")
+
+        return [u for _, u, _ in top]
+
+    def _centroid_for_terminal_urls(term_urls: list[str]) -> Optional[list]:
+        """
+        Centroid ONLY from terminal urls. Uses last segment embeddings.
+        """
+        if encoder is None or not term_urls:
+            return None
+        keys = [_url_key_for_embed(u) for u in term_urls]
+        keys = [k for k in keys if k]
+        if not keys:
+            return None
+        _embed_keys_batch(keys)
+
+        vecs = [key_emb_cache.get(k) for k in keys]
+        vecs = [v for v in vecs if v is not None]
+        if not vecs:
+            return None
+
+        v = np.mean(np.stack(vecs, axis=0), axis=0)
+        n = float(np.linalg.norm(v))
+        if n > 0:
+            v = v / n
+        return v.astype(np.float32).tolist()
 
     # === RENDER ===
     def render(url: str, *, expand: bool, force_js_light: bool = False):
         if not force_js_light and url in html_cache:
             soup = BeautifulSoup(html_cache[url], "html.parser") if html_cache[url] else None
             a = anchors_cache.get(url, [])
-            dbg(f"[S2][cache] url={url} anchors={len(a)} soup_ok={bool(html_cache[url])}")
+            dbg(f"[S2][cache] {_short_url(url)} anchors={len(a)} soup_ok={bool(html_cache[url])}")
             return soup, a, False
 
         mode = "full" if expand else ("light" if force_js_light else "smart-light")
-        html, anchors, via = js_capable_fetch(url, js_mode=mode)
+        html, anchors, via = js_capable_fetch(url, js_mode=mode, pw=pw)
         if not html and not anchors:
             if not force_js_light:
                 html_cache[url] = None
@@ -1602,7 +1986,7 @@ def stage2_drill_search_and_images(
         full = ordered_dedupe([urljoin(url, a) for a in anchors if a])
         html_cache[url] = html
         anchors_cache[url] = full
-        dbg(f"[S2] rendered via={via} url={url} anchors={len(full)} soup_ok={bool(html)} expand={expand} force_js_light={force_js_light}")
+        dbg(f"[S2] via={via:<16} url={_short_url(url)} anchors={len(full)} expand={expand} force_js_light={force_js_light}")
         soup = BeautifulSoup(html, "html.parser") if html else None
         return soup, full, True
 
@@ -1636,29 +2020,37 @@ def stage2_drill_search_and_images(
             if hit_meta:
                 meta.update(hit_meta)
 
-            if "ctx_score" in meta or "ctx_sem_score" in meta:
-                meta["ctx_confidence"] = meta.get("ctx_sem_score", meta.get("ctx_score"))
-                dbg(f"[CTX][domain] saved {dest} ctx_score={meta.get('ctx_score')} "
-                    f"ctx_sem={meta.get('ctx_sem_score')} conf={meta.get('ctx_confidence')}")
+            conf = meta.get("ctx_sem_score", meta.get("ctx_score"))
+            if conf is not None:
+                meta["ctx_confidence"] = conf
+                dbg(f"🖼️  [SAVE] {os.path.basename(dest)}  conf={float(conf):.3f}  from={_short_url(page_url)}")
             else:
-                dbg(f"[CTX][domain] saved {dest} ctx=n/a")
+                dbg(f"🖼️  [SAVE] {os.path.basename(dest)}  from={_short_url(page_url)}")
 
             _register_image_metadata(dest, meta)
             saved_paths.append(dest)
-            dbg(f"[IMG] saved {dest}")
             return True
         return False
+
+    def _dbg_hit_reason_small(url, node, score, details):
+        try:
+            txt = node if isinstance(node, str) else (node.get_text(" ", strip=True) or "")
+        except Exception:
+            txt = ""
+        snippet = (txt[:110].replace("\n", " ") + ("..." if len(txt) > 110 else "")) if txt else ""
+        ctx = details.get("ctx_sem_score", details.get("sem_score", score))
+        dbg(f"·--[HIT] {_short_url(url)}  hit_score={float(score):.3f}  sem={float(ctx) if ctx is not None else 'n/a'}  '{snippet}'")
 
     def _save_from_hits(page_url: str, tsoup, ranked_hits: list, *, per_root_counter: list[int]):
         for node, score, details in ranked_hits:
             if _global_cap_hit():
                 raise _StopAll()
-            _dbg_hit_reason(page_url, node, phrase_rxs[0])
+
+            _dbg_hit_reason_small(page_url, node, score, details)
 
             ctx_score = details.get("ctx_score", score)
             ctx_sem = details.get("ctx_sem_score", details.get("sem_score"))
 
-            # unify context metadata schema (no ddg-only / domain-only extras)
             raw_ctx_meta = {
                 "ctx_text": details.get("ctx_text") or details.get("snippet") or details.get("heading_text"),
                 "ctx_score": ctx_score,
@@ -1672,48 +2064,50 @@ def stage2_drill_search_and_images(
             hit_meta = _normalize_ctx_meta(raw_ctx_meta)
 
             cands = _extract_img_candidates_near_hit(node, tsoup, page_url, per_hit_cap=per_hit_cap) or []
+            if not cands:
+                dbg(f"·--[HIT] but no img candidates near hit  ({_short_url(page_url)})")
+                continue
+
             for img_url, why in cands:
                 if _global_cap_hit():
                     raise _StopAll()
                 if _save_one(img_url, tsoup, page_url, hit_meta=hit_meta):
                     per_root_counter[0] += 1
-                    dbg(f"[COUNT][per-root] {per_root_counter[0]}/{hard_image_cap} (why={why})")
+                    dbg(f"·--[COUNT] {per_root_counter[0]}/{hard_image_cap}  why={why}")
                     if per_root_counter[0] >= hard_image_cap:
                         dbg(f"[S2] PER-ROOT CAP {hard_image_cap} reached → next root")
                         raise _NextRoot()
 
-
     # === TERMINAL PROCESSOR ===
-    def _process_terminal_url(tu: str, *, per_root_counter: list[int], fatigue_counter: list[int]):
-        """
-        Handles per-page logic, counting fatigue *only after first success*.
-        """
+    def _process_terminal_url(tu: str, *, per_root_counter: list[int], fatigue_counter: list[int], term_i: int, term_total: int):
         before_saves = per_root_counter[0]
+
         tsoup, _, _ = render(tu, expand=False)
         if not tsoup:
-            dbg(f"[S2][TERM] url={tu} soup=None")
             if per_root_counter[0] > 0:
                 fatigue_counter[0] += 1
+            dbg(f"⚠️  [TERM {term_i}/{term_total}] {_short_url(tu)}  fetch=fail  fatigue={fatigue_counter[0]}")
             return
 
         ranked = smart_find_hits_in_soup(
             tsoup,
             base_query,
             lemma_obj,
-            min_score=0.7,          
+            min_score=0.7,
             top_k=None,
             encoder=encoder,
             query_embedding=query_embedding,
             sem_min_score=0.5,
             return_embedding=True,
         )
-        dbg(f"[S2][TERM] url={tu} hits={len(ranked)}")
 
         if not ranked:
             if per_root_counter[0] > 0:
                 fatigue_counter[0] += 1
+            dbg(f"[TERM {term_i}/{term_total}] {_short_url(tu)}  hits=0  fatigue={fatigue_counter[0]}")
             return
 
+        # if we have hits but no nearby image candidates, try js_light once
         any_cand = False
         for n, _, _ in ranked[:3]:
             if _extract_img_candidates_near_hit(n, tsoup, tu, per_hit_cap=1):
@@ -1722,11 +2116,13 @@ def stage2_drill_search_and_images(
         if not any_cand:
             tsoup, _, _ = render(tu, expand=False, force_js_light=True)
 
+        dbg(f"·--[TERM {term_i}/{term_total}] {_short_url(tu)}  hits={len(ranked)}")
+
         _save_from_hits(tu, tsoup, ranked_hits=ranked, per_root_counter=per_root_counter)
 
-        # update fatigue only if we've already had a success
+        # update fatigue
         if per_root_counter[0] > before_saves:
-            fatigue_counter[0] = 0  # reset after any new image
+            fatigue_counter[0] = 0
         elif per_root_counter[0] > 0:
             fatigue_counter[0] += 1
 
@@ -1734,37 +2130,148 @@ def stage2_drill_search_and_images(
             dbg(f"[S2] FATIGUE LIMIT ({fatigue_limit}) after first success → next root")
             raise _NextRoot()
 
+    # === TERMINAL INDEX PRODUCTION ===
+    seen_index_entries: set[str] = set()
+
+    def _maybe_promote_terminal_index(entry_url: str, terminal_urls: list[str], per_root_saved: int):
+        """
+        Promote a terminal cluster into a stored index if:
+          - terminal_count >= min
+          - centroid exists
+          - centroid similarity >= terminal_index_promote_threshold
+          - (gating) after first success OR still allow if centroid is strong
+        """
+        if terminal_index_collector is None:
+            return
+        if not subject or not source_name:
+            return
+        if not terminal_urls or len(terminal_urls) < terminal_index_min_terminals:
+            return
+
+        entry_clean = clean_url(entry_url)
+        if not entry_clean or entry_clean in seen_index_entries:
+            return
+
+        if encoder is None or prompt_vec is None:
+            dbg(f"[IDX][CAND][REJECT] entry={_short_url(entry_url)} terminals={len(terminal_urls)} reason=no-encoder/prompt")
+            return
+
+        centroid = _centroid_for_terminal_urls(terminal_urls)
+        if not centroid:
+            dbg(f"[IDX][CAND][REJECT] entry={_short_url(entry_url)} terminals={len(terminal_urls)} reason=no-centroid")
+            return
+
+        score = float(np.dot(prompt_vec, np.asarray(centroid, dtype=np.float32)))
+        gating_ok = (per_root_saved > 0) or (score >= (terminal_index_promote_threshold + 0.08))
+        if not gating_ok:
+            dbg(f"[IDX][CAND][REJECT] entry={_short_url(entry_url)} terminals={len(terminal_urls)} score={score:.3f} reason=gating(pre-success)")
+            return
+
+        if score < terminal_index_promote_threshold:
+            dbg(f"[IDX][CAND][REJECT] entry={_short_url(entry_url)} terminals={len(terminal_urls)} score={score:.3f} reason=low-score")
+            return
+
+        idx_id = hashlib.sha1(f"{subject}|{entry_clean}|{len(terminal_urls)}".encode("utf-8")).hexdigest()[:10]
+        rec = {
+            "id": idx_id,
+            "subject": subject,
+            "entry_url": entry_clean,
+            "terminal_urls": ordered_dedupe([clean_url(u) for u in terminal_urls if u]),
+            "terminal_count": int(len(terminal_urls)),
+            "centroid_embedding": centroid,
+            "promote_score": float(score),
+            "created_at": datetime.datetime.utcnow().isoformat() + "Z",
+        }
+
+        terminal_index_collector.append(rec)
+        seen_index_entries.add(entry_clean)
+
+        dbg("[IDX][PROMOTE]")
+        dbg(f"  + subject='{subject}' source='{source_name}'")
+        dbg(f"  + entry={_short_url(entry_clean)}")
+        dbg(f"  + terminals={len(terminal_urls)} score={score:.3f} centroid_dim={len(centroid)}")
+
     # === MAIN LOOP ===
     seen_urls: set[str] = set()
+
+    # If we have a seed index, prefer its entry_url as first root
+    if terminal_index_seed and terminal_index_seed.get("entry_url"):
+        entry = clean_url(terminal_index_seed["entry_url"])
+        if entry:
+            roots_list = [entry] + [r for r in roots_list if clean_url(r) != entry]
+
     try:
-        for rdx, root in enumerate(roots, start=1):
+        for rdx, root in enumerate(roots_list, start=1):
             if _global_cap_hit():
                 raise _StopAll()
 
-            dbg(f"[S2] ROOT[{rdx}/{len(roots)}]: {root}")
+            dbg(f"\n[S2] ROOT[{rdx}/{len(roots_list)}] {root}")
             per_root_saved = [0]
             fatigue_counter = [0]
 
             try:
+                # --- If this root matches the selected terminal index, try it FIRST ---
+                used_index = False
+                if terminal_index_seed:
+                    seed_entry = clean_url(terminal_index_seed.get("entry_url") or "")
+                    if seed_entry and clean_url(root) == seed_entry:
+                        terms = terminal_index_seed.get("terminal_urls") or []
+                        # filter empties + allowed by root lock
+                        terms = [clean_url(u) for u in terms if u]
+                        terms = [u for u in terms if _allowed(root, u)]
+                        # sort and keep top-k (still high)
+                        terms_sorted = _score_and_sort_urls(terms, k=max(url_sort_k, 75))
+
+                        dbg("[IDX][USE] trying stored terminal index first")
+                        dbg(f"  + entry={_short_url(seed_entry)}")
+                        dbg(f"  + terminals={len(terms)} → processing={len(terms_sorted)} threshold={terminal_index_use_threshold:.2f}")
+
+                        # run terminals
+                        for i, tu in enumerate(terms_sorted, start=1):
+                            if _global_cap_hit(): raise _StopAll()
+                            if per_root_saved[0] >= hard_image_cap: raise _NextRoot()
+                            if tu in seen_urls: continue
+                            seen_urls.add(tu)
+                            _process_terminal_url(tu, per_root_counter=per_root_saved, fatigue_counter=fatigue_counter, term_i=i, term_total=len(terms_sorted))
+
+                        used_index = True
+
+                        # If index "fails" (0 images), fall back to normal drill
+                        if per_root_saved[0] == 0:
+                            dbg("[IDX][FALLBACK] 0 images from index → normal drill")
+                        else:
+                            dbg(f"[IDX][OK] images_from_index={per_root_saved[0]} (will continue drill if needed)")
+
+                # --- Normal drill ---
                 soup0, anchors0, _ = render(root, expand=True)
                 if not anchors0:
-                    dbg(f"[S2] ROOT DONE {root} (no anchors)")
+                    dbg(f"[S2] ROOT DONE {_short_url(root)} (no anchors)")
                     continue
 
-                term0, deeper0 = partition_anchors(root, anchors0, lambda u: _allowed(root, u))
-                dbg(f"[S2] root partition: terminal={len(term0)} deeper={len(deeper0)}")
+                term0_full, deeper0_full = partition_anchors(root, anchors0, lambda u: _allowed(root, u))
+                dbg(f"[S2] root partition: terminal={len(term0_full)} deeper={len(deeper0_full)}")
 
-                for tu in term0:
+                # Candidate index from root if it has big terminal fanout
+                _maybe_promote_terminal_index(root, term0_full, per_root_saved[0])
+
+                # Sort + keep top-k
+                term0 = _score_and_sort_urls(term0_full, k=url_sort_k)
+                deeper0 = _score_and_sort_urls(deeper0_full, k=url_sort_k)
+
+                # Process terminals first (sorted)
+                for i, tu in enumerate(term0, start=1):
                     if _global_cap_hit(): raise _StopAll()
                     if per_root_saved[0] >= hard_image_cap: raise _NextRoot()
                     if tu in seen_urls: continue
                     seen_urls.add(tu)
-                    _process_terminal_url(tu, per_root_counter=per_root_saved, fatigue_counter=fatigue_counter)
+                    _process_terminal_url(tu, per_root_counter=per_root_saved, fatigue_counter=fatigue_counter, term_i=i, term_total=len(term0))
 
+                # BFS-ish over deeper (sorted batches, high-K)
                 queue = deque(deeper0)
                 while queue:
                     if _global_cap_hit(): raise _StopAll()
                     if per_root_saved[0] >= hard_image_cap: raise _NextRoot()
+
                     cur = queue.popleft()
                     if cur in seen_urls: continue
                     seen_urls.add(cur)
@@ -1778,29 +2285,42 @@ def stage2_drill_search_and_images(
                                 raise _NextRoot()
                         continue
 
-                    term, deeper = partition_anchors(cur, canchors, lambda u: _allowed(root, u))
-                    dbg(f"[S2] cur={cur} terminal={len(term)} deeper={len(deeper)} queue_left={len(queue)} fatigue={fatigue_counter[0]}")
+                    term_full, deeper_full = partition_anchors(cur, canchors, lambda u: _allowed(root, u))
+                    dbg(f"[S2] cur={_short_url(cur)} term={len(term_full)} deeper={len(deeper_full)} q={len(queue)} fatigue={fatigue_counter[0]}")
 
-                    for tu in term:
+                    # candidate index if big terminal fanout
+                    _maybe_promote_terminal_index(cur, term_full, per_root_saved[0])
+
+                    # sort + keep top-k
+                    term = _score_and_sort_urls(term_full, k=url_sort_k)
+                    deeper = _score_and_sort_urls(deeper_full, k=url_sort_k)
+
+                    for i, tu in enumerate(term, start=1):
                         if _global_cap_hit(): raise _StopAll()
                         if per_root_saved[0] >= hard_image_cap: raise _NextRoot()
                         if tu in seen_urls: continue
                         seen_urls.add(tu)
-                        _process_terminal_url(tu, per_root_counter=per_root_saved, fatigue_counter=fatigue_counter)
+                        _process_terminal_url(tu, per_root_counter=per_root_saved, fatigue_counter=fatigue_counter, term_i=i, term_total=len(term))
 
                     for du in deeper:
                         if du not in seen_urls:
                             queue.append(du)
 
             except _NextRoot:
-                dbg(f"[S2] NEXT ROOT (saved {per_root_saved[0]} for {root})")
+                dbg(f"[S2] NEXT ROOT (saved {per_root_saved[0]} for {_short_url(root)})")
 
-            dbg(f"[S2] ROOT DONE {root} images_for_root={per_root_saved[0]} total_images={len(saved_paths)}")
+            dbg(f"[S2] ROOT DONE {_short_url(root)} images_for_root={per_root_saved[0]} total_images={len(saved_paths)}")
 
     except _StopAll:
         dbg(f"[S2] GLOBAL STOP total_images={len(saved_paths)} (global_cap={global_image_cap})")
+    finally:
+        try:
+            pw.close()
+        except Exception:
+            pass
 
     return saved_paths
+
 
 
 
@@ -1813,197 +2333,431 @@ def stage2_drill_search_and_images(
 def find_valid_roots(
     base_url: str,
     lemma_obj: dict,
-    max_pages_stage1: int = 100000,          # large ceiling; stopping is layer-based now
-    max_pages_stage2_per_root: int = 220,    # untouched (Stage 2)
+    max_pages_stage1: int = 100000,
+    max_pages_stage2_per_root: int = 220,
     timeout: int = 8,
     known_roots: list[str] | None = None,
     js_mode: str = "light",
 ):
     """
-    Stage 1: strict BFS with 'scan then expand'.
-    If ANY roots are found in a layer, finish that whole layer, then STOP
-    (do NOT expand to the next layer).
+    Modified Stage 1: BFS discovery using MiniLM semantic scoring.
+    Keeps only URLs semantically relevant to the query or 'menu' keyword.
+    Reorders kept URLs by prompt similarity.
 
-    Per layer:
-      1) SCAN: check all URLs in the current frontier against lemma phrases → collect roots.
-      2) EXPAND: fetch each frontier URL (JS-light), gather anchors → next_frontier (but ONLY
-                 if no roots were found this layer).
-    - Global 'visited' prevents loops.
-    - Non-HTML / scheme-block filters on both frontier URLs and extracted anchors.
-    - known_roots passthrough preserved and normalized; returns {root: []}.
+    NEW BEHAVIOR (your request):
+      1) Run normal BFS until we hit at least one high-prompt ROOT candidate in a layer.
+      2) Pick the BEST ROOT candidate (highest prompt score) as the "accepted candidate".
+      3) From that accepted candidate, run a "high-sim tree crawl":
+         - expand ONLY through URLs that pass threshold_prompt_root
+         - stop as soon as a layer produces ZERO URLs that pass threshold_prompt_root
+      4) Return FINAL roots as the deepest prompt_root URLs found under the accepted candidate.
+         If none found under it, return the accepted candidate itself.
+      5) Values contain a tiny parent/depth structure for later Stage 2 integration.
     """
     import re
+    import numpy as np
     from collections import deque
     from urllib.parse import urlparse, urlunparse, unquote
 
-    def dbg(*a, **k): print(*a, **k)
-
-    NON_HTML_EXT = (
-        ".pdf", ".doc", ".docx", ".zip", ".rar", ".7z",
-        ".ppt", ".pptx", ".xls", ".xlsx",
-        ".png", ".jpg", ".jpeg", ".gif", ".webp", ".svg", ".ico",
-        ".mp3", ".wav", ".mp4", ".webm", ".avi"
-    )
-    SCHEME_BLOCK = ("mailto:", "javascript:", "data:")
-
-    # --- registrable helper (tldextract preferred, safe fallback) ---
-    try:
-        import tldextract
-        def registrable(host: str) -> str:
-            t = tldextract.extract(host or "")
-            return ".".join([t.domain, t.suffix]) if t.suffix else (t.domain or "")
-    except Exception:
-        def registrable(host: str) -> str:
-            parts = (host or "").split(".")
-            return ".".join(parts[-2:]) if len(parts) >= 2 else (host or "")
-
-    # --- URL utils ---
+    # ----------------------------
+    # Helpers
+    # ----------------------------
     def clean_url(u: str) -> str:
         if not u:
             return ""
         u = unquote(u)
-        if u.lower().startswith(SCHEME_BLOCK):
+        if any(u.lower().startswith(s) for s in ("mailto:", "javascript:", "data:")):
             return ""
         u = re.sub(r"#.*$", "", u)
         u = re.sub(r"[?&](utm_[^=&]+|fbclid|gclid)=[^&]*", "", u)
         p = urlparse(u)
         scheme = p.scheme or "https"
         host = (p.hostname or "").lower()
-        path = p.path or "/"
-        if len(path) > 1 and path.endswith("/"):
-            path = path[:-1]
-        return urlunparse((scheme, host, path, "", p.query, ""))
+        path = (p.path or "/").rstrip("/")
+        if not path:
+            path = "/"
+        return urlunparse((scheme, host, path, "", "", ""))
 
-    def same_reg(u: str, base_reg: str) -> bool:
-        return registrable((urlparse(u).hostname or "").lower()) == base_reg
-
-    def is_non_html(u: str) -> bool:
-        lu = (u or "").lower()
-        return any(lu.endswith(ext) for ext in NON_HTML_EXT)
-
-    def path_segments(u: str):
+    def _last_path_part(u: str) -> str:
         p = urlparse(u)
-        return [s for s in (p.path or "/").split("/") if s]
+        segs = [s for s in (p.path or "").split("/") if s]
+        return segs[-1] if segs else ""
 
-    # Bucket by (host, last path segment); preserve first-seen order,
-    # but if a *shorter* path for same bucket appears in the same pass, prefer that.
-    def prefer_shortest_by_bucket_preserve(urls_iterable):
-        best = {}        # bucket -> (url, seg_count, first_index)
-        ordered = []
-        for idx, u in enumerate(urls_iterable):
+    def _normalize_for_embed(s: str) -> str:
+        s = (s or "").lower()
+        s = s.replace("-", " ").replace("_", " ")
+        s = re.sub(r"\s+", " ", s).strip()
+        return s
+
+    def prompt_key(u: str) -> str:
+        """
+        PROMPT embedding input:
+        - ONLY the final path segment
+        - slug-normalized into words
+        - NO domain
+        - NO parent structure
+        """
+        return _normalize_for_embed(_last_path_part(u))
+
+    def menu_key(u: str) -> str:
+        """
+        MENU embedding input:
+        - ALSO only final segment
+        - same normalization
+        - menu similarity is handled by thresholding, not structure depth
+        """
+        return _normalize_for_embed(_last_path_part(u))
+
+    def same_reg(u: str, reg: str) -> bool:
+        import tldextract
+        t = tldextract.extract(urlparse(u).hostname or "")
+        r = ".".join([t.domain, t.suffix]) if t.suffix else t.domain
+        return r == reg
+
+    def prefer_shortest_by_bucket(urls):
+        seen = {}
+        order = []
+        for u in urls:
             p = urlparse(u)
-            host = (p.hostname or "").lower()
-            segs = path_segments(u)
-            primary = segs[-1] if segs else ""
-            bucket = (host, primary)
-            seg_count = len(segs)
-            if bucket not in best:
-                best[bucket] = (u, seg_count, idx)
-                ordered.append(bucket)
+            key = (p.hostname, p.path.split("/")[-1])
+            segs = len([s for s in p.path.split("/") if s])
+            if key not in seen:
+                seen[key] = (u, segs)
+                order.append(key)
             else:
-                cur_u, cur_seg_count, cur_idx = best[bucket]
-                if seg_count < cur_seg_count:
-                    best[bucket] = (u, seg_count, cur_idx)  # keep original first_idx
-        return [best[b][0] for b in ordered]
+                if segs < seen[key][1]:
+                    seen[key] = (u, segs)
+        return [seen[k][0] for k in order]
 
-    # Use ONLY provided lemma_obj
-    lemma_phrases = {
-        (w or "").strip().lower()
-        for entry in (lemma_obj or {}).values()
-        for w in entry.get("lemmas", [])
-        if isinstance(w, str) and w.strip()
-    }
+    def _lemma_phrases_from_obj(lo: dict) -> list[str]:
+        out = []
+        seen = set()
+        for entry in (lo or {}).values():
+            for w in (entry.get("lemmas") or []):
+                if not isinstance(w, str):
+                    continue
+                s = w.strip()
+                if not s:
+                    continue
+                k = s.lower()
+                if k in seen:
+                    continue
+                seen.add(k)
+                out.append(s)
+        return out
 
-    def matches_phrase(u: str) -> bool:
-        if not lemma_phrases:
-            return True
-        lu = (u or "").lower()
-        return any(p in lu for p in lemma_phrases)
+    def _embed_centroid(texts: list[str]):
+        vecs = encoder.encode(texts, normalize_embeddings=True)
+        v = np.mean(np.asarray(vecs, dtype=np.float32), axis=0)
+        n = float(np.linalg.norm(v))
+        return (v / n) if n > 0 else v
 
-    # --- Normalize inputs ---
-    base_c = clean_url(base_url)
-    base_host = (urlparse(base_c).hostname or "").lower()
-    base_reg = registrable(base_host)
+    def _dot(a, b) -> float:
+        return float(np.dot(a, b))
+
+    # ----------------------------
+    # Initialize embeddings
+    # ----------------------------
+    encoder = _EMBED_MODEL
+    if encoder is None:
+        print("[S1] ⚠ MiniLM encoder unavailable — returning empty roots")
+        return {}
+
+    lemma_phrases = _lemma_phrases_from_obj(lemma_obj)
+    if not lemma_phrases:
+        inferred = prompt_key(clean_url(base_url))
+        lemma_phrases = [inferred or "query"]
+
+    menu_keyword = "site navigation menu toc section list"
+    prompt_emb = _embed_centroid(lemma_phrases)
+    menu_emb = encoder.encode(menu_keyword, normalize_embeddings=True)
+
+    # ----------------------------
+    # Thresholds (tune here)
+    # ----------------------------
+    threshold_prompt_expand = 0.2    # keep in BFS expansion if prompt OR menu passes
+    threshold_menu_expand = 0.2
+    threshold_prompt_root = 0.5     # HIGH prompt threshold for "true" roots
+
+    # ----------------------------
+    # Setup BFS
+    # ----------------------------
+    base_clean = clean_url(base_url)
+    if not base_clean:
+        print("[S1] Invalid base URL.")
+        return {}
+
+    host = (urlparse(base_clean).hostname or "").lower()
+    import tldextract
+    t = tldextract.extract(host)
+    base_reg = ".".join([t.domain, t.suffix]) if t.suffix else t.domain
 
     # known_roots passthrough
     if known_roots:
-        roots = [clean_url(r) for r in known_roots if r]
-        roots = [r for r in roots if r and same_reg(r, base_reg) and not is_non_html(r)]
-        roots = prefer_shortest_by_bucket_preserve(roots)
-        dbg(f"[FIND][S1] skipping Stage 1 via known_roots count={len(roots)}")
-        return {r: [] for r in roots}
+        roots0 = [clean_url(r) for r in known_roots if r]
+        roots0 = [r for r in roots0 if r and same_reg(r, base_reg) and not any(r.lower().endswith(ext) for ext in NON_HTML_EXT)]
+        roots0 = prefer_shortest_by_bucket(roots0)
+        print(f"[S1] known_roots supplied; skipping discovery. roots={len(roots0)}")
+        return {r: {"parent": None, "depth": 0, "prompt": None, "menu": None} for r in roots0}
 
-    if not base_host:
-        dbg("[FIND][S1] no base_host")
-        return {}
-
-    # --- BFS state ---
-    visited = set([base_c])
-    frontier = deque([base_c])
-    roots = []
-    breaths = 0
+    visited = {base_clean}
+    frontier = deque([base_clean])
+    layer_idx = 0
     total_fetches = 0
 
-    while frontier and total_fetches < max_pages_stage1:
-        breaths += 1
+    print(f"[S1] Starting discovery on {base_clean} (domain={base_reg})")
+    print(f"[S1][EMBED] prompt_phrases={len(lemma_phrases)} example={lemma_phrases[:6]} menu='{menu_keyword}'")
+    print(f"[S1][THRESH] expand: prompt>={threshold_prompt_expand} OR menu>={threshold_menu_expand} | root: prompt>={threshold_prompt_root}")
+
+    # we will pick the BEST root candidate from the first layer that produces any
+    accepted_root = None
+    accepted_root_scores = None  # (prompt, menu, combo, key)
+
+    # ----------------------------
+    # Phase 1: normal BFS until first layer with any ROOT candidates
+    # ----------------------------
+    while frontier and layer_idx < 10 and total_fetches < max_pages_stage1:
+        layer_idx += 1
         layer = list(frontier)
         frontier.clear()
-        dbg(f"[FIND][S1][LAYER {breaths} START] frontier={len(layer)} visited={len(visited)} roots={len(roots)}")
 
-        # 1) SCAN: check this layer's URLs for matches (no fetching)
-        layer_scan = [u for u in layer if same_reg(u, base_reg) and not is_non_html(u)]
-        layer_matches = [u for u in layer_scan if matches_phrase(u)]
-        layer_found_any = False
+        print(f"\n[S1][LAYER {layer_idx}] Frontier={len(layer)} Visited={len(visited)}")
 
-        if layer_matches:
-            for m in prefer_shortest_by_bucket_preserve(layer_matches):
-                if m not in roots:
-                    roots.append(m)
-                    layer_found_any = True
-                    dbg(f"[FIND][S1][ROOT] {m}")
+        # ---- Step 1: Scan layer
+        candidates = []
+        for u in layer:
+            if not same_reg(u, base_reg):
+                continue
+            if any(u.lower().endswith(ext) for ext in NON_HTML_EXT):
+                continue
+            candidates.append(u)
 
-        # If we found any roots in this layer, STOP after finishing the layer (no next expansion)
-        if layer_found_any:
-            dbg(f"[FIND][S1][LAYER {breaths} STOP] roots_found={len(roots)} — not expanding further")
+        if not candidates:
+            print("[S1] no candidates in this layer")
+            continue
+
+        # ---- Step 2: Embed candidates and rank
+        prompt_texts = [prompt_key(u) for u in candidates]
+        menu_texts = [menu_key(u) for u in candidates]
+
+        prompt_url_embs = encoder.encode(prompt_texts, normalize_embeddings=True)
+        menu_url_embs = encoder.encode(menu_texts, normalize_embeddings=True)
+
+        prompt_scores = [_dot(prompt_emb, e) for e in prompt_url_embs]
+        menu_scores = [_dot(menu_emb, e) for e in menu_url_embs]
+        combined = [0.8 * p + 0.2 * m for p, m in zip(prompt_scores, menu_scores)]
+
+        kept_expand = []   # (u, ps, ms, cs, key)
+        kept_roots = []    # prompt-only high
+        dropped = []
+
+        for u, k, ps, ms, cs in zip(candidates, prompt_texts, prompt_scores, menu_scores, combined):
+            if ps >= threshold_prompt_expand or ms >= threshold_menu_expand:
+                kept_expand.append((u, ps, ms, cs, k))
+                if ps >= threshold_prompt_root:
+                    kept_roots.append((u, ps, ms, cs, k))
+            else:
+                dropped.append((u, ps, ms, cs, k))
+
+        kept_expand_sorted = sorted(kept_expand, key=lambda x: x[1], reverse=True)
+        kept_roots_sorted = sorted(kept_roots, key=lambda x: x[1], reverse=True)
+        dropped_sorted = sorted(dropped, key=lambda x: x[1], reverse=True)
+
+        # Debug (layer-based)
+        print(f"[S1][LAYER {layer_idx}][STATS] kept_expand={len(kept_expand)} kept_roots={len(kept_roots)} dropped={len(dropped)}")
+        if kept_expand_sorted:
+            print("[S1][LAYER RANK] Kept-for-expand URLs (prompt-sorted):")
+            for u, ps, ms, cs, k in kept_expand_sorted[:15]:
+                mark = "ROOT" if ps >= threshold_prompt_root else "keep"
+                print(f"  + [{mark}] {u}\n    key='{k}' prompt={ps:.3f} menu={ms:.3f} combo={cs:.3f}")
+        else:
+            print("[S1][LAYER RANK] Kept-for-expand URLs: (none)")
+
+        if dropped_sorted:
+            print("[S1][LAYER DROP] Dropped URLs (top 20 by prompt):")
+            for u, ps, ms, cs, k in dropped_sorted[:20]:
+                print(f"  - {u}\n    key='{k}' prompt={ps:.3f} menu={ms:.3f} combo={cs:.3f}")
+
+        # ---- If this layer contains any ROOT candidates, pick the BEST and stop phase 1.
+        if kept_roots_sorted:
+            best = kept_roots_sorted[0]
+            accepted_root = best[0]
+            accepted_root_scores = (best[1], best[2], best[3], best[4])
+            print(f"[S1][LAYER {layer_idx}] Accepted BEST ROOT → {accepted_root}")
             break
 
-        # 2) EXPAND: fetch to collect anchors for NEXT layer
-        next_candidates = []
-        for u in layer_scan:
+        # ---- Step 3: Expand if no roots yet
+        expand_from = [u for (u, _, _, _, _) in kept_expand_sorted] if kept_expand_sorted else list(candidates)
+
+        next_frontier = []
+        for u in expand_from:
             try:
                 html, anchors, via = js_capable_fetch(u, js_mode=js_mode)
-            except Exception as e:
-                dbg(f"[JSFETCH][ERR] {u} -> {e}")
-                anchors, via = [], "error"
-
+            except Exception:
+                anchors = []
             total_fetches += 1
-            dbg(f"[JSFETCH][{via}] {u} ok anchors={len(anchors) if anchors else 0}")
+            if not anchors:
+                continue
+            for a in anchors:
+                cu = clean_url(a)
+                if not cu or cu in visited:
+                    continue
+                if not same_reg(cu, base_reg):
+                    continue
+                if any(cu.lower().endswith(ext) for ext in NON_HTML_EXT):
+                    continue
+                visited.add(cu)
+                next_frontier.append(cu)
+
+        # reorder next frontier by prompt for faster convergence
+        if next_frontier:
+            nf_keys = [prompt_key(u) for u in next_frontier]
+            nf_embs = encoder.encode(nf_keys, normalize_embeddings=True)
+            nf_scores = [_dot(prompt_emb, e) for e in nf_embs]
+            next_frontier = [u for _, u in sorted(zip(nf_scores, next_frontier), reverse=True)]
+
+        for n in prefer_shortest_by_bucket(next_frontier):
+            frontier.append(n)
+
+        print(f"[S1][LAYER {layer_idx}] Expanded → next frontier size={len(frontier)}")
+
+    if not accepted_root:
+        print("\n[S1] Discovery complete. Found 0 candidate roots.")
+        return {}
+
+    # ----------------------------
+    # Phase 2: "High-sim tree" crawl under accepted_root
+    # Expand ONLY through nodes that pass threshold_prompt_root.
+    # Stop when a layer yields zero passers.
+    # ----------------------------
+    print("\n[S1][TREE] Starting high-sim crawl under accepted_root")
+    print(f"[S1][TREE] seed={accepted_root}")
+
+    tree_nodes = {}  # url -> meta
+    seed_ps, seed_ms, seed_cs, seed_key = accepted_root_scores
+    tree_nodes[accepted_root] = {
+        "parent": None,
+        "depth": 0,
+        "prompt": float(seed_ps),
+        "menu": float(seed_ms),
+        "combo": float(seed_cs),
+        "key": seed_key,
+    }
+
+    tree_frontier = [accepted_root]
+    tree_visited = set([accepted_root])
+    tree_depth = 0
+    max_tree_depth = 8
+    max_tree_nodes = 120
+
+    while tree_frontier and tree_depth < max_tree_depth and len(tree_nodes) < max_tree_nodes:
+        tree_depth += 1
+
+        # collect candidate children from this frontier
+        child_candidates = []
+        parent_for_child = {}  # first parent wins
+
+        for parent_url in tree_frontier:
+            try:
+                html, anchors, via = js_capable_fetch(parent_url, js_mode=js_mode)
+            except Exception:
+                anchors = []
 
             if not anchors:
                 continue
 
             for a in anchors:
                 cu = clean_url(a)
-                if not cu:
-                    continue
-                if cu in visited:
+                if not cu or cu in tree_visited:
                     continue
                 if not same_reg(cu, base_reg):
                     continue
-                if is_non_html(cu):
+                if any(cu.lower().endswith(ext) for ext in NON_HTML_EXT):
                     continue
-                visited.add(cu)
-                next_candidates.append(cu)
 
-        # Keep order; bucket-dedupe while preserving first-seen
-        next_frontier = prefer_shortest_by_bucket_preserve(next_candidates)
-        for cu in next_frontier:
-            frontier.append(cu)
+                tree_visited.add(cu)
+                child_candidates.append(cu)
+                if cu not in parent_for_child:
+                    parent_for_child[cu] = parent_url
 
-        dbg(f"[FIND][S1][LAYER {breaths} END] next_frontier={len(next_frontier)} roots={len(roots)}")
+        child_candidates = prefer_shortest_by_bucket(child_candidates)
 
-    # Final normalized roots map
-    return {r: [] for r in prefer_shortest_by_bucket_preserve(roots)}
+        if not child_candidates:
+            print(f"[S1][TREE][DEPTH {tree_depth}] candidates=0 → STOP")
+            break
+
+        # score children
+        p_texts = [prompt_key(u) for u in child_candidates]
+        m_texts = [menu_key(u) for u in child_candidates]
+
+        p_embs = encoder.encode(p_texts, normalize_embeddings=True)
+        m_embs = encoder.encode(m_texts, normalize_embeddings=True)
+
+        p_scores = [_dot(prompt_emb, e) for e in p_embs]
+        m_scores = [_dot(menu_emb, e) for e in m_embs]
+        c_scores = [0.8 * p + 0.2 * m for p, m in zip(p_scores, m_scores)]
+
+        pass_high = []
+        for u, k, ps, ms, cs in zip(child_candidates, p_texts, p_scores, m_scores, c_scores):
+            if ps >= threshold_prompt_root:
+                pass_high.append((u, ps, ms, cs, k))
+
+        pass_high_sorted = sorted(pass_high, key=lambda x: x[1], reverse=True)
+
+        print(f"[S1][TREE][DEPTH {tree_depth}] scanned={len(child_candidates)} pass_high={len(pass_high_sorted)} (prompt>={threshold_prompt_root})")
+
+        # full detail but not spammy: show top 20 passers + top 20 failures by prompt
+        if pass_high_sorted:
+            print("[S1][TREE][PASS] top passers:")
+            for u, ps, ms, cs, k in pass_high_sorted[:20]:
+                print(f"  + {u}\n    key='{k}' prompt={ps:.3f} menu={ms:.3f} combo={cs:.3f}")
+
+        if not pass_high_sorted:
+            print(f"[S1][TREE][DEPTH {tree_depth}] no high-sim nodes in this layer → STOP")
+            break
+
+        # record nodes + build next frontier (ONLY passers)
+        next_frontier = []
+        for u, ps, ms, cs, k in pass_high_sorted:
+            if u in tree_nodes:
+                continue
+            tree_nodes[u] = {
+                "parent": parent_for_child.get(u),
+                "depth": tree_depth,
+                "prompt": float(ps),
+                "menu": float(ms),
+                "combo": float(cs),
+                "key": k,
+            }
+            next_frontier.append(u)
+
+        tree_frontier = next_frontier
+
+    # ----------------------------
+    # Final root set selection:
+    # - if we found any depth>=1 high nodes, return those (NOT the seed)
+    # - else return the seed
+    # ----------------------------
+    depth1_plus = [u for u, meta in tree_nodes.items() if meta.get("depth", 0) >= 1]
+    depth1_plus = prefer_shortest_by_bucket(depth1_plus)
+
+    if depth1_plus:
+        print(f"\n[S1] Final roots: returning depth>=1 high-sim nodes count={len(depth1_plus)} (excluding seed)")
+        out = {u: tree_nodes[u] for u in depth1_plus if u in tree_nodes}
+    else:
+        print("\n[S1] Final roots: no high-sim descendants found; returning seed only")
+        out = {accepted_root: tree_nodes[accepted_root]}
+
+    # Summary
+    keys = list(out.keys())
+    print(f"[S1] Discovery complete. Found {len(keys)} candidate roots:")
+    for r in keys[:12]:
+        m = out[r]
+        print(f"  → {r}  (depth={m.get('depth')} prompt={m.get('prompt'):.3f})")
+
+    return out
+
+
 
 
 
@@ -2132,6 +2886,9 @@ PARSERS = {
 # =========================
 # HANDLE NON-API (NEW PIPELINE)
 # =========================
+# =========================
+# MODIFIED: handle_result_no_api (reads/uses/saves terminal indexes)
+# =========================
 def handle_result_no_api(source: Source, query: str, subj: str, hard_image_cap: int = 5,
                          encoder: Optional[Any] = None,
                          query_embedding: Optional[Any] = None,
@@ -2144,14 +2901,11 @@ def handle_result_no_api(source: Source, query: str, subj: str, hard_image_cap: 
                 seen.add(x); out.append(x)
         return out
 
-    # Build subject lemmas for Stage 1 discovery filtering
     lemma_obj_subj = get_limited_lemmas(subj, 4)
-    # Build query + synonyms for text matching (Stage 2)
     lemma_obj_query = get_limited_lemmas(query, 5)
 
     valid_endpoints: List[str] = []
 
-    # Predefined subject urls
     if getattr(source, "subjecturls", None):
         dbg("[NOAPI] subject urls exist")
         for current_subj, url_or_list in source.subjecturls.items():
@@ -2162,7 +2916,6 @@ def handle_result_no_api(source: Source, query: str, subj: str, hard_image_cap: 
             else:
                 valid_endpoints.append(url_or_list)
 
-    # Previously found urls
     if getattr(source, "subjecturlsfound", None):
         dbg("[NOAPI] previously found urls loaded")
         for current_subj, url_or_list in source.subjecturlsfound.items():
@@ -2173,7 +2926,6 @@ def handle_result_no_api(source: Source, query: str, subj: str, hard_image_cap: 
             else:
                 valid_endpoints.append(url_or_list)
 
-    # Normalize + dedupe
     valid_endpoints = uniq_keep_order(clean_url(u) for u in valid_endpoints if u)
 
     # Stage 1 discovery (or normalize known)
@@ -2188,7 +2940,6 @@ def handle_result_no_api(source: Source, query: str, subj: str, hard_image_cap: 
         dbg(f"[NOAPI] no roots after Stage 1 for {source.name}")
         source.img_paths = []
         return []
-    
 
     # Persist roots we used (so next run can reuse)
     try:
@@ -2205,7 +2956,6 @@ def handle_result_no_api(source: Source, query: str, subj: str, hard_image_cap: 
             new_roots = [r for r in roots if r and r not in prev]
             if new_roots:
                 data["SubjectUrlsFound"][subj].extend(new_roots)
-                # de-dupe
                 dedup = []
                 s = set()
                 for u in data["SubjectUrlsFound"][subj]:
@@ -2226,31 +2976,94 @@ def handle_result_no_api(source: Source, query: str, subj: str, hard_image_cap: 
     except Exception as e:
         dbg(f"[NOAPI] persist warning: {e}")
 
+    # =========================
+    # NEW: Load ALL terminal indexes for this subject, pick best for THIS domain
+    # =========================
+    terminal_seed = None
+    try:
+        all_idx = _load_all_terminal_indexes_for_subject(subj)
+        if all_idx and base_ctx_embedding is not None and encoder is not None:
+            import numpy as np
 
-    #ALL STAGE 2
+            prompt_vec = _norm_vec(base_ctx_embedding)
+            my_reg = _registrable_of(source.url)
 
+            # filter to matching registrable domain + valid centroid
+            candidates = []
+            for idx in all_idx:
+                entry = idx.get("entry_url") or ""
+                reg = _registrable_of(entry) if entry else _registrable_of(idx.get("_source_url") or "")
+                if reg != my_reg:
+                    continue
+                cent = idx.get("centroid_embedding")
+                if not isinstance(cent, list) or len(cent) < 32:
+                    continue
+                score = float(np.dot(prompt_vec, np.asarray(cent, dtype=np.float32)))
+                candidates.append((score, idx))
+
+            candidates.sort(key=lambda x: x[0], reverse=True)
+
+            dbg(f"[IDX][SELECT] subj='{subj}' domain='{my_reg}' indexes_found_total={len(all_idx)} domain_matched={len(candidates)}")
+            for s, idx in candidates[:10]:
+                dbg(f"  ↳ score={s:.3f} terminals={int(idx.get('terminal_count') or 0):>3} entry={_short_url(idx.get('entry_url') or '')}  (src={idx.get('_source_name')})")
+
+            if candidates:
+                best_score, best = candidates[0]
+                if best_score >= 0.35:  # keep consistent with Stage2 default use threshold
+                    terminal_seed = {
+                        "entry_url": best.get("entry_url"),
+                        "terminal_urls": best.get("terminal_urls") or [],
+                        "centroid_embedding": best.get("centroid_embedding"),
+                        "score": float(best_score),
+                        "source": best.get("_source_name"),
+                        "id": best.get("id"),
+                    }
+                    dbg(f"[IDX][SELECT][USE] id={terminal_seed.get('id')} score={best_score:.3f} entry={_short_url(terminal_seed.get('entry_url') or '')}")
+                else:
+                    dbg(f"[IDX][SELECT][DROP] best_score={best_score:.3f} < 0.35 threshold")
+    except Exception as e:
+        dbg(f"[IDX][SELECT][ERR] {e}")
+
+    # Stage 2
     session = requests.Session()
     session.headers.update({"User-Agent": "diag-scrape/0.1"})
     html_cache = {}
     anchors_cache = {}
 
-    # NEW STAGE 2 (drill + text search + image download) — pass the *roots* actually selected
-    dbg(f"[NOAPI] Stage 2 starting with roots={len(roots)} hard_image_cap={hard_image_cap}")
+    terminal_indexes_out: list[dict] = []
+
+    dbg(f"[NOAPI] Stage 2 starting roots={len(roots)} hard_image_cap={hard_image_cap}")
     saved = stage2_drill_search_and_images(
-        roots=roots,                      # ← use roots
+        roots=roots,
         base_query=query,
-        lemma_obj=lemma_obj_query,        # ← use query lemmas for text matching
-        hard_image_cap=hard_image_cap,    # ← per-root cap (now bumped at call site)
+        lemma_obj=lemma_obj_query,
+        hard_image_cap=hard_image_cap,
         session=session,
         html_cache=html_cache,
         anchors_cache=anchors_cache,
         encoder=encoder,
         query_embedding=query_embedding,
         prompt_embedding=base_ctx_embedding,
-        per_hit_cap = 1,
+        per_hit_cap=1,
+
+        # NEW:
+        url_sort_k=65,
+        terminal_index_seed=terminal_seed,
+        terminal_index_collector=terminal_indexes_out,
+        terminal_index_min_terminals=25,
+        terminal_index_use_threshold=0.35,
+        terminal_index_promote_threshold=0.28,
+        subject=subj,
+        source_name=source.name,
     )
 
     source.img_paths = saved
+
+    # NEW: Persist terminal indexes discovered during Stage2 into THIS source json
+    if terminal_indexes_out:
+        dbg(f"[IDX][RUN] produced_indexes={len(terminal_indexes_out)} (will persist)")
+        _persist_terminal_indexes_to_source(source.name, subj, terminal_indexes_out)
+
     return saved
 
 
@@ -2904,14 +3717,14 @@ def research(query: str, subj: str):
             web_sources.append(src)
 
     # DDG: CC-backed images with per-image context
-    ddg_cc_image_harvest(
-        query=query,
-        target_count=20,              # higher cap so the new behaviour actually matters
-        lemma_obj=lemma_obj_query,
-        encoder=encoder,
-        query_embedding=query_embedding,
-        base_ctx_embedding=base_ctx_embedding,
-    )
+    #ddg_cc_image_harvest(
+    #    query=query,
+    #    target_count=20,              # higher cap so the new behaviour actually matters
+    #    lemma_obj=lemma_obj_query,
+    #    encoder=encoder,
+    #    query_embedding=query_embedding,
+    #    base_ctx_embedding=base_ctx_embedding,
+    #)
 
     for src in web_sources:
         dbg(f"opened source {src.name}, has no api, starting process..")
@@ -2939,3 +3752,6 @@ def research(query: str, subj: str):
     unique = collect_unique_images(IMAGES_PATH, base_ctx_embedding, prompt_text=query, dbg=dbg)
     dbg(f"Unique images:{unique}")
     return unique
+
+if "__main__":
+    research("Eukaryotic cell", "Biology")
