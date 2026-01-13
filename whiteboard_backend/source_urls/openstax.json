@@ -9,13 +9,16 @@
     "Geography": ""
   },
   "SubjectUrlsFound": {
-    "Biology": [
-      "https://openstax.org/books/biology-2e"
-    ],
     "Calculus": [
       "https://openstax.org/details/books/calculus-volume-1",
       "https://openstax.org/details/books/calculus-volume-2",
       "https://openstax.org/details/books/calculus-volume-3"
+    ],
+    "Biology": [
+      "https://openstax.org/details/books/biology-2e",
+      "https://openstax.org/details/books/concepts-biology",
+      "https://openstax.org/details/books/microbiology",
+      "https://openstax.org/details/books/biology-ap-courses"
     ]
   }
 }
