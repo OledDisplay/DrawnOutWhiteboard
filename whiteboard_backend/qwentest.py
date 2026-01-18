@@ -390,8 +390,8 @@ def build_prompt(
 
     return (
         "Here is an image with LEFT and RIGHT panels.\n"
-        "- LEFT: a cropped target region (only the main color is active; other colors are grayscaled.\n"
-        "- RIGHT: the full image with a red rectangle marking where LEFT came (coloured)\n\n"
+        "- LEFT: a cropped target region with highlighted object\n"
+        "- RIGHT: the full image with a red rectangle marking where LEFT came from(coloured)\n\n"
         "Identify, count and describe pure shapes building up LEFT - big / small circles, lines, squares\n"
         "Analyze RIGHT + coloured crop for semantic context.\n"
         "Based on shapes and visual characteristics pick the closest label:\n\n"

@@ -35,6 +35,7 @@ Skeletonized/
 FontPngs/
 ClusterRenders/
 ClusterMaps/
+_path_cache/
 
 # OS stuff
 .DS_Store

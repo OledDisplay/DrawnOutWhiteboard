@@ -1,0 +1,1680 @@
+{
+  "image_index": 2,
+  "full_image_source": "C:\\Users\\marti\\allFolder\\code\\DRAWNOUT\\whiteboard_backend\\ProccessedImages\\processed_2.png",
+  "clusters_json": "C:\\Users\\marti\\allFolder\\code\\DRAWNOUT\\whiteboard_backend\\ClusterMaps\\processed_2\\clusters.json",
+  "candidate_labels": [
+    "Endoplasmic",
+    "Mitochondrion",
+    "membrane",
+    "Ribosome",
+    "Cytoplasm",
+    "Nucleolus",
+    "reticulum",
+    "Nucleus",
+    "Cell"
+  ],
+  "model_id": "Qwen/Qwen3-VL-2B-Instruct",
+  "quant_mode": "4bit",
+  "used_quant": false,
+  "device": "cuda:0",
+  "proc_longest_edge": 768,
+  "panel_edge": 384,
+  "batch_size": 4,
+  "clusters": {
+    "0001_cyan_0_mask.png": {
+      "entry": {
+        "color_id": 4,
+        "color_name": "cyan",
+        "group_index_in_color": 0,
+        "stroke_indexes": [
+          0
+        ],
+        "bbox_xyxy": [
+          1539,
+          669,
+          2334,
+          1219
+        ],
+        "crop_file_bbox": "cyan_0_bbox.png",
+        "crop_file_mask": "cyan_0_mask.png"
+      },
+      "mask_file": "cyan_0_mask.png",
+      "mask_path": "C:\\Users\\marti\\allFolder\\code\\DRAWNOUT\\whiteboard_backend\\ClusterRenders\\processed_2\\cyan_0_mask.png",
+      "colour_hint": "cyan",
+      "bbox_xyxy": [
+        1539,
+        669,
+        2334,
+        1219
+      ],
+      "bbox_resized_xyxy": [
+        162,
+        70,
+        246,
+        128
+      ],
+      "bbox_right_panel_xyxy": [
+        162,
+        151,
+        246,
+        209
+      ],
+      "bbox_norm_xyxy": [
+        0.42233809001097694,
+        0.31857142857142856,
+        0.6405049396267838,
+        0.5804761904761905
+      ],
+      "batch_size": 4,
+      "batch_timing_s": 15.2131,
+      "avg_per_item_s": 3.8033,
+      "model_raw": "```json\n{\n  \"label\": \"Nucleus\",\n  \"shapes\": [\n    \"circle\",\n    \"rectangle\"\n  ],\n  \"evidence\": \"The highlighted object in the left panel is a large, blue, circular structure with a smaller, crescent-shaped nucleus inside. This is consistent with the appearance of a nucleus in a",
+      "json_objects": [],
+      "parsed": null,
+      "final": null,
+      "auto_capped": false
+    },
+    "0002_green_0_mask.png": {
+      "entry": {
+        "color_id": 5,
+        "color_name": "green",
+        "group_index_in_color": 0,
+        "stroke_indexes": [
+          1,
+          2,
+          3
+        ],
+        "bbox_xyxy": [
+          1419,
+          646,
+          1730,
+          984
+        ],
+        "crop_file_bbox": "green_0_bbox.png",
+        "crop_file_mask": "green_0_mask.png"
+      },
+      "mask_file": "green_0_mask.png",
+      "mask_path": "C:\\Users\\marti\\allFolder\\code\\DRAWNOUT\\whiteboard_backend\\ClusterRenders\\processed_2\\green_0_mask.png",
+      "colour_hint": "green",
+      "bbox_xyxy": [
+        1419,
+        646,
+        1730,
+        984
+      ],
+      "bbox_resized_xyxy": [
+        150,
+        68,
+        182,
+        104
+      ],
+      "bbox_right_panel_xyxy": [
+        150,
+        149,
+        182,
+        185
+      ],
+      "bbox_norm_xyxy": [
+        0.3894072447859495,
+        0.3076190476190476,
+        0.4747530186608123,
+        0.4685714285714286
+      ],
+      "batch_size": 4,
+      "batch_timing_s": 15.2131,
+      "avg_per_item_s": 3.8033,
+      "model_raw": "```json\n{\n  \"label\": \"Cell\",\n  \"shapes\": [\n    \"circle\",\n    \"line\",\n    \"square\"\n  ],\n  \"evidence\": \"The left panel shows a close-up of a green, curved object, which is a part of a larger structure. The right panel shows a diagram of a cell with various",
+      "json_objects": [],
+      "parsed": null,
+      "final": null,
+      "auto_capped": false
+    },
+    "0003_green_1_mask.png": {
+      "entry": {
+        "color_id": 5,
+        "color_name": "green",
+        "group_index_in_color": 1,
+        "stroke_indexes": [
+          5
+        ],
+        "bbox_xyxy": [
+          1436,
+          625,
+          2500,
+          1432
+        ],
+        "crop_file_bbox": "green_1_bbox.png",
+        "crop_file_mask": "green_1_mask.png"
+      },
+      "mask_file": "green_1_mask.png",
+      "mask_path": "C:\\Users\\marti\\allFolder\\code\\DRAWNOUT\\whiteboard_backend\\ClusterRenders\\processed_2\\green_1_mask.png",
+      "colour_hint": "green",
+      "bbox_xyxy": [
+        1436,
+        625,
+        2500,
+        1432
+      ],
+      "bbox_resized_xyxy": [
+        151,
+        66,
+        263,
+        151
+      ],
+      "bbox_right_panel_xyxy": [
+        151,
+        147,
+        263,
+        232
+      ],
+      "bbox_norm_xyxy": [
+        0.3940724478594951,
+        0.2976190476190476,
+        0.686059275521405,
+        0.6819047619047619
+      ],
+      "batch_size": 4,
+      "batch_timing_s": 15.2131,
+      "avg_per_item_s": 3.8033,
+      "model_raw": "```json\n{\n  \"label\": \"Cell\",\n  \"shapes\": [\n    \"circle\",\n    \"line\",\n    \"square\"\n  ],\n  \"evidence\": \"The image on the right shows a diagram of a cell, which is the overall structure. The red rectangle highlights a specific part of the cell, and the left panel shows",
+      "json_objects": [],
+      "parsed": null,
+      "final": null,
+      "auto_capped": false
+    },
+    "0004_green_2_mask.png": {
+      "entry": {
+        "color_id": 5,
+        "color_name": "green",
+        "group_index_in_color": 2,
+        "stroke_indexes": [
+          4
+        ],
+        "bbox_xyxy": [
+          1744,
+          1460,
+          2123,
+          1516
+        ],
+        "crop_file_bbox": "green_2_bbox.png",
+        "crop_file_mask": "green_2_mask.png"
+      },
+      "mask_file": "green_2_mask.png",
+      "mask_path": "C:\\Users\\marti\\allFolder\\code\\DRAWNOUT\\whiteboard_backend\\ClusterRenders\\processed_2\\green_2_mask.png",
+      "colour_hint": "green",
+      "bbox_xyxy": [
+        1744,
+        1460,
+        2123,
+        1516
+      ],
+      "bbox_resized_xyxy": [
+        184,
+        154,
+        224,
+        160
+      ],
+      "bbox_right_panel_xyxy": [
+        184,
+        235,
+        224,
+        241
+      ],
+      "bbox_norm_xyxy": [
+        0.47859495060373214,
+        0.6952380952380952,
+        0.5826015367727772,
+        0.7219047619047619
+      ],
+      "batch_size": 4,
+      "batch_timing_s": 15.2131,
+      "avg_per_item_s": 3.8033,
+      "model_raw": "```json\n{\n  \"label\": \"Cell\",\n  \"shapes\": [\n    \"circle\",\n    \"line\",\n    \"square\"\n  ],\n  \"evidence\": \"The image on the right shows a diagram of a cell with various organelles. The left panel shows a cropped section of this cell, which is a complete cell structure",
+      "json_objects": [],
+      "parsed": null,
+      "final": null,
+      "auto_capped": false
+    },
+    "0005_red_0_mask.png": {
+      "entry": {
+        "color_id": 7,
+        "color_name": "red",
+        "group_index_in_color": 0,
+        "stroke_indexes": [
+          6,
+          7,
+          10,
+          11,
+          12,
+          13,
+          14,
+          15,
+          16,
+          17,
+          18,
+          19,
+          20,
+          21,
+          22,
+          23,
+          24,
+          25,
+          26,
+          27,
+          28,
+          29,
+          34,
+          35,
+          36,
+          37,
+          38,
+          39
+        ],
+        "bbox_xyxy": [
+          987,
+          305,
+          2807,
+          2049
+        ],
+        "crop_file_bbox": "red_0_bbox.png",
+        "crop_file_mask": "red_0_mask.png"
+      },
+      "mask_file": "red_0_mask.png",
+      "mask_path": "C:\\Users\\marti\\allFolder\\code\\DRAWNOUT\\whiteboard_backend\\ClusterRenders\\processed_2\\red_0_mask.png",
+      "colour_hint": "red",
+      "bbox_xyxy": [
+        987,
+        305,
+        2807,
+        2049
+      ],
+      "bbox_resized_xyxy": [
+        104,
+        32,
+        296,
+        216
+      ],
+      "bbox_right_panel_xyxy": [
+        104,
+        113,
+        296,
+        297
+      ],
+      "bbox_norm_xyxy": [
+        0.2708562019758507,
+        0.14523809523809525,
+        0.7703073545554336,
+        0.9757142857142858
+      ],
+      "batch_size": 4,
+      "batch_timing_s": 6.4064,
+      "avg_per_item_s": 1.6016,
+      "model_raw": "```json\n{\n  \"label\": \"Cell\",\n  \"shapes\": [\n    \"circle\",\n    \"line\",\n    \"square\"\n  ],\n  \"evidence\": \"The left panel shows a large circular structure with internal components, which is a cell. The right panel shows a detailed view of a cell with various organelles, including",
+      "json_objects": [],
+      "parsed": null,
+      "final": null,
+      "auto_capped": false
+    },
+    "0006_red_1_mask.png": {
+      "entry": {
+        "color_id": 7,
+        "color_name": "red",
+        "group_index_in_color": 1,
+        "stroke_indexes": [
+          30,
+          31,
+          32,
+          33
+        ],
+        "bbox_xyxy": [
+          1412,
+          1579,
+          2140,
+          1664
+        ],
+        "crop_file_bbox": "red_1_bbox.png",
+        "crop_file_mask": "red_1_mask.png"
+      },
+      "mask_file": "red_1_mask.png",
+      "mask_path": "C:\\Users\\marti\\allFolder\\code\\DRAWNOUT\\whiteboard_backend\\ClusterRenders\\processed_2\\red_1_mask.png",
+      "colour_hint": "red",
+      "bbox_xyxy": [
+        1412,
+        1579,
+        2140,
+        1664
+      ],
+      "bbox_resized_xyxy": [
+        149,
+        166,
+        226,
+        175
+      ],
+      "bbox_right_panel_xyxy": [
+        149,
+        247,
+        226,
+        256
+      ],
+      "bbox_norm_xyxy": [
+        0.38748627881448955,
+        0.7519047619047619,
+        0.5872667398463227,
+        0.7923809523809524
+      ],
+      "batch_size": 4,
+      "batch_timing_s": 6.4064,
+      "avg_per_item_s": 1.6016,
+      "model_raw": "```json\n{\n  \"label\": \"Cell\",\n  \"shapes\": [\n    \"circle\",\n    \"line\",\n    \"square\"\n  ],\n  \"evidence\": \"The image on the right shows a diagram of a cell with various organelles. The left panel shows a cropped target region, which is a part of the cell.",
+      "json_objects": [],
+      "parsed": null,
+      "final": null,
+      "auto_capped": false
+    },
+    "0007_red_2_mask.png": {
+      "entry": {
+        "color_id": 7,
+        "color_name": "red",
+        "group_index_in_color": 2,
+        "stroke_indexes": [
+          8,
+          9
+        ],
+        "bbox_xyxy": [
+          1645,
+          417,
+          2227,
+          644
+        ],
+        "crop_file_bbox": "red_2_bbox.png",
+        "crop_file_mask": "red_2_mask.png"
+      },
+      "mask_file": "red_2_mask.png",
+      "mask_path": "C:\\Users\\marti\\allFolder\\code\\DRAWNOUT\\whiteboard_backend\\ClusterRenders\\processed_2\\red_2_mask.png",
+      "colour_hint": "red",
+      "bbox_xyxy": [
+        1645,
+        417,
+        2227,
+        644
+      ],
+      "bbox_resized_xyxy": [
+        173,
+        44,
+        235,
+        68
+      ],
+      "bbox_right_panel_xyxy": [
+        173,
+        125,
+        235,
+        149
+      ],
+      "bbox_norm_xyxy": [
+        0.45142700329308455,
+        0.19857142857142857,
+        0.6111416026344676,
+        0.30666666666666664
+      ],
+      "batch_size": 4,
+      "batch_timing_s": 6.4064,
+      "avg_per_item_s": 1.6016,
+      "model_raw": "```json\n{\n  \"label\": \"Cell\",\n  \"shapes\": [\n    \"circle\",\n    \"line\",\n    \"square\"\n  ],\n  \"evidence\": \"The left panel shows a highlighted object that is a large, circular structure with a patterned surface. The right panel shows a full cell diagram with a nucleus, mitochondria",
+      "json_objects": [],
+      "parsed": null,
+      "final": null,
+      "auto_capped": false
+    },
+    "0008_blue_0_mask.png": {
+      "entry": {
+        "color_id": 8,
+        "color_name": "blue",
+        "group_index_in_color": 0,
+        "stroke_indexes": [
+          47
+        ],
+        "bbox_xyxy": [
+          1092,
+          929,
+          1159,
+          997
+        ],
+        "crop_file_bbox": "blue_0_bbox.png",
+        "crop_file_mask": "blue_0_mask.png"
+      },
+      "mask_file": "blue_0_mask.png",
+      "mask_path": "C:\\Users\\marti\\allFolder\\code\\DRAWNOUT\\whiteboard_backend\\ClusterRenders\\processed_2\\blue_0_mask.png",
+      "colour_hint": "blue",
+      "bbox_xyxy": [
+        1092,
+        929,
+        1159,
+        997
+      ],
+      "bbox_resized_xyxy": [
+        115,
+        98,
+        122,
+        105
+      ],
+      "bbox_right_panel_xyxy": [
+        115,
+        179,
+        122,
+        186
+      ],
+      "bbox_norm_xyxy": [
+        0.2996706915477497,
+        0.4423809523809524,
+        0.3180570801317234,
+        0.4747619047619048
+      ],
+      "batch_size": 4,
+      "batch_timing_s": 6.4064,
+      "avg_per_item_s": 1.6016,
+      "model_raw": "```json\n{\n  \"label\": \"Nucleus\",\n  \"shapes\": [\n    \"circle\"\n  ],\n  \"evidence\": \"The left panel shows a large, blue, circular object with a dark gray halo. The right panel shows a diagram of a cell with a nucleus, which is a large, round organelle with",
+      "json_objects": [],
+      "parsed": null,
+      "final": null,
+      "auto_capped": false
+    },
+    "0009_blue_1_mask.png": {
+      "entry": {
+        "color_id": 8,
+        "color_name": "blue",
+        "group_index_in_color": 1,
+        "stroke_indexes": [
+          43
+        ],
+        "bbox_xyxy": [
+          1191,
+          1424,
+          1276,
+          1509
+        ],
+        "crop_file_bbox": "blue_1_bbox.png",
+        "crop_file_mask": "blue_1_mask.png"
+      },
+      "mask_file": "blue_1_mask.png",
+      "mask_path": "C:\\Users\\marti\\allFolder\\code\\DRAWNOUT\\whiteboard_backend\\ClusterRenders\\processed_2\\blue_1_mask.png",
+      "colour_hint": "blue",
+      "bbox_xyxy": [
+        1191,
+        1424,
+        1276,
+        1509
+      ],
+      "bbox_resized_xyxy": [
+        126,
+        150,
+        134,
+        159
+      ],
+      "bbox_right_panel_xyxy": [
+        126,
+        231,
+        134,
+        240
+      ],
+      "bbox_norm_xyxy": [
+        0.32683863885839737,
+        0.6780952380952381,
+        0.35016465422612514,
+        0.7185714285714285
+      ],
+      "batch_size": 4,
+      "batch_timing_s": 6.7255,
+      "avg_per_item_s": 1.6814,
+      "model_raw": "```json\n{\n  \"label\": \"Nucleus\",\n  \"shapes\": [\n    \"circle\"\n  ],\n  \"evidence\": \"The left panel shows a large, blue, circular object which is consistent with the appearance of a nucleus. The right panel shows a detailed diagram of a cell with a nucleus, which is the primary structure",
+      "json_objects": [],
+      "parsed": null,
+      "final": null,
+      "auto_capped": false
+    },
+    "0010_blue_2_mask.png": {
+      "entry": {
+        "color_id": 8,
+        "color_name": "blue",
+        "group_index_in_color": 2,
+        "stroke_indexes": [
+          42
+        ],
+        "bbox_xyxy": [
+          1210,
+          1126,
+          1295,
+          1188
+        ],
+        "crop_file_bbox": "blue_2_bbox.png",
+        "crop_file_mask": "blue_2_mask.png"
+      },
+      "mask_file": "blue_2_mask.png",
+      "mask_path": "C:\\Users\\marti\\allFolder\\code\\DRAWNOUT\\whiteboard_backend\\ClusterRenders\\processed_2\\blue_2_mask.png",
+      "colour_hint": "blue",
+      "bbox_xyxy": [
+        1210,
+        1126,
+        1295,
+        1188
+      ],
+      "bbox_resized_xyxy": [
+        128,
+        119,
+        136,
+        125
+      ],
+      "bbox_right_panel_xyxy": [
+        128,
+        200,
+        136,
+        206
+      ],
+      "bbox_norm_xyxy": [
+        0.33205268935236004,
+        0.5361904761904762,
+        0.3553787047200878,
+        0.5657142857142857
+      ],
+      "batch_size": 4,
+      "batch_timing_s": 6.7255,
+      "avg_per_item_s": 1.6814,
+      "model_raw": "```json\n{\n  \"label\": \"Cell\",\n  \"shapes\": [\n    \"circle\",\n    \"line\",\n    \"square\"\n  ],\n  \"evidence\": \"The left panel shows a blurred image of a cell, and the right panel shows a detailed diagram of a cell with various organelles. The cell is the overall structure",
+      "json_objects": [],
+      "parsed": null,
+      "final": null,
+      "auto_capped": false
+    },
+    "0011_blue_3_mask.png": {
+      "entry": {
+        "color_id": 8,
+        "color_name": "blue",
+        "group_index_in_color": 3,
+        "stroke_indexes": [
+          48
+        ],
+        "bbox_xyxy": [
+          1302,
+          1011,
+          1369,
+          1077
+        ],
+        "crop_file_bbox": "blue_3_bbox.png",
+        "crop_file_mask": "blue_3_mask.png"
+      },
+      "mask_file": "blue_3_mask.png",
+      "mask_path": "C:\\Users\\marti\\allFolder\\code\\DRAWNOUT\\whiteboard_backend\\ClusterRenders\\processed_2\\blue_3_mask.png",
+      "colour_hint": "blue",
+      "bbox_xyxy": [
+        1302,
+        1011,
+        1369,
+        1077
+      ],
+      "bbox_resized_xyxy": [
+        137,
+        107,
+        144,
+        113
+      ],
+      "bbox_right_panel_xyxy": [
+        137,
+        188,
+        144,
+        194
+      ],
+      "bbox_norm_xyxy": [
+        0.3572996706915478,
+        0.48142857142857143,
+        0.3756860592755214,
+        0.5128571428571429
+      ],
+      "batch_size": 4,
+      "batch_timing_s": 6.7255,
+      "avg_per_item_s": 1.6814,
+      "model_raw": "```json\n{\n  \"label\": \"Nucleus\",\n  \"shapes\": [\n    \"circle\",\n    \"rectangle\"\n  ],\n  \"evidence\": \"The left panel shows a large blue circle, which is the nucleus. The right panel shows a diagram of a cell with a nucleus, which is the large organelle with a",
+      "json_objects": [],
+      "parsed": null,
+      "final": null,
+      "auto_capped": false
+    },
+    "0012_blue_4_mask.png": {
+      "entry": {
+        "color_id": 8,
+        "color_name": "blue",
+        "group_index_in_color": 4,
+        "stroke_indexes": [
+          44
+        ],
+        "bbox_xyxy": [
+          1371,
+          538,
+          1437,
+          605
+        ],
+        "crop_file_bbox": "blue_4_bbox.png",
+        "crop_file_mask": "blue_4_mask.png"
+      },
+      "mask_file": "blue_4_mask.png",
+      "mask_path": "C:\\Users\\marti\\allFolder\\code\\DRAWNOUT\\whiteboard_backend\\ClusterRenders\\processed_2\\blue_4_mask.png",
+      "colour_hint": "blue",
+      "bbox_xyxy": [
+        1371,
+        538,
+        1437,
+        605
+      ],
+      "bbox_resized_xyxy": [
+        144,
+        57,
+        151,
+        64
+      ],
+      "bbox_right_panel_xyxy": [
+        144,
+        138,
+        151,
+        145
+      ],
+      "bbox_norm_xyxy": [
+        0.3762349066959385,
+        0.2561904761904762,
+        0.3943468715697036,
+        0.28809523809523807
+      ],
+      "batch_size": 4,
+      "batch_timing_s": 6.7255,
+      "avg_per_item_s": 1.6814,
+      "model_raw": "```json\n{\n  \"label\": \"Nucleus\",\n  \"shapes\": [\n    \"circle\"\n  ],\n  \"evidence\": \"The left panel shows a large, blue, circular object which is consistent with the appearance of a nucleus. The right panel shows a detailed diagram of a cell with a nucleus, which is the primary structure",
+      "json_objects": [],
+      "parsed": null,
+      "final": null,
+      "auto_capped": false
+    },
+    "0013_blue_5_mask.png": {
+      "entry": {
+        "color_id": 8,
+        "color_name": "blue",
+        "group_index_in_color": 5,
+        "stroke_indexes": [
+          40
+        ],
+        "bbox_xyxy": [
+          1765,
+          375,
+          1849,
+          447
+        ],
+        "crop_file_bbox": "blue_5_bbox.png",
+        "crop_file_mask": "blue_5_mask.png"
+      },
+      "mask_file": "blue_5_mask.png",
+      "mask_path": "C:\\Users\\marti\\allFolder\\code\\DRAWNOUT\\whiteboard_backend\\ClusterRenders\\processed_2\\blue_5_mask.png",
+      "colour_hint": "blue",
+      "bbox_xyxy": [
+        1765,
+        375,
+        1849,
+        447
+      ],
+      "bbox_resized_xyxy": [
+        186,
+        40,
+        195,
+        47
+      ],
+      "bbox_right_panel_xyxy": [
+        186,
+        121,
+        195,
+        128
+      ],
+      "bbox_norm_xyxy": [
+        0.484357848518112,
+        0.17857142857142858,
+        0.5074094401756312,
+        0.21285714285714286
+      ],
+      "batch_size": 4,
+      "batch_timing_s": 6.8952,
+      "avg_per_item_s": 1.7238,
+      "model_raw": "```json\n{\n  \"label\": \"Nucleus\",\n  \"shapes\": [\n    \"circle\"\n  ],\n  \"evidence\": \"The left panel shows a large, blue, circular object with a central region, which is consistent with the appearance of a nucleus. The right panel shows a detailed diagram of a cell with a nucleus,",
+      "json_objects": [],
+      "parsed": null,
+      "final": null,
+      "auto_capped": false
+    },
+    "0014_blue_6_mask.png": {
+      "entry": {
+        "color_id": 8,
+        "color_name": "blue",
+        "group_index_in_color": 6,
+        "stroke_indexes": [
+          46
+        ],
+        "bbox_xyxy": [
+          2399,
+          791,
+          2466,
+          869
+        ],
+        "crop_file_bbox": "blue_6_bbox.png",
+        "crop_file_mask": "blue_6_mask.png"
+      },
+      "mask_file": "blue_6_mask.png",
+      "mask_path": "C:\\Users\\marti\\allFolder\\code\\DRAWNOUT\\whiteboard_backend\\ClusterRenders\\processed_2\\blue_6_mask.png",
+      "colour_hint": "blue",
+      "bbox_xyxy": [
+        2399,
+        791,
+        2466,
+        869
+      ],
+      "bbox_resized_xyxy": [
+        253,
+        83,
+        260,
+        92
+      ],
+      "bbox_right_panel_xyxy": [
+        253,
+        164,
+        260,
+        173
+      ],
+      "bbox_norm_xyxy": [
+        0.6583424807903403,
+        0.37666666666666665,
+        0.676728869374314,
+        0.4138095238095238
+      ],
+      "batch_size": 4,
+      "batch_timing_s": 6.8952,
+      "avg_per_item_s": 1.7238,
+      "model_raw": "```json\n{\n  \"label\": \"Cell\",\n  \"shapes\": [\n    \"Circle\",\n    \"Line\",\n    \"Square\"\n  ],\n  \"evidence\": \"The right panel shows a diagram of a cell with various organelles. The left panel shows a blurred image of a cell, which is the subject of the red rectangle",
+      "json_objects": [],
+      "parsed": null,
+      "final": null,
+      "auto_capped": false
+    },
+    "0015_blue_7_mask.png": {
+      "entry": {
+        "color_id": 8,
+        "color_name": "blue",
+        "group_index_in_color": 7,
+        "stroke_indexes": [
+          45
+        ],
+        "bbox_xyxy": [
+          2413,
+          682,
+          2498,
+          767
+        ],
+        "crop_file_bbox": "blue_7_bbox.png",
+        "crop_file_mask": "blue_7_mask.png"
+      },
+      "mask_file": "blue_7_mask.png",
+      "mask_path": "C:\\Users\\marti\\allFolder\\code\\DRAWNOUT\\whiteboard_backend\\ClusterRenders\\processed_2\\blue_7_mask.png",
+      "colour_hint": "blue",
+      "bbox_xyxy": [
+        2413,
+        682,
+        2498,
+        767
+      ],
+      "bbox_resized_xyxy": [
+        254,
+        72,
+        263,
+        81
+      ],
+      "bbox_right_panel_xyxy": [
+        254,
+        153,
+        263,
+        162
+      ],
+      "bbox_norm_xyxy": [
+        0.6621844127332601,
+        0.32476190476190475,
+        0.685510428100988,
+        0.36523809523809525
+      ],
+      "batch_size": 4,
+      "batch_timing_s": 6.8952,
+      "avg_per_item_s": 1.7238,
+      "model_raw": "```json\n{\n  \"label\": \"Nucleus\",\n  \"shapes\": [\n    \"circle\"\n  ],\n  \"evidence\": \"The left panel shows a large, blue, circular object with a central core, which is consistent with the appearance of a nucleus. The right panel shows a detailed diagram of a cell with a nucleus,",
+      "json_objects": [],
+      "parsed": null,
+      "final": null,
+      "auto_capped": false
+    },
+    "0016_blue_8_mask.png": {
+      "entry": {
+        "color_id": 8,
+        "color_name": "blue",
+        "group_index_in_color": 8,
+        "stroke_indexes": [
+          49
+        ],
+        "bbox_xyxy": [
+          2487,
+          1203,
+          2554,
+          1269
+        ],
+        "crop_file_bbox": "blue_8_bbox.png",
+        "crop_file_mask": "blue_8_mask.png"
+      },
+      "mask_file": "blue_8_mask.png",
+      "mask_path": "C:\\Users\\marti\\allFolder\\code\\DRAWNOUT\\whiteboard_backend\\ClusterRenders\\processed_2\\blue_8_mask.png",
+      "colour_hint": "blue",
+      "bbox_xyxy": [
+        2487,
+        1203,
+        2554,
+        1269
+      ],
+      "bbox_resized_xyxy": [
+        262,
+        127,
+        269,
+        134
+      ],
+      "bbox_right_panel_xyxy": [
+        262,
+        208,
+        269,
+        215
+      ],
+      "bbox_norm_xyxy": [
+        0.6824917672886938,
+        0.5728571428571428,
+        0.7008781558726674,
+        0.6042857142857143
+      ],
+      "batch_size": 4,
+      "batch_timing_s": 6.8952,
+      "avg_per_item_s": 1.7238,
+      "model_raw": "```json\n{\n  \"label\": \"Nucleus\",\n  \"shapes\": [\n    \"circle\"\n  ],\n  \"evidence\": \"The left panel shows a large, blue, circular object with a dark gray border. This is consistent with the appearance of a nucleus in a cell, which is a large organelle. The right",
+      "json_objects": [],
+      "parsed": null,
+      "final": null,
+      "auto_capped": false
+    },
+    "0017_blue_9_mask.png": {
+      "entry": {
+        "color_id": 8,
+        "color_name": "blue",
+        "group_index_in_color": 9,
+        "stroke_indexes": [
+          41
+        ],
+        "bbox_xyxy": [
+          2534,
+          1082,
+          2603,
+          1151
+        ],
+        "crop_file_bbox": "blue_9_bbox.png",
+        "crop_file_mask": "blue_9_mask.png"
+      },
+      "mask_file": "blue_9_mask.png",
+      "mask_path": "C:\\Users\\marti\\allFolder\\code\\DRAWNOUT\\whiteboard_backend\\ClusterRenders\\processed_2\\blue_9_mask.png",
+      "colour_hint": "blue",
+      "bbox_xyxy": [
+        2534,
+        1082,
+        2603,
+        1151
+      ],
+      "bbox_resized_xyxy": [
+        267,
+        114,
+        274,
+        121
+      ],
+      "bbox_right_panel_xyxy": [
+        267,
+        195,
+        274,
+        202
+      ],
+      "bbox_norm_xyxy": [
+        0.6953896816684961,
+        0.5152380952380953,
+        0.714324917672887,
+        0.5480952380952381
+      ],
+      "batch_size": 4,
+      "batch_timing_s": 6.9672,
+      "avg_per_item_s": 1.7418,
+      "model_raw": "```json\n{\n  \"label\": \"Nucleus\",\n  \"shapes\": [\n    \"circle\"\n  ],\n  \"evidence\": \"The left panel shows a large blue circle, which is the nucleus. The right panel shows a diagram of a cell with a nucleus, and the red rectangle highlights the nucleus, which is the large blue",
+      "json_objects": [],
+      "parsed": null,
+      "final": null,
+      "auto_capped": false
+    },
+    "0018_blue_10_mask.png": {
+      "entry": {
+        "color_id": 8,
+        "color_name": "blue",
+        "group_index_in_color": 10,
+        "stroke_indexes": [
+          50
+        ],
+        "bbox_xyxy": [
+          2569,
+          1302,
+          2636,
+          1369
+        ],
+        "crop_file_bbox": "blue_10_bbox.png",
+        "crop_file_mask": "blue_10_mask.png"
+      },
+      "mask_file": "blue_10_mask.png",
+      "mask_path": "C:\\Users\\marti\\allFolder\\code\\DRAWNOUT\\whiteboard_backend\\ClusterRenders\\processed_2\\blue_10_mask.png",
+      "colour_hint": "blue",
+      "bbox_xyxy": [
+        2569,
+        1302,
+        2636,
+        1369
+      ],
+      "bbox_resized_xyxy": [
+        271,
+        137,
+        278,
+        144
+      ],
+      "bbox_right_panel_xyxy": [
+        271,
+        218,
+        278,
+        225
+      ],
+      "bbox_norm_xyxy": [
+        0.7049945115257958,
+        0.62,
+        0.7233809001097695,
+        0.6519047619047619
+      ],
+      "batch_size": 4,
+      "batch_timing_s": 6.9672,
+      "avg_per_item_s": 1.7418,
+      "model_raw": "```json\n{\n  \"label\": \"Cell\",\n  \"shapes\": [\n    \"circle\",\n    \"line\",\n    \"square\"\n  ],\n  \"evidence\": \"The left panel shows a large blue circle, which is the main structure of the cell. The right panel shows a detailed diagram of a cell with various organelles,",
+      "json_objects": [],
+      "parsed": null,
+      "final": null,
+      "auto_capped": false
+    },
+    "0019_purple_0_mask.png": {
+      "entry": {
+        "color_id": 9,
+        "color_name": "purple",
+        "group_index_in_color": 0,
+        "stroke_indexes": [
+          51
+        ],
+        "bbox_xyxy": [
+          1274,
+          1393,
+          2589,
+          1866
+        ],
+        "crop_file_bbox": "purple_0_bbox.png",
+        "crop_file_mask": "purple_0_mask.png"
+      },
+      "mask_file": "purple_0_mask.png",
+      "mask_path": "C:\\Users\\marti\\allFolder\\code\\DRAWNOUT\\whiteboard_backend\\ClusterRenders\\processed_2\\purple_0_mask.png",
+      "colour_hint": "purple",
+      "bbox_xyxy": [
+        1274,
+        1393,
+        2589,
+        1866
+      ],
+      "bbox_resized_xyxy": [
+        134,
+        147,
+        273,
+        197
+      ],
+      "bbox_right_panel_xyxy": [
+        134,
+        228,
+        273,
+        278
+      ],
+      "bbox_norm_xyxy": [
+        0.34961580680570803,
+        0.6633333333333333,
+        0.710482985729967,
+        0.8885714285714286
+      ],
+      "batch_size": 4,
+      "batch_timing_s": 6.9672,
+      "avg_per_item_s": 1.7418,
+      "model_raw": "```json\n{\n  \"label\": \"Reticulum\",\n  \"shapes\": [\n    \"circle\",\n    \"line\",\n    \"square\"\n  ],\n  \"evidence\": \"The highlighted object in the left panel is a long, wavy, purple structure that resembles a network of interconnected tubules. This structure is consistent with the appearance",
+      "json_objects": [],
+      "parsed": null,
+      "final": null,
+      "auto_capped": false
+    },
+    "0020_gray_0_mask.png": {
+      "entry": {
+        "color_id": 10,
+        "color_name": "gray",
+        "group_index_in_color": 0,
+        "stroke_indexes": [
+          53
+        ],
+        "bbox_xyxy": [
+          1082,
+          920,
+          1169,
+          1007
+        ],
+        "crop_file_bbox": "gray_0_bbox.png",
+        "crop_file_mask": "gray_0_mask.png"
+      },
+      "mask_file": "gray_0_mask.png",
+      "mask_path": "C:\\Users\\marti\\allFolder\\code\\DRAWNOUT\\whiteboard_backend\\ClusterRenders\\processed_2\\gray_0_mask.png",
+      "colour_hint": "gray",
+      "bbox_xyxy": [
+        1082,
+        920,
+        1169,
+        1007
+      ],
+      "bbox_resized_xyxy": [
+        114,
+        97,
+        123,
+        106
+      ],
+      "bbox_right_panel_xyxy": [
+        114,
+        178,
+        123,
+        187
+      ],
+      "bbox_norm_xyxy": [
+        0.2969264544456641,
+        0.4380952380952381,
+        0.320801317233809,
+        0.4795238095238095
+      ],
+      "batch_size": 4,
+      "batch_timing_s": 6.9672,
+      "avg_per_item_s": 1.7418,
+      "model_raw": "```json\n{\n  \"label\": \"Nucleus\",\n  \"shapes\": [\n    \"circle\"\n  ],\n  \"evidence\": \"The left panel shows a large, circular structure with a blue center and a lighter outer ring. The right panel shows a detailed diagram of a cell with a nucleus, which is a large, roughly spherical",
+      "json_objects": [],
+      "parsed": null,
+      "final": null,
+      "auto_capped": false
+    },
+    "0021_gray_1_mask.png": {
+      "entry": {
+        "color_id": 10,
+        "color_name": "gray",
+        "group_index_in_color": 1,
+        "stroke_indexes": [
+          54
+        ],
+        "bbox_xyxy": [
+          1292,
+          1001,
+          1379,
+          1088
+        ],
+        "crop_file_bbox": "gray_1_bbox.png",
+        "crop_file_mask": "gray_1_mask.png"
+      },
+      "mask_file": "gray_1_mask.png",
+      "mask_path": "C:\\Users\\marti\\allFolder\\code\\DRAWNOUT\\whiteboard_backend\\ClusterRenders\\processed_2\\gray_1_mask.png",
+      "colour_hint": "gray",
+      "bbox_xyxy": [
+        1292,
+        1001,
+        1379,
+        1088
+      ],
+      "bbox_resized_xyxy": [
+        136,
+        105,
+        145,
+        115
+      ],
+      "bbox_right_panel_xyxy": [
+        136,
+        186,
+        145,
+        196
+      ],
+      "bbox_norm_xyxy": [
+        0.3545554335894621,
+        0.4766666666666667,
+        0.378430296377607,
+        0.518095238095238
+      ],
+      "batch_size": 4,
+      "batch_timing_s": 6.581,
+      "avg_per_item_s": 1.6453,
+      "model_raw": "```json\n{\n  \"label\": \"Nucleus\",\n  \"shapes\": [\n    \"circle\",\n    \"square\"\n  ],\n  \"evidence\": \"The left panel shows a large, blue, circular structure with a smaller, lighter blue circle inside. The right panel shows a detailed diagram of a cell with a nucleus, which is",
+      "json_objects": [],
+      "parsed": null,
+      "final": null,
+      "auto_capped": false
+    },
+    "0022_gray_2_mask.png": {
+      "entry": {
+        "color_id": 10,
+        "color_name": "gray",
+        "group_index_in_color": 2,
+        "stroke_indexes": [
+          52
+        ],
+        "bbox_xyxy": [
+          1360,
+          528,
+          1448,
+          615
+        ],
+        "crop_file_bbox": "gray_2_bbox.png",
+        "crop_file_mask": "gray_2_mask.png"
+      },
+      "mask_file": "gray_2_mask.png",
+      "mask_path": "C:\\Users\\marti\\allFolder\\code\\DRAWNOUT\\whiteboard_backend\\ClusterRenders\\processed_2\\gray_2_mask.png",
+      "colour_hint": "gray",
+      "bbox_xyxy": [
+        1360,
+        528,
+        1448,
+        615
+      ],
+      "bbox_resized_xyxy": [
+        143,
+        56,
+        153,
+        65
+      ],
+      "bbox_right_panel_xyxy": [
+        143,
+        137,
+        153,
+        146
+      ],
+      "bbox_norm_xyxy": [
+        0.3732162458836443,
+        0.25142857142857145,
+        0.3973655323819978,
+        0.29285714285714287
+      ],
+      "batch_size": 4,
+      "batch_timing_s": 6.581,
+      "avg_per_item_s": 1.6453,
+      "model_raw": "```json\n{\n  \"label\": \"Nucleus\",\n  \"shapes\": [\n    \"circle\"\n  ],\n  \"evidence\": \"The left panel shows a large, centrally located circular structure with a blue center and a lighter blue outer ring. This is consistent with the appearance of a nucleus in a cell. The right panel shows a",
+      "json_objects": [],
+      "parsed": null,
+      "final": null,
+      "auto_capped": false
+    },
+    "0023_gray_3_mask.png": {
+      "entry": {
+        "color_id": 10,
+        "color_name": "gray",
+        "group_index_in_color": 3,
+        "stroke_indexes": [
+          55
+        ],
+        "bbox_xyxy": [
+          2476,
+          1192,
+          2564,
+          1280
+        ],
+        "crop_file_bbox": "gray_3_bbox.png",
+        "crop_file_mask": "gray_3_mask.png"
+      },
+      "mask_file": "gray_3_mask.png",
+      "mask_path": "C:\\Users\\marti\\allFolder\\code\\DRAWNOUT\\whiteboard_backend\\ClusterRenders\\processed_2\\gray_3_mask.png",
+      "colour_hint": "gray",
+      "bbox_xyxy": [
+        2476,
+        1192,
+        2564,
+        1280
+      ],
+      "bbox_resized_xyxy": [
+        261,
+        126,
+        270,
+        135
+      ],
+      "bbox_right_panel_xyxy": [
+        261,
+        207,
+        270,
+        216
+      ],
+      "bbox_norm_xyxy": [
+        0.6794731064763996,
+        0.5676190476190476,
+        0.703622392974753,
+        0.6095238095238096
+      ],
+      "batch_size": 4,
+      "batch_timing_s": 6.581,
+      "avg_per_item_s": 1.6453,
+      "model_raw": "```json\n{\n  \"label\": \"Nucleus\",\n  \"shapes\": [\n    \"circle\"\n  ],\n  \"evidence\": \"The left panel shows a large, blue, circular object with a central core, which is consistent with the appearance of a nucleus. The right panel shows a detailed diagram of a cell with a nucleus,",
+      "json_objects": [],
+      "parsed": null,
+      "final": null,
+      "auto_capped": false
+    },
+    "0024_gray_4_mask.png": {
+      "entry": {
+        "color_id": 10,
+        "color_name": "gray",
+        "group_index_in_color": 4,
+        "stroke_indexes": [
+          56
+        ],
+        "bbox_xyxy": [
+          2559,
+          1292,
+          2646,
+          1380
+        ],
+        "crop_file_bbox": "gray_4_bbox.png",
+        "crop_file_mask": "gray_4_mask.png"
+      },
+      "mask_file": "gray_4_mask.png",
+      "mask_path": "C:\\Users\\marti\\allFolder\\code\\DRAWNOUT\\whiteboard_backend\\ClusterRenders\\processed_2\\gray_4_mask.png",
+      "colour_hint": "gray",
+      "bbox_xyxy": [
+        2559,
+        1292,
+        2646,
+        1380
+      ],
+      "bbox_resized_xyxy": [
+        270,
+        136,
+        279,
+        145
+      ],
+      "bbox_right_panel_xyxy": [
+        270,
+        217,
+        279,
+        226
+      ],
+      "bbox_norm_xyxy": [
+        0.7022502744237102,
+        0.6152380952380953,
+        0.7261251372118551,
+        0.6571428571428571
+      ],
+      "batch_size": 4,
+      "batch_timing_s": 6.581,
+      "avg_per_item_s": 1.6453,
+      "model_raw": "```json\n{\n  \"label\": \"Nucleus\",\n  \"shapes\": [\n    \"circle\"\n  ],\n  \"evidence\": \"The left panel shows a large, centrally located blue circle with a lighter blue center, which is consistent with the appearance of a nucleus. The right panel shows a detailed diagram of a cell with a nucleus",
+      "json_objects": [],
+      "parsed": null,
+      "final": null,
+      "auto_capped": false
+    },
+    "0025_black_0_mask.png": {
+      "entry": {
+        "color_id": 11,
+        "color_name": "black",
+        "group_index_in_color": 0,
+        "stroke_indexes": [
+          61
+        ],
+        "bbox_xyxy": [
+          714,
+          1060,
+          1198,
+          1213
+        ],
+        "crop_file_bbox": "black_0_bbox.png",
+        "crop_file_mask": "black_0_mask.png"
+      },
+      "mask_file": "black_0_mask.png",
+      "mask_path": "C:\\Users\\marti\\allFolder\\code\\DRAWNOUT\\whiteboard_backend\\ClusterRenders\\processed_2\\black_0_mask.png",
+      "colour_hint": "black",
+      "bbox_xyxy": [
+        714,
+        1060,
+        1198,
+        1213
+      ],
+      "bbox_resized_xyxy": [
+        75,
+        112,
+        126,
+        128
+      ],
+      "bbox_right_panel_xyxy": [
+        75,
+        193,
+        126,
+        209
+      ],
+      "bbox_norm_xyxy": [
+        0.1959385290889133,
+        0.5047619047619047,
+        0.3287596048298573,
+        0.5776190476190476
+      ],
+      "batch_size": 4,
+      "batch_timing_s": 6.633,
+      "avg_per_item_s": 1.6583,
+      "model_raw": "```json\n{\n  \"label\": \"Cell\",\n  \"shapes\": [\n    \"circle\",\n    \"line\",\n    \"square\"\n  ],\n  \"evidence\": \"The image on the right shows a diagram of a cell, which is the overall structure. The red rectangle in the left panel highlights a part of this cell, specifically the",
+      "json_objects": [],
+      "parsed": null,
+      "final": null,
+      "auto_capped": false
+    },
+    "0026_black_1_mask.png": {
+      "entry": {
+        "color_id": 11,
+        "color_name": "black",
+        "group_index_in_color": 1,
+        "stroke_indexes": [
+          62
+        ],
+        "bbox_xyxy": [
+          886,
+          1465,
+          1440,
+          1670
+        ],
+        "crop_file_bbox": "black_1_bbox.png",
+        "crop_file_mask": "black_1_mask.png"
+      },
+      "mask_file": "black_1_mask.png",
+      "mask_path": "C:\\Users\\marti\\allFolder\\code\\DRAWNOUT\\whiteboard_backend\\ClusterRenders\\processed_2\\black_1_mask.png",
+      "colour_hint": "black",
+      "bbox_xyxy": [
+        886,
+        1465,
+        1440,
+        1670
+      ],
+      "bbox_resized_xyxy": [
+        93,
+        154,
+        152,
+        176
+      ],
+      "bbox_right_panel_xyxy": [
+        93,
+        235,
+        152,
+        257
+      ],
+      "bbox_norm_xyxy": [
+        0.24313940724478594,
+        0.6976190476190476,
+        0.3951701427003293,
+        0.7952380952380952
+      ],
+      "batch_size": 4,
+      "batch_timing_s": 6.633,
+      "avg_per_item_s": 1.6583,
+      "model_raw": "```json\n{\n  \"label\": \"Cell\",\n  \"shapes\": [\n    \"circle\",\n    \"line\",\n    \"square\"\n  ],\n  \"evidence\": \"The left panel shows a cropped target region with a highlighted object. The right panel shows a full image of a cell, which is the context for the label. The red",
+      "json_objects": [],
+      "parsed": null,
+      "final": null,
+      "auto_capped": false
+    },
+    "0027_black_2_mask.png": {
+      "entry": {
+        "color_id": 11,
+        "color_name": "black",
+        "group_index_in_color": 2,
+        "stroke_indexes": [
+          59
+        ],
+        "bbox_xyxy": [
+          887,
+          536,
+          1746,
+          909
+        ],
+        "crop_file_bbox": "black_2_bbox.png",
+        "crop_file_mask": "black_2_mask.png"
+      },
+      "mask_file": "black_2_mask.png",
+      "mask_path": "C:\\Users\\marti\\allFolder\\code\\DRAWNOUT\\whiteboard_backend\\ClusterRenders\\processed_2\\black_2_mask.png",
+      "colour_hint": "black",
+      "bbox_xyxy": [
+        887,
+        536,
+        1746,
+        909
+      ],
+      "bbox_resized_xyxy": [
+        93,
+        56,
+        184,
+        96
+      ],
+      "bbox_right_panel_xyxy": [
+        93,
+        137,
+        184,
+        177
+      ],
+      "bbox_norm_xyxy": [
+        0.2434138309549945,
+        0.25523809523809526,
+        0.4791437980241493,
+        0.4328571428571429
+      ],
+      "batch_size": 4,
+      "batch_timing_s": 6.633,
+      "avg_per_item_s": 1.6583,
+      "model_raw": "```json\n{\n  \"label\": \"Nucleus\",\n  \"shapes\": [\n    \"circle\"\n  ],\n  \"evidence\": \"The highlighted region in the left panel shows a large, centrally located circular structure with a distinct nucleus, which is consistent with the nucleus of a cell. The red rectangle in the right panel also highlights this",
+      "json_objects": [],
+      "parsed": null,
+      "final": null,
+      "auto_capped": false
+    },
+    "0028_black_3_mask.png": {
+      "entry": {
+        "color_id": 11,
+        "color_name": "black",
+        "group_index_in_color": 3,
+        "stroke_indexes": [
+          58
+        ],
+        "bbox_xyxy": [
+          1200,
+          246,
+          1891,
+          739
+        ],
+        "crop_file_bbox": "black_3_bbox.png",
+        "crop_file_mask": "black_3_mask.png"
+      },
+      "mask_file": "black_3_mask.png",
+      "mask_path": "C:\\Users\\marti\\allFolder\\code\\DRAWNOUT\\whiteboard_backend\\ClusterRenders\\processed_2\\black_3_mask.png",
+      "colour_hint": "black",
+      "bbox_xyxy": [
+        1200,
+        246,
+        1891,
+        739
+      ],
+      "bbox_resized_xyxy": [
+        126,
+        26,
+        199,
+        78
+      ],
+      "bbox_right_panel_xyxy": [
+        126,
+        107,
+        199,
+        159
+      ],
+      "bbox_norm_xyxy": [
+        0.32930845225027444,
+        0.11714285714285715,
+        0.5189352360043907,
+        0.3519047619047619
+      ],
+      "batch_size": 4,
+      "batch_timing_s": 6.633,
+      "avg_per_item_s": 1.6583,
+      "model_raw": "```json\n{\n  \"label\": \"Cell\",\n  \"shapes\": [\n    \"circle\",\n    \"line\",\n    \"square\"\n  ],\n  \"evidence\": \"The left panel shows a cropped target region with a highlighted object. The right panel shows a full image of a cell, which is the context for the label. The red",
+      "json_objects": [],
+      "parsed": null,
+      "final": null,
+      "auto_capped": false
+    },
+    "0029_black_4_mask.png": {
+      "entry": {
+        "color_id": 11,
+        "color_name": "black",
+        "group_index_in_color": 4,
+        "stroke_indexes": [
+          57
+        ],
+        "bbox_xyxy": [
+          2027,
+          207,
+          2282,
+          479
+        ],
+        "crop_file_bbox": "black_4_bbox.png",
+        "crop_file_mask": "black_4_mask.png"
+      },
+      "mask_file": "black_4_mask.png",
+      "mask_path": "C:\\Users\\marti\\allFolder\\code\\DRAWNOUT\\whiteboard_backend\\ClusterRenders\\processed_2\\black_4_mask.png",
+      "colour_hint": "black",
+      "bbox_xyxy": [
+        2027,
+        207,
+        2282,
+        479
+      ],
+      "bbox_resized_xyxy": [
+        214,
+        22,
+        240,
+        50
+      ],
+      "bbox_right_panel_xyxy": [
+        214,
+        103,
+        240,
+        131
+      ],
+      "bbox_norm_xyxy": [
+        0.5562568605927553,
+        0.09857142857142857,
+        0.6262349066959385,
+        0.2280952380952381
+      ],
+      "batch_size": 2,
+      "batch_timing_s": 7.1168,
+      "avg_per_item_s": 3.5584,
+      "model_raw": "```json\n{\n  \"label\": \"Cell\",\n  \"shapes\": [\n    \"circle\",\n    \"line\",\n    \"square\"\n  ],\n  \"evidence\": \"The left panel shows a highlighted object that is a large, circular shape with a diagonal line. The right panel shows a diagram of a cell with various organelles,",
+      "json_objects": [],
+      "parsed": null,
+      "final": null,
+      "auto_capped": false
+    },
+    "0030_black_5_mask.png": {
+      "entry": {
+        "color_id": 11,
+        "color_name": "black",
+        "group_index_in_color": 5,
+        "stroke_indexes": [
+          60
+        ],
+        "bbox_xyxy": [
+          2566,
+          637,
+          2937,
+          1119
+        ],
+        "crop_file_bbox": "black_5_bbox.png",
+        "crop_file_mask": "black_5_mask.png"
+      },
+      "mask_file": "black_5_mask.png",
+      "mask_path": "C:\\Users\\marti\\allFolder\\code\\DRAWNOUT\\whiteboard_backend\\ClusterRenders\\processed_2\\black_5_mask.png",
+      "colour_hint": "black",
+      "bbox_xyxy": [
+        2566,
+        637,
+        2937,
+        1119
+      ],
+      "bbox_resized_xyxy": [
+        270,
+        67,
+        309,
+        118
+      ],
+      "bbox_right_panel_xyxy": [
+        270,
+        148,
+        309,
+        199
+      ],
+      "bbox_norm_xyxy": [
+        0.7041712403951701,
+        0.30333333333333334,
+        0.8059824368825467,
+        0.5328571428571428
+      ],
+      "batch_size": 2,
+      "batch_timing_s": 7.1168,
+      "avg_per_item_s": 3.5584,
+      "model_raw": "```json\n{\n  \"label\": \"Cell\",\n  \"shapes\": [\n    \"circle\",\n    \"line\",\n    \"square\"\n  ],\n  \"evidence\": \"The left panel shows a highlighted object that is a large circle with a black line, and the right panel shows a diagram of a cell with a red rectangle highlighting a part",
+      "json_objects": [],
+      "parsed": null,
+      "final": null,
+      "auto_capped": false
+    }
+  },
+  "cluster_order": [
+    "0001_cyan_0_mask.png",
+    "0002_green_0_mask.png",
+    "0003_green_1_mask.png",
+    "0004_green_2_mask.png",
+    "0005_red_0_mask.png",
+    "0006_red_1_mask.png",
+    "0007_red_2_mask.png",
+    "0008_blue_0_mask.png",
+    "0009_blue_1_mask.png",
+    "0010_blue_2_mask.png",
+    "0011_blue_3_mask.png",
+    "0012_blue_4_mask.png",
+    "0013_blue_5_mask.png",
+    "0014_blue_6_mask.png",
+    "0015_blue_7_mask.png",
+    "0016_blue_8_mask.png",
+    "0017_blue_9_mask.png",
+    "0018_blue_10_mask.png",
+    "0019_purple_0_mask.png",
+    "0020_gray_0_mask.png",
+    "0021_gray_1_mask.png",
+    "0022_gray_2_mask.png",
+    "0023_gray_3_mask.png",
+    "0024_gray_4_mask.png",
+    "0025_black_0_mask.png",
+    "0026_black_1_mask.png",
+    "0027_black_2_mask.png",
+    "0028_black_3_mask.png",
+    "0029_black_4_mask.png",
+    "0030_black_5_mask.png"
+  ]
+}
