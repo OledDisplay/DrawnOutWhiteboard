@@ -3,7 +3,7 @@ import re
 from typing import List, Tuple, Optional, Iterable, Set, Any
 from bs4 import BeautifulSoup, Tag
 import numpy as np
-from urllib.parse import urlparse, unquote
+from urllib.parse import urlparse, unquote, urljoin
 
 # ---------- lightweight helpers ----------
 
@@ -16,8 +16,6 @@ _STOP = {
     "these","those","it","its","their","his","her","your","our","not","no","do","does",
     "did","can","could","may","might","should","would","will"
 }
-
-_TOKEN_RX = re.compile(r"[A-Za-z0-9]+(?:['\-][A-Za-z0-9]+)?")  # keeps hyphenated like "prokaryotic-like"
 
 _TOKEN_RX = re.compile(r"[A-Za-z0-9]+(?:['\-][A-Za-z0-9]+)?")  # keeps hyphenated like "prokaryotic-like"
 
@@ -420,6 +418,192 @@ def _image_dom_context(img: Tag) -> str:
     text = " ".join(b for b in blocks if b).strip()
     return text
 
+
+# ---------- hit→image selection (integrated + minimal) ----------
+
+_UI_IMG_SKIP_RX = re.compile(r"(sprite|icon|logo|avatar|spinner|loading|button|badge|emoji)", re.I)
+
+def _img_url(img: Tag) -> Optional[str]:
+    # small + robust: srcset last entry (often biggest) else src/data-src/data-original
+    srcset = (img.get("srcset") or img.get("data-srcset") or "").strip()
+    if srcset:
+        last = srcset.split(",")[-1].strip().split(" ")[0].strip()
+        if last:
+            return last
+    for a in ("src", "data-src", "data-original"):
+        v = img.get(a)
+        if isinstance(v, str) and v.strip():
+            return v.strip()
+    return None
+
+def _hit_container(node: Tag) -> Tag:
+    # keep it simple: nearest block-ish container
+    BLOCKS = {"p","li","figure","div","section","article","h1","h2","h3","h4"}
+    cur = node
+    for _ in range(6):
+        if not isinstance(cur, Tag):
+            break
+        if (cur.name or "").lower() in BLOCKS:
+            return cur
+        cur = cur.parent
+    return node
+
+def _neighbors(block: Tag, n: int = 2) -> List[Tag]:
+    out = [block]
+    p = block.previous_sibling
+    c = 0
+    while p is not None and c < n:
+        if isinstance(p, Tag):
+            out.append(p); c += 1
+        p = p.previous_sibling
+    q = block.next_sibling
+    c = 0
+    while q is not None and c < n:
+        if isinstance(q, Tag):
+            out.append(q); c += 1
+        q = q.next_sibling
+    return out
+
+def _cand_cov(cand_tokens: List[str], ref_set: Set[str]) -> float:
+    if not cand_tokens:
+        return 0.0
+    s = set(cand_tokens)
+    if not s:
+        return 0.0
+    return len(s & ref_set) / float(len(s))
+
+def pick_best_image_for_hit(
+    soup: BeautifulSoup,
+    hit_node: Tag,
+    hit_details: dict,
+    page_url: str,
+    base_query: str,
+    lemma_obj: dict,
+    *,
+    encoder: Optional[Any] = None,
+    query_embedding: Optional[Any] = None,
+    window_blocks: int = 2,
+    min_score: float = 0.14,
+    debug: bool = True,
+) -> Optional[Tuple[str, float, dict]]:
+    profile = QueryProfile(base_query, lemma_obj)
+
+    hit_ctx = (hit_details.get("ctx_text") or hit_details.get("snippet") or "") if isinstance(hit_details, dict) else ""
+    hit_head = (hit_details.get("heading_text") or "") if isinstance(hit_details, dict) else ""
+    hit_ref = set(_content_tokens((hit_head + " " + hit_ctx).strip()))
+    if not hit_ref:
+        hit_ref = set(_content_tokens(_text_of(hit_node)))
+
+    block = _hit_container(hit_node)
+    scopes = _neighbors(block, n=window_blocks)
+
+    seen: Set[str] = set()
+    cands: List[dict] = []
+
+    for sc in scopes:
+        if not isinstance(sc, Tag):
+            continue
+
+        for img in sc.find_all("img"):
+            if not isinstance(img, Tag):
+                continue
+
+            raw = _img_url(img)
+            if not raw or raw.lower().startswith("data:"):
+                continue
+            if _UI_IMG_SKIP_RX.search(raw):
+                continue
+
+            # skip nav/header/footer/sidebar images
+            if img.find_parent(["nav", "header", "footer", "aside"]):
+                continue
+
+            # tiny pixel trackers
+            try:
+                w = int(img.get("width") or 0)
+                h = int(img.get("height") or 0)
+                if w > 0 and h > 0 and (w <= 32 and h <= 32):
+                    continue
+            except Exception:
+                pass
+
+            abs_u = urljoin(page_url or "", raw)
+            if abs_u in seen:
+                continue
+            seen.add(abs_u)
+
+            attr_text, attr_tokens = _image_attr_text_and_tokens(img)
+            dom = _image_dom_context(img)
+            dom_ctx = _find_context_window(dom, base_query, profile) if dom else ""
+            dom_tokens = _content_tokens(dom_ctx)
+
+            hit_loc = _cand_cov(dom_tokens, hit_ref)
+            hit_attr = _cand_cov(attr_tokens, hit_ref)
+
+            ok_attr, _ = _image_attr_match(profile, img, min_cov=0.34)
+
+            # hard gate: if nothing matches the hit AND no attr match → drop
+            if (hit_loc < 0.12 and hit_attr < 0.12) and not ok_attr:
+                continue
+
+            lex = 0.70 * hit_loc + 0.30 * hit_attr
+
+            cands.append({
+                "url": abs_u,
+                "lex": float(lex),
+                "hit_loc": float(hit_loc),
+                "hit_attr": float(hit_attr),
+                "ctx_text": (dom_ctx or "")[:200],
+                "attr_text": (attr_text or "")[:120],
+            })
+
+    if not cands:
+        if debug:
+            dbg("[HIT→IMG] ❌ none")
+        return None
+
+    cands.sort(key=lambda d: d["lex"], reverse=True)
+
+    # optional semantic bump only for top few
+    if encoder is not None and query_embedding is not None:
+        topm = cands[:3]
+        for d in topm:
+            try:
+                t = (d["ctx_text"] or "").strip()
+                if not t:
+                    d["score"] = d["lex"]
+                else:
+                    sem = _cosine_sim(query_embedding, encoder.encode(t))
+                    d["score"] = 0.75 * d["lex"] + 0.25 * float(sem)
+            except Exception:
+                d["score"] = d["lex"]
+        for d in cands[3:]:
+            d["score"] = d["lex"]
+    else:
+        for d in cands:
+            d["score"] = d["lex"]
+
+    cands.sort(key=lambda d: d["score"], reverse=True)
+    best = cands[0]
+
+    if best["score"] < float(min_score):
+        if debug:
+            dbg(f"[HIT→IMG] ❌ best={best['score']:.3f} < {min_score:.3f}")
+        return None
+
+    if debug:
+        dbg(f"[HIT→IMG] ✅ score={best['score']:.3f} loc={best['hit_loc']:.2f} attr={best['hit_attr']:.2f}  {best['url']}")
+
+    meta = {
+        "best_img_hitLoc": best["hit_loc"],
+        "best_img_hitAttr": best["hit_attr"],
+        "best_img_attr_text": best["attr_text"],
+        "best_img_ctx_text": best["ctx_text"],
+        "best_img_score": best["score"],
+    }
+    return best["url"], best["score"], meta
+
+
 # ---------- main entry: text hits ----------
 
 def smart_find_hits_in_soup(
@@ -427,6 +611,7 @@ def smart_find_hits_in_soup(
     base_query: str,
     lemma_obj: dict,
     *,
+    page_url: str = "",
     min_score: float = 0.60,
     top_k: Optional[int] = None,
     encoder: Optional[Any] = None,
@@ -489,6 +674,26 @@ def smart_find_hits_in_soup(
                 )
                 continue
             # --- end debug block ---
+
+        # attach ONE best image for the hit (above/below only)
+        picked = pick_best_image_for_hit(
+            soup=soup,
+            hit_node=n,
+            hit_details=details,
+            page_url=page_url,
+            base_query=base_query,
+            lemma_obj=lemma_obj,
+            encoder=encoder,
+            query_embedding=query_embedding,
+            window_blocks=2,
+            min_score=0.14,
+            debug=True,
+        )
+        if picked:
+            img_url, img_score, img_meta = picked
+            details["best_img_url"] = img_url
+            details["best_img_score"] = img_score
+            details.update(img_meta)
 
         scored.append((n, s, details))
 

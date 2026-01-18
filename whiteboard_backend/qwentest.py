@@ -63,8 +63,7 @@ INT8_CPU_OFFLOAD = False  # only relevant if QUANT_MODE=="8bit"
 # ============================
 # Set to 1 => strict cluster-by-cluster (lowest VRAM).
 # Set >1 => batching (faster, more VRAM).
-BATCH_SIZE = 8
-
+BATCH_SIZE = 4
 
 # ============================
 # SPEED / MEMORY LEVERS

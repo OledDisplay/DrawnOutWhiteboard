@@ -237,7 +237,7 @@ def rerank_image_candidates_siglip(
     for c in prepared:
         conf = c["confidence_score"]
         clip_s = c["clip_score"]
-        final_score = 0.65 * conf + 0.35 * clip_s
+        final_score = 0.4 * conf + 0.6 * clip_s
         c["final_score"] = final_score
 
     # sort by final_score and keep top final_k
