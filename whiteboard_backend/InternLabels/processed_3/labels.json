@@ -1,0 +1,679 @@
+{
+  "image_index": 3,
+  "full_image": "processed_3.png",
+  "candidate_labels": [
+    "Nuclear",
+    "Golgi",
+    "AHU",
+    "Microtubules",
+    "nRUD",
+    "membrane",
+    "Smooth",
+    "Chromatin",
+    "Centrosome",
+    "Cytoplasm",
+    "modifies",
+    "Intermediate",
+    "Microfilaments",
+    "digests",
+    "fibrous",
+    "Endoplasmic",
+    "Peroxisome",
+    "Rough",
+    "where",
+    "pores",
+    "form",
+    "waste",
+    "makes",
+    "move",
+    "associated",
+    "maintain",
+    "organelles",
+    "mitotic",
+    "Cytoskeleton",
+    "condensed",
+    "Lysosome",
+    "reticulum",
+    "Plasma",
+    "organizing",
+    "produce",
+    "Vacuole",
+    "Mitochondria",
+    "Nucleolus",
+    "metabolizes",
+    "Nucleus",
+    "cortex"
+  ],
+  "tiles": {
+    "mask": 1,
+    "bbox": 1,
+    "full": 1
+  },
+  "quant_mode": "4bit",
+  "clusters": [
+    {
+      "source_folder": "processed_3",
+      "bbox_crop": "C:\\Users\\marti\\allFolder\\code\\DRAWNOUT\\whiteboard_backend\\ClusterRenders\\processed_3\\orange_0_bbox.png",
+      "mask_crop": "C:\\Users\\marti\\allFolder\\code\\DRAWNOUT\\whiteboard_backend\\ClusterRenders\\processed_3\\orange_0_mask.png",
+      "bbox_xyxy": [
+        298,
+        694,
+        353,
+        822
+      ],
+      "colour_hint": "orange",
+      "error": "inference_failed: 'InternLM2ForCausalLM' object has no attribute 'generate'"
+    },
+    {
+      "source_folder": "processed_3",
+      "bbox_crop": "C:\\Users\\marti\\allFolder\\code\\DRAWNOUT\\whiteboard_backend\\ClusterRenders\\processed_3\\orange_1_bbox.png",
+      "mask_crop": "C:\\Users\\marti\\allFolder\\code\\DRAWNOUT\\whiteboard_backend\\ClusterRenders\\processed_3\\orange_1_mask.png",
+      "bbox_xyxy": [
+        310,
+        395,
+        554,
+        794
+      ],
+      "colour_hint": "orange",
+      "error": "inference_failed: 'InternLM2ForCausalLM' object has no attribute 'generate'"
+    },
+    {
+      "source_folder": "processed_3",
+      "bbox_crop": "C:\\Users\\marti\\allFolder\\code\\DRAWNOUT\\whiteboard_backend\\ClusterRenders\\processed_3\\orange_2_bbox.png",
+      "mask_crop": "C:\\Users\\marti\\allFolder\\code\\DRAWNOUT\\whiteboard_backend\\ClusterRenders\\processed_3\\orange_2_mask.png",
+      "bbox_xyxy": [
+        409,
+        802,
+        695,
+        947
+      ],
+      "colour_hint": "orange",
+      "error": "inference_failed: 'InternLM2ForCausalLM' object has no attribute 'generate'"
+    },
+    {
+      "source_folder": "processed_3",
+      "bbox_crop": "C:\\Users\\marti\\allFolder\\code\\DRAWNOUT\\whiteboard_backend\\ClusterRenders\\processed_3\\orange_3_bbox.png",
+      "mask_crop": "C:\\Users\\marti\\allFolder\\code\\DRAWNOUT\\whiteboard_backend\\ClusterRenders\\processed_3\\orange_3_mask.png",
+      "bbox_xyxy": [
+        430,
+        813,
+        477,
+        934
+      ],
+      "colour_hint": "orange",
+      "error": "inference_failed: 'InternLM2ForCausalLM' object has no attribute 'generate'"
+    },
+    {
+      "source_folder": "processed_3",
+      "bbox_crop": "C:\\Users\\marti\\allFolder\\code\\DRAWNOUT\\whiteboard_backend\\ClusterRenders\\processed_3\\orange_4_bbox.png",
+      "mask_crop": "C:\\Users\\marti\\allFolder\\code\\DRAWNOUT\\whiteboard_backend\\ClusterRenders\\processed_3\\orange_4_mask.png",
+      "bbox_xyxy": [
+        490,
+        378,
+        814,
+        613
+      ],
+      "colour_hint": "orange",
+      "error": "inference_failed: 'InternLM2ForCausalLM' object has no attribute 'generate'"
+    },
+    {
+      "source_folder": "processed_3",
+      "bbox_crop": "C:\\Users\\marti\\allFolder\\code\\DRAWNOUT\\whiteboard_backend\\ClusterRenders\\processed_3\\orange_5_bbox.png",
+      "mask_crop": "C:\\Users\\marti\\allFolder\\code\\DRAWNOUT\\whiteboard_backend\\ClusterRenders\\processed_3\\orange_5_mask.png",
+      "bbox_xyxy": [
+        626,
+        888,
+        647,
+        910
+      ],
+      "colour_hint": "orange",
+      "error": "inference_failed: 'InternLM2ForCausalLM' object has no attribute 'generate'"
+    },
+    {
+      "source_folder": "processed_3",
+      "bbox_crop": "C:\\Users\\marti\\allFolder\\code\\DRAWNOUT\\whiteboard_backend\\ClusterRenders\\processed_3\\orange_6_bbox.png",
+      "mask_crop": "C:\\Users\\marti\\allFolder\\code\\DRAWNOUT\\whiteboard_backend\\ClusterRenders\\processed_3\\orange_6_mask.png",
+      "bbox_xyxy": [
+        666,
+        802,
+        737,
+        878
+      ],
+      "colour_hint": "orange",
+      "error": "inference_failed: 'InternLM2ForCausalLM' object has no attribute 'generate'"
+    },
+    {
+      "source_folder": "processed_3",
+      "bbox_crop": "C:\\Users\\marti\\allFolder\\code\\DRAWNOUT\\whiteboard_backend\\ClusterRenders\\processed_3\\orange_7_bbox.png",
+      "mask_crop": "C:\\Users\\marti\\allFolder\\code\\DRAWNOUT\\whiteboard_backend\\ClusterRenders\\processed_3\\orange_7_mask.png",
+      "bbox_xyxy": [
+        710,
+        478,
+        851,
+        860
+      ],
+      "colour_hint": "orange",
+      "error": "inference_failed: 'InternLM2ForCausalLM' object has no attribute 'generate'"
+    },
+    {
+      "source_folder": "processed_3",
+      "bbox_crop": "C:\\Users\\marti\\allFolder\\code\\DRAWNOUT\\whiteboard_backend\\ClusterRenders\\processed_3\\cyan_0_bbox.png",
+      "mask_crop": "C:\\Users\\marti\\allFolder\\code\\DRAWNOUT\\whiteboard_backend\\ClusterRenders\\processed_3\\cyan_0_mask.png",
+      "bbox_xyxy": [
+        445,
+        772,
+        569,
+        857
+      ],
+      "colour_hint": "cyan",
+      "error": "inference_failed: 'InternLM2ForCausalLM' object has no attribute 'generate'"
+    },
+    {
+      "source_folder": "processed_3",
+      "bbox_crop": "C:\\Users\\marti\\allFolder\\code\\DRAWNOUT\\whiteboard_backend\\ClusterRenders\\processed_3\\green_0_bbox.png",
+      "mask_crop": "C:\\Users\\marti\\allFolder\\code\\DRAWNOUT\\whiteboard_backend\\ClusterRenders\\processed_3\\green_0_mask.png",
+      "bbox_xyxy": [
+        336,
+        725,
+        383,
+        794
+      ],
+      "colour_hint": "green",
+      "error": "inference_failed: 'InternLM2ForCausalLM' object has no attribute 'generate'"
+    },
+    {
+      "source_folder": "processed_3",
+      "bbox_crop": "C:\\Users\\marti\\allFolder\\code\\DRAWNOUT\\whiteboard_backend\\ClusterRenders\\processed_3\\green_1_bbox.png",
+      "mask_crop": "C:\\Users\\marti\\allFolder\\code\\DRAWNOUT\\whiteboard_backend\\ClusterRenders\\processed_3\\green_1_mask.png",
+      "bbox_xyxy": [
+        445,
+        880,
+        468,
+        918
+      ],
+      "colour_hint": "green",
+      "error": "inference_failed: 'InternLM2ForCausalLM' object has no attribute 'generate'"
+    },
+    {
+      "source_folder": "processed_3",
+      "bbox_crop": "C:\\Users\\marti\\allFolder\\code\\DRAWNOUT\\whiteboard_backend\\ClusterRenders\\processed_3\\green_2_bbox.png",
+      "mask_crop": "C:\\Users\\marti\\allFolder\\code\\DRAWNOUT\\whiteboard_backend\\ClusterRenders\\processed_3\\green_2_mask.png",
+      "bbox_xyxy": [
+        542,
+        400,
+        836,
+        735
+      ],
+      "colour_hint": "green",
+      "error": "inference_failed: 'InternLM2ForCausalLM' object has no attribute 'generate'"
+    },
+    {
+      "source_folder": "processed_3",
+      "bbox_crop": "C:\\Users\\marti\\allFolder\\code\\DRAWNOUT\\whiteboard_backend\\ClusterRenders\\processed_3\\magenta_0_bbox.png",
+      "mask_crop": "C:\\Users\\marti\\allFolder\\code\\DRAWNOUT\\whiteboard_backend\\ClusterRenders\\processed_3\\magenta_0_mask.png",
+      "bbox_xyxy": [
+        379,
+        641,
+        399,
+        665
+      ],
+      "colour_hint": "magenta",
+      "error": "inference_failed: 'InternLM2ForCausalLM' object has no attribute 'generate'"
+    },
+    {
+      "source_folder": "processed_3",
+      "bbox_crop": "C:\\Users\\marti\\allFolder\\code\\DRAWNOUT\\whiteboard_backend\\ClusterRenders\\processed_3\\magenta_1_bbox.png",
+      "mask_crop": "C:\\Users\\marti\\allFolder\\code\\DRAWNOUT\\whiteboard_backend\\ClusterRenders\\processed_3\\magenta_1_mask.png",
+      "bbox_xyxy": [
+        395,
+        724,
+        415,
+        745
+      ],
+      "colour_hint": "magenta",
+      "error": "inference_failed: 'InternLM2ForCausalLM' object has no attribute 'generate'"
+    },
+    {
+      "source_folder": "processed_3",
+      "bbox_crop": "C:\\Users\\marti\\allFolder\\code\\DRAWNOUT\\whiteboard_backend\\ClusterRenders\\processed_3\\magenta_2_bbox.png",
+      "mask_crop": "C:\\Users\\marti\\allFolder\\code\\DRAWNOUT\\whiteboard_backend\\ClusterRenders\\processed_3\\magenta_2_mask.png",
+      "bbox_xyxy": [
+        413,
+        763,
+        435,
+        785
+      ],
+      "colour_hint": "magenta",
+      "error": "inference_failed: 'InternLM2ForCausalLM' object has no attribute 'generate'"
+    },
+    {
+      "source_folder": "processed_3",
+      "bbox_crop": "C:\\Users\\marti\\allFolder\\code\\DRAWNOUT\\whiteboard_backend\\ClusterRenders\\processed_3\\magenta_3_bbox.png",
+      "mask_crop": "C:\\Users\\marti\\allFolder\\code\\DRAWNOUT\\whiteboard_backend\\ClusterRenders\\processed_3\\magenta_3_mask.png",
+      "bbox_xyxy": [
+        461,
+        548,
+        483,
+        571
+      ],
+      "colour_hint": "magenta",
+      "error": "inference_failed: 'InternLM2ForCausalLM' object has no attribute 'generate'"
+    },
+    {
+      "source_folder": "processed_3",
+      "bbox_crop": "C:\\Users\\marti\\allFolder\\code\\DRAWNOUT\\whiteboard_backend\\ClusterRenders\\processed_3\\magenta_4_bbox.png",
+      "mask_crop": "C:\\Users\\marti\\allFolder\\code\\DRAWNOUT\\whiteboard_backend\\ClusterRenders\\processed_3\\magenta_4_mask.png",
+      "bbox_xyxy": [
+        507,
+        649,
+        565,
+        731
+      ],
+      "colour_hint": "magenta",
+      "error": "inference_failed: 'InternLM2ForCausalLM' object has no attribute 'generate'"
+    },
+    {
+      "source_folder": "processed_3",
+      "bbox_crop": "C:\\Users\\marti\\allFolder\\code\\DRAWNOUT\\whiteboard_backend\\ClusterRenders\\processed_3\\magenta_5_bbox.png",
+      "mask_crop": "C:\\Users\\marti\\allFolder\\code\\DRAWNOUT\\whiteboard_backend\\ClusterRenders\\processed_3\\magenta_5_mask.png",
+      "bbox_xyxy": [
+        659,
+        503,
+        728,
+        650
+      ],
+      "colour_hint": "magenta",
+      "error": "inference_failed: 'InternLM2ForCausalLM' object has no attribute 'generate'"
+    },
+    {
+      "source_folder": "processed_3",
+      "bbox_crop": "C:\\Users\\marti\\allFolder\\code\\DRAWNOUT\\whiteboard_backend\\ClusterRenders\\processed_3\\red_0_bbox.png",
+      "mask_crop": "C:\\Users\\marti\\allFolder\\code\\DRAWNOUT\\whiteboard_backend\\ClusterRenders\\processed_3\\red_0_mask.png",
+      "bbox_xyxy": [
+        365,
+        513,
+        560,
+        794
+      ],
+      "colour_hint": "red",
+      "error": "inference_failed: 'InternLM2ForCausalLM' object has no attribute 'generate'"
+    },
+    {
+      "source_folder": "processed_3",
+      "bbox_crop": "C:\\Users\\marti\\allFolder\\code\\DRAWNOUT\\whiteboard_backend\\ClusterRenders\\processed_3\\red_1_bbox.png",
+      "mask_crop": "C:\\Users\\marti\\allFolder\\code\\DRAWNOUT\\whiteboard_backend\\ClusterRenders\\processed_3\\red_1_mask.png",
+      "bbox_xyxy": [
+        504,
+        843,
+        526,
+        862
+      ],
+      "colour_hint": "red",
+      "error": "inference_failed: 'InternLM2ForCausalLM' object has no attribute 'generate'"
+    },
+    {
+      "source_folder": "processed_3",
+      "bbox_crop": "C:\\Users\\marti\\allFolder\\code\\DRAWNOUT\\whiteboard_backend\\ClusterRenders\\processed_3\\red_2_bbox.png",
+      "mask_crop": "C:\\Users\\marti\\allFolder\\code\\DRAWNOUT\\whiteboard_backend\\ClusterRenders\\processed_3\\red_2_mask.png",
+      "bbox_xyxy": [
+        551,
+        830,
+        591,
+        872
+      ],
+      "colour_hint": "red",
+      "error": "inference_failed: 'InternLM2ForCausalLM' object has no attribute 'generate'"
+    },
+    {
+      "source_folder": "processed_3",
+      "bbox_crop": "C:\\Users\\marti\\allFolder\\code\\DRAWNOUT\\whiteboard_backend\\ClusterRenders\\processed_3\\red_3_bbox.png",
+      "mask_crop": "C:\\Users\\marti\\allFolder\\code\\DRAWNOUT\\whiteboard_backend\\ClusterRenders\\processed_3\\red_3_mask.png",
+      "bbox_xyxy": [
+        559,
+        617,
+        793,
+        861
+      ],
+      "colour_hint": "red",
+      "error": "inference_failed: 'InternLM2ForCausalLM' object has no attribute 'generate'"
+    },
+    {
+      "source_folder": "processed_3",
+      "bbox_crop": "C:\\Users\\marti\\allFolder\\code\\DRAWNOUT\\whiteboard_backend\\ClusterRenders\\processed_3\\red_4_bbox.png",
+      "mask_crop": "C:\\Users\\marti\\allFolder\\code\\DRAWNOUT\\whiteboard_backend\\ClusterRenders\\processed_3\\red_4_mask.png",
+      "bbox_xyxy": [
+        608,
+        841,
+        661,
+        893
+      ],
+      "colour_hint": "red",
+      "error": "inference_failed: 'InternLM2ForCausalLM' object has no attribute 'generate'"
+    },
+    {
+      "source_folder": "processed_3",
+      "bbox_crop": "C:\\Users\\marti\\allFolder\\code\\DRAWNOUT\\whiteboard_backend\\ClusterRenders\\processed_3\\red_5_bbox.png",
+      "mask_crop": "C:\\Users\\marti\\allFolder\\code\\DRAWNOUT\\whiteboard_backend\\ClusterRenders\\processed_3\\red_5_mask.png",
+      "bbox_xyxy": [
+        650,
+        628,
+        670,
+        650
+      ],
+      "colour_hint": "red",
+      "error": "inference_failed: 'InternLM2ForCausalLM' object has no attribute 'generate'"
+    },
+    {
+      "source_folder": "processed_3",
+      "bbox_crop": "C:\\Users\\marti\\allFolder\\code\\DRAWNOUT\\whiteboard_backend\\ClusterRenders\\processed_3\\red_6_bbox.png",
+      "mask_crop": "C:\\Users\\marti\\allFolder\\code\\DRAWNOUT\\whiteboard_backend\\ClusterRenders\\processed_3\\red_6_mask.png",
+      "bbox_xyxy": [
+        750,
+        536,
+        770,
+        556
+      ],
+      "colour_hint": "red",
+      "error": "inference_failed: 'InternLM2ForCausalLM' object has no attribute 'generate'"
+    },
+    {
+      "source_folder": "processed_3",
+      "bbox_crop": "C:\\Users\\marti\\allFolder\\code\\DRAWNOUT\\whiteboard_backend\\ClusterRenders\\processed_3\\blue_0_bbox.png",
+      "mask_crop": "C:\\Users\\marti\\allFolder\\code\\DRAWNOUT\\whiteboard_backend\\ClusterRenders\\processed_3\\blue_0_mask.png",
+      "bbox_xyxy": [
+        363,
+        526,
+        644,
+        793
+      ],
+      "colour_hint": "blue",
+      "error": "inference_failed: 'InternLM2ForCausalLM' object has no attribute 'generate'"
+    },
+    {
+      "source_folder": "processed_3",
+      "bbox_crop": "C:\\Users\\marti\\allFolder\\code\\DRAWNOUT\\whiteboard_backend\\ClusterRenders\\processed_3\\purple_0_bbox.png",
+      "mask_crop": "C:\\Users\\marti\\allFolder\\code\\DRAWNOUT\\whiteboard_backend\\ClusterRenders\\processed_3\\purple_0_mask.png",
+      "bbox_xyxy": [
+        404,
+        612,
+        577,
+        785
+      ],
+      "colour_hint": "purple",
+      "error": "inference_failed: 'InternLM2ForCausalLM' object has no attribute 'generate'"
+    },
+    {
+      "source_folder": "processed_3",
+      "bbox_crop": "C:\\Users\\marti\\allFolder\\code\\DRAWNOUT\\whiteboard_backend\\ClusterRenders\\processed_3\\gray_0_bbox.png",
+      "mask_crop": "C:\\Users\\marti\\allFolder\\code\\DRAWNOUT\\whiteboard_backend\\ClusterRenders\\processed_3\\gray_0_mask.png",
+      "bbox_xyxy": [
+        480,
+        858,
+        568,
+        923
+      ],
+      "colour_hint": "gray",
+      "error": "inference_failed: 'InternLM2ForCausalLM' object has no attribute 'generate'"
+    },
+    {
+      "source_folder": "processed_3",
+      "bbox_crop": "C:\\Users\\marti\\allFolder\\code\\DRAWNOUT\\whiteboard_backend\\ClusterRenders\\processed_3\\black_0_bbox.png",
+      "mask_crop": "C:\\Users\\marti\\allFolder\\code\\DRAWNOUT\\whiteboard_backend\\ClusterRenders\\processed_3\\black_0_mask.png",
+      "bbox_xyxy": [
+        217,
+        610,
+        362,
+        755
+      ],
+      "colour_hint": "black",
+      "error": "inference_failed: 'InternLM2ForCausalLM' object has no attribute 'generate'"
+    },
+    {
+      "source_folder": "processed_3",
+      "bbox_crop": "C:\\Users\\marti\\allFolder\\code\\DRAWNOUT\\whiteboard_backend\\ClusterRenders\\processed_3\\black_1_bbox.png",
+      "mask_crop": "C:\\Users\\marti\\allFolder\\code\\DRAWNOUT\\whiteboard_backend\\ClusterRenders\\processed_3\\black_1_mask.png",
+      "bbox_xyxy": [
+        228,
+        384,
+        476,
+        404
+      ],
+      "colour_hint": "black",
+      "error": "inference_failed: 'InternLM2ForCausalLM' object has no attribute 'generate'"
+    },
+    {
+      "source_folder": "processed_3",
+      "bbox_crop": "C:\\Users\\marti\\allFolder\\code\\DRAWNOUT\\whiteboard_backend\\ClusterRenders\\processed_3\\black_2_bbox.png",
+      "mask_crop": "C:\\Users\\marti\\allFolder\\code\\DRAWNOUT\\whiteboard_backend\\ClusterRenders\\processed_3\\black_2_mask.png",
+      "bbox_xyxy": [
+        232,
+        812,
+        477,
+        1183
+      ],
+      "colour_hint": "black",
+      "error": "inference_failed: 'InternLM2ForCausalLM' object has no attribute 'generate'"
+    },
+    {
+      "source_folder": "processed_3",
+      "bbox_crop": "C:\\Users\\marti\\allFolder\\code\\DRAWNOUT\\whiteboard_backend\\ClusterRenders\\processed_3\\black_3_bbox.png",
+      "mask_crop": "C:\\Users\\marti\\allFolder\\code\\DRAWNOUT\\whiteboard_backend\\ClusterRenders\\processed_3\\black_3_mask.png",
+      "bbox_xyxy": [
+        361,
+        47,
+        557,
+        67
+      ],
+      "colour_hint": "black",
+      "error": "inference_failed: 'InternLM2ForCausalLM' object has no attribute 'generate'"
+    },
+    {
+      "source_folder": "processed_3",
+      "bbox_crop": "C:\\Users\\marti\\allFolder\\code\\DRAWNOUT\\whiteboard_backend\\ClusterRenders\\processed_3\\black_4_bbox.png",
+      "mask_crop": "C:\\Users\\marti\\allFolder\\code\\DRAWNOUT\\whiteboard_backend\\ClusterRenders\\processed_3\\black_4_mask.png",
+      "bbox_xyxy": [
+        379,
+        266,
+        506,
+        286
+      ],
+      "colour_hint": "black",
+      "error": "inference_failed: 'InternLM2ForCausalLM' object has no attribute 'generate'"
+    },
+    {
+      "source_folder": "processed_3",
+      "bbox_crop": "C:\\Users\\marti\\allFolder\\code\\DRAWNOUT\\whiteboard_backend\\ClusterRenders\\processed_3\\black_5_bbox.png",
+      "mask_crop": "C:\\Users\\marti\\allFolder\\code\\DRAWNOUT\\whiteboard_backend\\ClusterRenders\\processed_3\\black_5_mask.png",
+      "bbox_xyxy": [
+        451,
+        383,
+        472,
+        686
+      ],
+      "colour_hint": "black",
+      "error": "inference_failed: 'InternLM2ForCausalLM' object has no attribute 'generate'"
+    },
+    {
+      "source_folder": "processed_3",
+      "bbox_crop": "C:\\Users\\marti\\allFolder\\code\\DRAWNOUT\\whiteboard_backend\\ClusterRenders\\processed_3\\black_6_bbox.png",
+      "mask_crop": "C:\\Users\\marti\\allFolder\\code\\DRAWNOUT\\whiteboard_backend\\ClusterRenders\\processed_3\\black_6_mask.png",
+      "bbox_xyxy": [
+        452,
+        1161,
+        473,
+        1182
+      ],
+      "colour_hint": "black",
+      "error": "inference_failed: 'InternLM2ForCausalLM' object has no attribute 'generate'"
+    },
+    {
+      "source_folder": "processed_3",
+      "bbox_crop": "C:\\Users\\marti\\allFolder\\code\\DRAWNOUT\\whiteboard_backend\\ClusterRenders\\processed_3\\black_7_bbox.png",
+      "mask_crop": "C:\\Users\\marti\\allFolder\\code\\DRAWNOUT\\whiteboard_backend\\ClusterRenders\\processed_3\\black_7_mask.png",
+      "bbox_xyxy": [
+        484,
+        265,
+        506,
+        658
+      ],
+      "colour_hint": "black",
+      "error": "inference_failed: 'InternLM2ForCausalLM' object has no attribute 'generate'"
+    },
+    {
+      "source_folder": "processed_3",
+      "bbox_crop": "C:\\Users\\marti\\allFolder\\code\\DRAWNOUT\\whiteboard_backend\\ClusterRenders\\processed_3\\black_8_bbox.png",
+      "mask_crop": "C:\\Users\\marti\\allFolder\\code\\DRAWNOUT\\whiteboard_backend\\ClusterRenders\\processed_3\\black_8_mask.png",
+      "bbox_xyxy": [
+        529,
+        887,
+        586,
+        1077
+      ],
+      "colour_hint": "black",
+      "error": "inference_failed: 'InternLM2ForCausalLM' object has no attribute 'generate'"
+    },
+    {
+      "source_folder": "processed_3",
+      "bbox_crop": "C:\\Users\\marti\\allFolder\\code\\DRAWNOUT\\whiteboard_backend\\ClusterRenders\\processed_3\\black_9_bbox.png",
+      "mask_crop": "C:\\Users\\marti\\allFolder\\code\\DRAWNOUT\\whiteboard_backend\\ClusterRenders\\processed_3\\black_9_mask.png",
+      "bbox_xyxy": [
+        534,
+        42,
+        560,
+        646
+      ],
+      "colour_hint": "black",
+      "error": "inference_failed: 'InternLM2ForCausalLM' object has no attribute 'generate'"
+    },
+    {
+      "source_folder": "processed_3",
+      "bbox_crop": "C:\\Users\\marti\\allFolder\\code\\DRAWNOUT\\whiteboard_backend\\ClusterRenders\\processed_3\\black_10_bbox.png",
+      "mask_crop": "C:\\Users\\marti\\allFolder\\code\\DRAWNOUT\\whiteboard_backend\\ClusterRenders\\processed_3\\black_10_mask.png",
+      "bbox_xyxy": [
+        593,
+        842,
+        778,
+        1030
+      ],
+      "colour_hint": "black",
+      "error": "inference_failed: 'InternLM2ForCausalLM' object has no attribute 'generate'"
+    },
+    {
+      "source_folder": "processed_3",
+      "bbox_crop": "C:\\Users\\marti\\allFolder\\code\\DRAWNOUT\\whiteboard_backend\\ClusterRenders\\processed_3\\black_11_bbox.png",
+      "mask_crop": "C:\\Users\\marti\\allFolder\\code\\DRAWNOUT\\whiteboard_backend\\ClusterRenders\\processed_3\\black_11_mask.png",
+      "bbox_xyxy": [
+        599,
+        47,
+        808,
+        71
+      ],
+      "colour_hint": "black",
+      "error": "inference_failed: 'InternLM2ForCausalLM' object has no attribute 'generate'"
+    },
+    {
+      "source_folder": "processed_3",
+      "bbox_crop": "C:\\Users\\marti\\allFolder\\code\\DRAWNOUT\\whiteboard_backend\\ClusterRenders\\processed_3\\black_12_bbox.png",
+      "mask_crop": "C:\\Users\\marti\\allFolder\\code\\DRAWNOUT\\whiteboard_backend\\ClusterRenders\\processed_3\\black_12_mask.png",
+      "bbox_xyxy": [
+        600,
+        47,
+        623,
+        476
+      ],
+      "colour_hint": "black",
+      "error": "inference_failed: 'InternLM2ForCausalLM' object has no attribute 'generate'"
+    },
+    {
+      "source_folder": "processed_3",
+      "bbox_crop": "C:\\Users\\marti\\allFolder\\code\\DRAWNOUT\\whiteboard_backend\\ClusterRenders\\processed_3\\black_13_bbox.png",
+      "mask_crop": "C:\\Users\\marti\\allFolder\\code\\DRAWNOUT\\whiteboard_backend\\ClusterRenders\\processed_3\\black_13_mask.png",
+      "bbox_xyxy": [
+        636,
+        192,
+        803,
+        216
+      ],
+      "colour_hint": "black",
+      "error": "inference_failed: 'InternLM2ForCausalLM' object has no attribute 'generate'"
+    },
+    {
+      "source_folder": "processed_3",
+      "bbox_crop": "C:\\Users\\marti\\allFolder\\code\\DRAWNOUT\\whiteboard_backend\\ClusterRenders\\processed_3\\black_14_bbox.png",
+      "mask_crop": "C:\\Users\\marti\\allFolder\\code\\DRAWNOUT\\whiteboard_backend\\ClusterRenders\\processed_3\\black_14_mask.png",
+      "bbox_xyxy": [
+        637,
+        195,
+        692,
+        561
+      ],
+      "colour_hint": "black",
+      "error": "inference_failed: 'InternLM2ForCausalLM' object has no attribute 'generate'"
+    },
+    {
+      "source_folder": "processed_3",
+      "bbox_crop": "C:\\Users\\marti\\allFolder\\code\\DRAWNOUT\\whiteboard_backend\\ClusterRenders\\processed_3\\black_15_bbox.png",
+      "mask_crop": "C:\\Users\\marti\\allFolder\\code\\DRAWNOUT\\whiteboard_backend\\ClusterRenders\\processed_3\\black_15_mask.png",
+      "bbox_xyxy": [
+        647,
+        748,
+        804,
+        882
+      ],
+      "colour_hint": "black",
+      "error": "inference_failed: 'InternLM2ForCausalLM' object has no attribute 'generate'"
+    },
+    {
+      "source_folder": "processed_3",
+      "bbox_crop": "C:\\Users\\marti\\allFolder\\code\\DRAWNOUT\\whiteboard_backend\\ClusterRenders\\processed_3\\black_16_bbox.png",
+      "mask_crop": "C:\\Users\\marti\\allFolder\\code\\DRAWNOUT\\whiteboard_backend\\ClusterRenders\\processed_3\\black_16_mask.png",
+      "bbox_xyxy": [
+        671,
+        296,
+        804,
+        320
+      ],
+      "colour_hint": "black",
+      "error": "inference_failed: 'InternLM2ForCausalLM' object has no attribute 'generate'"
+    },
+    {
+      "source_folder": "processed_3",
+      "bbox_crop": "C:\\Users\\marti\\allFolder\\code\\DRAWNOUT\\whiteboard_backend\\ClusterRenders\\processed_3\\black_17_bbox.png",
+      "mask_crop": "C:\\Users\\marti\\allFolder\\code\\DRAWNOUT\\whiteboard_backend\\ClusterRenders\\processed_3\\black_17_mask.png",
+      "bbox_xyxy": [
+        758,
+        456,
+        874,
+        515
+      ],
+      "colour_hint": "black",
+      "error": "inference_failed: 'InternLM2ForCausalLM' object has no attribute 'generate'"
+    },
+    {
+      "source_folder": "processed_3",
+      "bbox_crop": "C:\\Users\\marti\\allFolder\\code\\DRAWNOUT\\whiteboard_backend\\ClusterRenders\\processed_3\\black_18_bbox.png",
+      "mask_crop": "C:\\Users\\marti\\allFolder\\code\\DRAWNOUT\\whiteboard_backend\\ClusterRenders\\processed_3\\black_18_mask.png",
+      "bbox_xyxy": [
+        770,
+        702,
+        867,
+        734
+      ],
+      "colour_hint": "black",
+      "error": "inference_failed: 'InternLM2ForCausalLM' object has no attribute 'generate'"
+    },
+    {
+      "source_folder": "processed_3",
+      "bbox_crop": "C:\\Users\\marti\\allFolder\\code\\DRAWNOUT\\whiteboard_backend\\ClusterRenders\\processed_3\\black_19_bbox.png",
+      "mask_crop": "C:\\Users\\marti\\allFolder\\code\\DRAWNOUT\\whiteboard_backend\\ClusterRenders\\processed_3\\black_19_mask.png",
+      "bbox_xyxy": [
+        830,
+        603,
+        918,
+        628
+      ],
+      "colour_hint": "black",
+      "error": "inference_failed: 'InternLM2ForCausalLM' object has no attribute 'generate'"
+    }
+  ]
+}

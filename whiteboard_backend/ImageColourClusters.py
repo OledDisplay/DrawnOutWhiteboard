@@ -53,7 +53,7 @@ def color_rank(name: str) -> int:
 # CONFIG (simple + blunt)
 # ============================
 # “blanket threshold” in image pixels (bbox-to-bbox distance)
-GROUP_RADIUS_PX = 30.0
+GROUP_RADIUS_PX = 20
 
 # spatial hash cell size; should be >= radius so neighbors are local
 GRID_CELL_PX = 48.0
@@ -63,7 +63,6 @@ CLUSTER_CROP_PAD = 8
 
 # stroke keep-color padding around skeleton line (pixels)
 STROKE_SKELETON_PAD_PX = 3
-
 # --- SPEED KNOBS ---
 # If False: skips the expensive per-stroke color sampling and does NOT rewrite vectors json.
 ENABLE_STROKE_COLOR_SAMPLING = False
@@ -82,6 +81,44 @@ MIN_CONTRIB_PIXELS_PER_STROKE = 60
 # Color bit-shift quantization (RESTORED)
 # (r>>4,g>>4,b>>4) => 16x16x16 bins
 RGB_Q_SHIFT = 10
+
+BBOX_PAD_FRAC = 0.06   # 6% of bbox size
+BBOX_PAD_MIN_PX = 4
+BBOX_PAD_MAX_PX = 15
+
+# ============================
+# CROSS-COLOUR CLUSTER MERGE
+# ============================
+ENABLE_CROSS_COLOR_CLUSTER_MERGE = True
+
+# overlap ratio = intersection_area / area_of_smaller_cluster_bbox
+CROSS_COLOR_OVERLAP_RATIO = 0.70  # "high %" overlap
+
+# only merge if also within distance threshold (same as grouping)
+CROSS_COLOR_DISTANCE_PX = GROUP_RADIUS_PX
+
+# ============================
+# FILLED WRAP MASK FOR OUTPUT CROPS
+# ============================
+# This is ONLY for the grayscale+color crop output (helps when strokes are outlines).
+ENABLE_FILLED_WRAP_MASK = True
+
+# How aggressively to bridge gaps between nearby stroke segments inside the crop.
+WRAP_BRIDGE_PX = 6
+
+# How much to "tighten" after filling (erosion).
+WRAP_TIGHTEN_PX = 2
+
+# Pixel thickness used when rasterizing stroke lines into the initial mask
+WRAP_STROKE_THICKNESS = 1
+
+# ============================
+# OVERLAP MASK FOR MERGING (EXACT PIXEL OVERLAP OF STROKES)
+# ============================
+# This is used ONLY for cross-colour merge decisions, NOT for output crops.
+MERGE_MASK_STROKE_THICKNESS = 1
+MERGE_MASK_DILATE_PX = 1  # small dilation so pixel overlap is robust but not over-permissive
+MERGE_GRID_CELL_PX = 96.0
 
 
 # ============================
@@ -214,6 +251,15 @@ def _cluster_bbox(bboxes: List[Tuple[float,float,float,float]], idxs: List[int])
         xs0.append(x0); ys0.append(y0); xs1.append(x1); ys1.append(y1)
     return (min(xs0), min(ys0), max(xs1), max(ys1))
 
+#============================
+#MERGE OVERLAPPING CLUSTERS FROM DIFFERENT COLOURS
+# (STILL NEEDED EVEN WITH OPTIMIZED STROKES)
+#============================
+def _bbox_area(bb: Tuple[float, float, float, float]) -> float:
+    x0, y0, x1, y1 = bb
+    return max(0.0, x1 - x0) * max(0.0, y1 - y0)
+
+
 
 # ============================
 # Stroke parsing
@@ -282,9 +328,80 @@ def _color_name_from_id(cid_1based: int) -> str:
         return COLOR_ORDER_LIGHT_TO_DARK[cid_1based - 1]
     return "unknown"
 
+#POLYLINE COMP LOGIC
+def _min_pointset_d2(a: np.ndarray, b: np.ndarray) -> float:
+    """
+    Minimum squared distance between two point sets.
+    a: (Na,2), b: (Nb,2)
+    """
+    if a is None or b is None:
+        return float("inf")
+    if a.size == 0 or b.size == 0:
+        return float("inf")
+    A = a.astype(np.float32)
+    B = b.astype(np.float32)
+    diff = A[:, None, :] - B[None, :, :]
+    d2 = diff[..., 0] * diff[..., 0] + diff[..., 1] * diff[..., 1]
+    return float(d2.min())
+
+
+def _min_points_to_polyline_d2(points: np.ndarray, poly: np.ndarray) -> float:
+    """
+    Minimum squared distance from a set of points to a polyline (piecewise linear).
+    points: (N,2)
+    poly:   (M,2), M>=2
+    """
+    if points is None or poly is None:
+        return float("inf")
+    if points.size == 0 or poly.size == 0:
+        return float("inf")
+    if poly.shape[0] < 2:
+        return _min_pointset_d2(points, poly)
+
+    P = points.astype(np.float32)               # (N,2)
+    A = poly[:-1].astype(np.float32)            # (S,2)
+    B = poly[1:].astype(np.float32)             # (S,2)
+    V = B - A                                   # (S,2)
+
+    VV = V[:, 0] * V[:, 0] + V[:, 1] * V[:, 1]  # (S,)
+    VV = np.maximum(VV, 1e-6)                   # avoid div by 0
+
+    # Broadcast:
+    # P -> (N,1,2), A -> (1,S,2), V -> (1,S,2)
+    W = P[:, None, :] - A[None, :, :]           # (N,S,2)
+
+    t = (W[..., 0] * V[None, :, 0] + W[..., 1] * V[None, :, 1]) / VV[None, :]  # (N,S)
+    t = np.clip(t, 0.0, 1.0)
+
+    proj = A[None, :, :] + V[None, :, :] * t[..., None]  # (N,S,2)
+    D = P[:, None, :] - proj                               # (N,S,2)
+
+    d2 = D[..., 0] * D[..., 0] + D[..., 1] * D[..., 1]    # (N,S)
+    return float(d2.min())
+
+
+def _polyline_min_distance_d2(a: np.ndarray, b: np.ndarray) -> float:
+    """
+    Symmetric min squared distance between 2 polylines.
+    Works well with your sampled stroke points.
+    """
+    if a is None or b is None:
+        return float("inf")
+    if a.shape[0] == 0 or b.shape[0] == 0:
+        return float("inf")
+
+    # If either is just one point -> pointset distance
+    if a.shape[0] < 2 or b.shape[0] < 2:
+        return _min_pointset_d2(a, b)
+
+    d2_1 = _min_points_to_polyline_d2(a, b)
+    d2_2 = _min_points_to_polyline_d2(b, a)
+    return float(min(d2_1, d2_2))
+
+
 
 # ============================
-# Color helpers (RESTORED)
+# Color helpers
 # ============================
 def _clamp(v: float, lo: float, hi: float) -> float:
     return max(lo, min(hi, v))
@@ -443,20 +560,25 @@ def _estimate_stroke_color(
     return rgb, float(conf), int(contrib)
 
 
+
+
+
+
 # ============================
 # Clustering per color (simple)
 # ============================
-def _cluster_indices_by_bbox_proximity(
+def _cluster_indices_by_polyline_proximity(
     idxs: List[int],
-    bboxes: List[Tuple[float,float,float,float]],
+    bboxes: List[Tuple[float, float, float, float]],
+    stroke_pts: List[Optional[np.ndarray]],
     radius_px: float,
     grid_cell_px: float,
 ) -> List[List[int]]:
     """
-    Clusters strokes by bbox distance <= radius_px, but ONLY among idxs list.
-    Uses spatial hashing on bbox centroid to reduce comparisons.
+    Cluster strokes by TRUE geometric proximity:
+    min distance between sampled polylines <= radius_px.
 
-    Returns clusters as lists of stroke indices (original stroke index space).
+    Uses bbox+grid ONLY for candidate generation (speed).
     """
     if not idxs:
         return []
@@ -464,50 +586,74 @@ def _cluster_indices_by_bbox_proximity(
     local_to_global = idxs
     n = len(local_to_global)
 
-    cent = np.zeros((n, 2), dtype=np.float32)
-    for li, gi in enumerate(local_to_global):
-        x0,y0,x1,y1 = bboxes[gi]
-        cent[li, 0] = (x0 + x1) * 0.5
-        cent[li, 1] = (y0 + y1) * 0.5
-
     cell = float(max(8.0, grid_cell_px))
-    grid: Dict[Tuple[int,int], List[int]] = {}
+    r = float(max(0.0, radius_px))
+    r2 = r * r
 
-    def cell_key(x: float, y: float) -> Tuple[int,int]:
-        return (int(math.floor(x / cell)), int(math.floor(y / cell)))
+    grid: Dict[Tuple[int, int], List[int]] = {}
 
-    for li in range(n):
-        k = cell_key(float(cent[li,0]), float(cent[li,1]))
-        grid.setdefault(k, []).append(li)
+    def cell_range(x0: float, y0: float, x1: float, y1: float) -> Tuple[int, int, int, int]:
+        ex0 = x0 - r
+        ey0 = y0 - r
+        ex1 = x1 + r
+        ey1 = y1 + r
+        gx0 = int(math.floor(ex0 / cell))
+        gy0 = int(math.floor(ey0 / cell))
+        gx1 = int(math.floor(ex1 / cell))
+        gy1 = int(math.floor(ey1 / cell))
+        return gx0, gy0, gx1, gy1
+
+    # Index by expanded bbox cells (candidate generation)
+    for li, gi in enumerate(local_to_global):
+        x0, y0, x1, y1 = bboxes[gi]
+        gx0, gy0, gx1, gy1 = cell_range(float(x0), float(y0), float(x1), float(y1))
+        for gy in range(gy0, gy1 + 1):
+            for gx in range(gx0, gx1 + 1):
+                grid.setdefault((gx, gy), []).append(li)
 
     uf = UnionFind(n)
 
-    for li in range(n):
-        cx, cy = float(cent[li,0]), float(cent[li,1])
-        gx, gy = cell_key(cx, cy)
+    # Compare only candidates, but merge using polyline distance
+    for li, gi in enumerate(local_to_global):
+        x0, y0, x1, y1 = bboxes[gi]
+        gx0, gy0, gx1, gy1 = cell_range(float(x0), float(y0), float(x1), float(y1))
 
-        for oy in (-1, 0, 1):
-            for ox in (-1, 0, 1):
-                bucket = grid.get((gx+ox, gy+oy))
+        candidates = set()
+        for gy in range(gy0, gy1 + 1):
+            for gx in range(gx0, gx1 + 1):
+                bucket = grid.get((gx, gy))
                 if not bucket:
                     continue
                 for lj in bucket:
-                    if lj <= li:
-                        continue
-                    gi = local_to_global[li]
-                    gj = local_to_global[lj]
-                    d = _bbox_distance(bboxes[gi], bboxes[gj])
-                    if d <= radius_px:
-                        uf.union(li, lj)
+                    if lj > li:
+                        candidates.add(lj)
+
+        pts_i = stroke_pts[gi]
+
+        for lj in candidates:
+            gj = local_to_global[lj]
+            pts_j = stroke_pts[gj]
+
+            # If either stroke has no samples, fallback to bbox distance
+            if pts_i is None or pts_j is None:
+                d = _bbox_distance(bboxes[gi], bboxes[gj])
+                if d <= r:
+                    uf.union(li, lj)
+                continue
+
+            d2 = _polyline_min_distance_d2(pts_i, pts_j)
+            if d2 <= r2:
+                uf.union(li, lj)
 
     groups: Dict[int, List[int]] = {}
     for li in range(n):
-        r = uf.find(li)
-        groups.setdefault(r, []).append(local_to_global[li])
+        root = uf.find(li)
+        groups.setdefault(root, []).append(local_to_global[li])
 
     out = list(groups.values())
     out.sort(key=lambda g: (min(bboxes[i][0] for i in g), min(bboxes[i][1] for i in g)))
     return out
+
 
 def _render_cluster_crop_keep_strokes_color(
     img_rgb: np.ndarray,
@@ -579,6 +725,388 @@ def _render_cluster_crop_keep_strokes_color(
     return out
 
 
+def _render_cluster_crop_keep_strokes_color_filled(
+    img_rgb: np.ndarray,
+    x0p: int,
+    y0p: int,
+    x1p: int,
+    y1p: int,
+    stroke_indices: List[int],
+    stroke_samples_px_cache: List[Optional[np.ndarray]],
+    pad_px: int,
+) -> np.ndarray:
+    """
+    Same output idea as _render_cluster_crop_keep_strokes_color, BUT:
+    it attempts to "wrap" the stroke set and color-fill the inside region
+    (helps when your skeleton strokes are outlines of the real object).
+    """
+    crop_rgb = img_rgb[y0p:y1p, x0p:x1p]
+    ch, cw, _ = crop_rgb.shape
+    if ch <= 0 or cw <= 0:
+        return crop_rgb
+
+    skel = np.zeros((ch, cw), dtype=np.uint8)
+
+    extra = int(max(pad_px, WRAP_BRIDGE_PX)) + 2
+    min_x = x0p - extra
+    max_x = x1p + extra
+    min_y = y0p - extra
+    max_y = y1p + extra
+
+    for si in stroke_indices:
+        if si < 0 or si >= len(stroke_samples_px_cache):
+            continue
+        pts_img = stroke_samples_px_cache[si]
+        if pts_img is None or pts_img.shape[0] < 2:
+            continue
+
+        x = pts_img[:, 0]
+        y = pts_img[:, 1]
+        keep = (x >= min_x) & (x < max_x) & (y >= min_y) & (y < max_y)
+        if not np.any(keep):
+            continue
+
+        pts = pts_img[keep].copy()
+        pts[:, 0] -= int(x0p)
+        pts[:, 1] -= int(y0p)
+
+        pts[:, 0] = np.clip(pts[:, 0], 0, cw - 1)
+        pts[:, 1] = np.clip(pts[:, 1], 0, ch - 1)
+
+        cv2.polylines(
+            skel,
+            [pts.reshape(-1, 1, 2)],
+            isClosed=False,
+            color=255,
+            thickness=int(max(1, WRAP_STROKE_THICKNESS)),
+            lineType=cv2.LINE_8,
+        )
+
+    if not np.any(skel):
+        return crop_rgb
+
+    # baseline stroke thickness so strokes themselves stay colored
+    if pad_px > 0:
+        k = 2 * int(pad_px) + 1
+        kernel = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (k, k))
+        thick = cv2.dilate(skel, kernel, iterations=1)
+    else:
+        thick = skel.copy()
+
+    if not ENABLE_FILLED_WRAP_MASK:
+        # fall back to skeleton behavior
+        gray = cv2.cvtColor(crop_rgb, cv2.COLOR_RGB2GRAY)
+        gray3 = np.repeat(gray[..., None], 3, axis=2)
+        out = np.where(thick[..., None] > 0, crop_rgb, gray3).astype(np.uint8)
+        return out
+
+    # "wrap" behavior: bridge nearby strokes, then fill the resulting shape
+    wrap = thick.copy()
+
+    if WRAP_BRIDGE_PX > 0:
+        k = 2 * int(WRAP_BRIDGE_PX) + 1
+        kernel_b = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (k, k))
+        wrap = cv2.morphologyEx(wrap, cv2.MORPH_CLOSE, kernel_b, iterations=1)
+
+    # Fill outer contour(s) to get a non-rect region
+    contours, _ = cv2.findContours(wrap, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+    filled = np.zeros_like(wrap)
+    if contours:
+        cv2.drawContours(filled, contours, contourIdx=-1, color=255, thickness=-1)
+
+    # Tighten (optional)
+    if WRAP_TIGHTEN_PX > 0 and np.any(filled):
+        k = 2 * int(WRAP_TIGHTEN_PX) + 1
+        kernel_t = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (k, k))
+        filled = cv2.erode(filled, kernel_t, iterations=1)
+
+    # Always keep the thick stroke pixels even if filling fails
+    keep_mask = np.maximum(filled, thick)
+
+    gray = cv2.cvtColor(crop_rgb, cv2.COLOR_RGB2GRAY)
+    gray3 = np.repeat(gray[..., None], 3, axis=2)
+
+    out = np.where(keep_mask[..., None] > 0, crop_rgb, gray3).astype(np.uint8)
+    return out
+
+
+# ============================
+# FAST EXACT-PIXEL OVERLAP MERGE (CROSS-COLOUR)
+# ============================
+def _cluster_tight_bbox_from_strokes(
+    stroke_indices: List[int],
+    stroke_pts: List[Optional[np.ndarray]],
+) -> Tuple[int, int, int, int]:
+    """
+    Returns a tight integer bbox [x0,y0,x1,y1) around sampled points of the strokes.
+    """
+    xs = []
+    ys = []
+    for si in stroke_indices:
+        if si < 0 or si >= len(stroke_pts):
+            continue
+        p = stroke_pts[si]
+        if p is None or p.shape[0] < 1:
+            continue
+        xs.append(int(np.min(p[:, 0])))
+        xs.append(int(np.max(p[:, 0])))
+        ys.append(int(np.min(p[:, 1])))
+        ys.append(int(np.max(p[:, 1])))
+
+    if not xs or not ys:
+        return (0, 0, 0, 0)
+
+    x0 = int(min(xs))
+    y0 = int(min(ys))
+    x1 = int(max(xs)) + 1
+    y1 = int(max(ys)) + 1
+    return (x0, y0, x1, y1)
+
+def _cluster_stroke_mask_local(
+    stroke_indices: List[int],
+    stroke_pts: List[Optional[np.ndarray]],
+    bbox_xyxy: Tuple[int, int, int, int],
+    dilate_px: int,
+    thickness: int,
+) -> Tuple[np.ndarray, int]:
+    """
+    Rasterize cluster strokes into a local mask (tight bbox coords), then (optional) dilate.
+    Returns (mask01, area_pixels) where mask01 is uint8 {0,1}.
+    """
+    x0, y0, x1, y1 = bbox_xyxy
+    w = int(max(0, x1 - x0))
+    h = int(max(0, y1 - y0))
+    if w <= 0 or h <= 0:
+        return np.zeros((0, 0), dtype=np.uint8), 0
+
+    m = np.zeros((h, w), dtype=np.uint8)
+
+    for si in stroke_indices:
+        if si < 0 or si >= len(stroke_pts):
+            continue
+        pts_img = stroke_pts[si]
+        if pts_img is None or pts_img.shape[0] < 2:
+            continue
+
+        pts = pts_img.copy()
+        pts[:, 0] -= int(x0)
+        pts[:, 1] -= int(y0)
+
+        # Clip to mask bounds
+        pts[:, 0] = np.clip(pts[:, 0], 0, w - 1)
+        pts[:, 1] = np.clip(pts[:, 1], 0, h - 1)
+
+        cv2.polylines(
+            m,
+            [pts.reshape(-1, 1, 2)],
+            isClosed=False,
+            color=255,
+            thickness=int(max(1, thickness)),
+            lineType=cv2.LINE_8,
+        )
+
+    if not np.any(m):
+        return np.zeros((h, w), dtype=np.uint8), 0
+
+    if dilate_px > 0:
+        k = 2 * int(dilate_px) + 1
+        ker = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (k, k))
+        m = cv2.dilate(m, ker, iterations=1)
+
+    m01 = (m > 0).astype(np.uint8)
+    area = int(np.count_nonzero(m01))
+    return m01, area
+
+def _mask_overlap_ratio_small_in_big(
+    small_bbox: Tuple[int, int, int, int],
+    small_mask01: np.ndarray,
+    small_area: int,
+    big_bbox: Tuple[int, int, int, int],
+    big_mask01: np.ndarray,
+) -> float:
+    """
+    overlap ratio = intersection_pixels / small_area  (exact pixels)
+    """
+    if small_area <= 0:
+        return 0.0
+    if small_mask01.size == 0 or big_mask01.size == 0:
+        return 0.0
+
+    sx0, sy0, sx1, sy1 = small_bbox
+    bx0, by0, bx1, by1 = big_bbox
+
+    ix0 = max(sx0, bx0)
+    iy0 = max(sy0, by0)
+    ix1 = min(sx1, bx1)
+    iy1 = min(sy1, by1)
+
+    if ix1 <= ix0 or iy1 <= iy0:
+        return 0.0
+
+    # slices into small
+    s_x0 = ix0 - sx0
+    s_y0 = iy0 - sy0
+    s_x1 = ix1 - sx0
+    s_y1 = iy1 - sy0
+
+    # slices into big
+    b_x0 = ix0 - bx0
+    b_y0 = iy0 - by0
+    b_x1 = ix1 - bx0
+    b_y1 = iy1 - by0
+
+    s_sub = small_mask01[s_y0:s_y1, s_x0:s_x1]
+    b_sub = big_mask01[b_y0:b_y1, b_x0:b_x1]
+
+    if s_sub.size == 0 or b_sub.size == 0:
+        return 0.0
+
+    inter = int(np.count_nonzero((s_sub & b_sub) > 0))
+    return float(inter / float(max(1, small_area)))
+
+def _merge_overlapping_clusters_across_colors_fast(
+    clusters: List[Dict[str, Any]],
+    stroke_pts: List[Optional[np.ndarray]],
+    overlap_ratio_thr: float,
+) -> List[Dict[str, Any]]:
+    """
+    Cross-colour merging (FAST + robust):
+    - Build an exact pixel mask of STROKES for each cluster (tight bbox local).
+    - For each small cluster, find a bigger cluster of different color such that:
+        intersection_pixels / small_pixels >= overlap_ratio_thr
+      Then merge strokes small -> big and delete small.
+
+    This avoids square bbox overlap (your old issue), and removes the insane nested polyline loops.
+    """
+    if not clusters:
+        return clusters
+
+    work = []
+    for c in clusters:
+        cc = dict(c)
+        cc["_alive"] = True
+        cc["stroke_indexes"] = [int(x) for x in (cc.get("stroke_indexes") or [])]
+        work.append(cc)
+
+    # Precompute tight bbox + local stroke masks once
+    for c in work:
+        st = c["stroke_indexes"]
+        bb = _cluster_tight_bbox_from_strokes(st, stroke_pts)
+        c["_mask_bbox"] = bb
+        m01, area = _cluster_stroke_mask_local(
+            stroke_indices=st,
+            stroke_pts=stroke_pts,
+            bbox_xyxy=bb,
+            dilate_px=int(MERGE_MASK_DILATE_PX),
+            thickness=int(MERGE_MASK_STROKE_THICKNESS),
+        )
+        c["_mask01"] = m01
+        c["_mask_area"] = int(area)
+
+    # Spatial grid for candidate lookup (bbox-based ONLY for speed)
+    cell = float(max(16.0, MERGE_GRID_CELL_PX))
+    grid: Dict[Tuple[int, int], List[int]] = {}
+
+    def cell_range(bb: Tuple[int, int, int, int]) -> Tuple[int, int, int, int]:
+        x0, y0, x1, y1 = bb
+        gx0 = int(math.floor(float(x0) / cell))
+        gy0 = int(math.floor(float(y0) / cell))
+        gx1 = int(math.floor(float(x1) / cell))
+        gy1 = int(math.floor(float(y1) / cell))
+        return gx0, gy0, gx1, gy1
+
+    for i, c in enumerate(work):
+        bb = c["_mask_bbox"]
+        gx0, gy0, gx1, gy1 = cell_range(bb)
+        for gy in range(gy0, gy1 + 1):
+            for gx in range(gx0, gx1 + 1):
+                grid.setdefault((gx, gy), []).append(i)
+
+    # Process small -> big
+    idxs = list(range(len(work)))
+    idxs.sort(key=lambda i: work[i].get("_mask_area", 0))  # smallest first
+
+    for si in idxs:
+        small = work[si]
+        if not small["_alive"]:
+            continue
+        a_small = int(small.get("_mask_area", 0))
+        if a_small <= 0:
+            continue
+
+        sbb = small["_mask_bbox"]
+        gx0, gy0, gx1, gy1 = cell_range(sbb)
+
+        candidates = set()
+        for gy in range(gy0, gy1 + 1):
+            for gx in range(gx0, gx1 + 1):
+                bucket = grid.get((gx, gy))
+                if bucket:
+                    for bi in bucket:
+                        if bi != si:
+                            candidates.add(bi)
+
+        best_big = None
+        best_ratio = 0.0
+        best_big_area = None
+
+        for bi in candidates:
+            big = work[bi]
+            if not big["_alive"]:
+                continue
+            # Different colours only (your rule)
+            if int(big["color_id"]) == int(small["color_id"]):
+                continue
+
+            a_big = int(big.get("_mask_area", 0))
+            if a_big < a_small:
+                continue
+
+            ratio = _mask_overlap_ratio_small_in_big(
+                small_bbox=small["_mask_bbox"],
+                small_mask01=small["_mask01"],
+                small_area=a_small,
+                big_bbox=big["_mask_bbox"],
+                big_mask01=big["_mask01"],
+            )
+
+            if ratio < float(overlap_ratio_thr):
+                continue
+
+            # choose best by ratio, tie break by smallest big area (tighter containment)
+            if ratio > best_ratio:
+                best_ratio = ratio
+                best_big = big
+                best_big_area = a_big
+            elif ratio == best_ratio and best_big is not None:
+                if best_big_area is not None and a_big < best_big_area:
+                    best_big = big
+                    best_big_area = a_big
+
+        if best_big is None:
+            continue
+
+        # MERGE: small -> best_big
+        set_big = set(best_big["stroke_indexes"])
+        for sidx in small["stroke_indexes"]:
+            set_big.add(int(sidx))
+        best_big["stroke_indexes"] = sorted(set_big)
+
+        small["_alive"] = False
+
+    out = [c for c in work if c["_alive"]]
+    for c in out:
+        c.pop("_alive", None)
+        c.pop("_mask_bbox", None)
+        c.pop("_mask01", None)
+        c.pop("_mask_area", None)
+    return out
+
+
+
+# ============================
+# Main per-image pipeline
+# ============================
 # ============================
 # Main per-image pipeline
 # ============================
@@ -625,9 +1153,11 @@ def process_one(processed_img_path: Path) -> None:
         radius = SAMPLE_RADIUS_PX_LARGE if max(w_img, h_img) >= 1400 else SAMPLE_RADIUS_PX_SMALL
 
     # Precompute bbox + color_id per stroke
-    bboxes_img: List[Tuple[float,float,float,float]] = []
     color_ids_raw: List[Optional[int]] = []
     stroke_samples_px_cache: List[Optional[np.ndarray]] = []
+
+    bboxes_img_raw: List[Tuple[float, float, float, float]] = []
+    bboxes_img_pad: List[Tuple[float, float, float, float]] = []
 
     for s in strokes:
         if fmt == "bezier_cubic":
@@ -636,6 +1166,8 @@ def process_one(processed_img_path: Path) -> None:
         else:
             bb = _stroke_bbox_from_polyline(s)
             samples_json = _stroke_samples_json_from_polyline(s)
+
+        pts: Optional[np.ndarray] = None
 
         # Precompute stroke samples in IMAGE PIXELS (int) once for fast mask rendering
         if samples_json and len(samples_json) >= 2:
@@ -672,11 +1204,29 @@ def process_one(processed_img_path: Path) -> None:
         cid = _stroke_color_id_raw(s)
         color_ids_raw.append(cid)
 
-        if bb is None:
-            bboxes_img.append((0.0, 0.0, 0.0, 0.0))
+        if pts is not None and pts.shape[0] >= 2:
+            x0i = float(np.min(pts[:, 0]))
+            y0i = float(np.min(pts[:, 1]))
+            x1i = float(np.max(pts[:, 0]))
+            y1i = float(np.max(pts[:, 1]))
+            raw = (x0i, y0i, x1i, y1i)
         else:
-            x0, y0, x1, y1 = bb
-            bboxes_img.append((x0*scale_x, y0*scale_y, x1*scale_x, y1*scale_y))
+            # fallback: if no samples
+            if bb is None:
+                raw = (0.0, 0.0, 0.0, 0.0)
+            else:
+                x0, y0, x1, y1 = bb
+                raw = (float(x0 * scale_x), float(y0 * scale_y), float(x1 * scale_x), float(y1 * scale_y))
+            x0i, y0i, x1i, y1i = raw
+
+        w = max(1.0, x1i - x0i)
+        h = max(1.0, y1i - y0i)
+
+        pad = max(BBOX_PAD_MIN_PX, min(BBOX_PAD_MAX_PX, BBOX_PAD_FRAC * max(w, h)))
+        padbb = (x0i - pad, y0i - pad, x1i + pad, y1i + pad)
+
+        bboxes_img_raw.append(raw)
+        bboxes_img_pad.append(padbb)
 
     # normalize ids (0-based -> 1-based if needed)
     color_ids = _normalize_color_ids(color_ids_raw)
@@ -709,22 +1259,65 @@ def process_one(processed_img_path: Path) -> None:
         if isinstance(v, int):
             by_cid.setdefault(int(v), []).append(i)
 
+    # 1) Build raw clusters first (no rendering yet)
+    clusters_raw: List[Dict[str, Any]] = []
+
     for cid in range(1, 12):
         cname = _color_name_from_id(cid)
         idxs = by_cid.get(cid)
         if not idxs:
             continue
 
-        groups = _cluster_indices_by_bbox_proximity(
+        groups = _cluster_indices_by_polyline_proximity(
             idxs=idxs,
-            bboxes=bboxes_img,
+            bboxes=bboxes_img_raw,
+            stroke_pts=stroke_samples_px_cache,
             radius_px=float(GROUP_RADIUS_PX),
             grid_cell_px=float(GRID_CELL_PX),
         )
 
+        for g in groups:
+            bb = _cluster_bbox(bboxes_img_raw, g)
+            clusters_raw.append({
+                "color_id": int(cid),
+                "color_name": cname,
+                "stroke_indexes": [int(i) for i in g],
+                "bbox_raw": bb,
+            })
+
+    # 2) Cross-colour merge pass
+    if "ENABLE_CROSS_COLOR_CLUSTER_MERGE" in globals() and ENABLE_CROSS_COLOR_CLUSTER_MERGE:
+        overlap_thr = float(globals().get("CROSS_COLOR_OVERLAP_RATIO", 0.75))
+
+        # FAST merge that uses exact pixel overlap of stroke masks (NOT square bboxes)
+        clusters_raw = _merge_overlapping_clusters_across_colors_fast(
+            clusters=clusters_raw,
+            stroke_pts=stroke_samples_px_cache,
+            overlap_ratio_thr=overlap_thr,
+        )
+
+    # 3) Re-index clusters per colour AFTER merges
+    clusters_by_color: Dict[int, List[Dict[str, Any]]] = {}
+    for c in clusters_raw:
+        clusters_by_color.setdefault(int(c["color_id"]), []).append(c)
+
+    # 4) Render + output json entries
+    for cid in range(1, 12):
+        cname = _color_name_from_id(cid)
+        col_clusters = clusters_by_color.get(cid)
+        if not col_clusters:
+            continue
+
+        # stable ordering top-left
+        col_clusters.sort(key=lambda c: (c["bbox_raw"][0], c["bbox_raw"][1]))
+
         # group index WITHIN THIS COLOUR
-        for gi, g in enumerate(groups):
-            bb = _cluster_bbox(bboxes_img, g)
+        for gi, c in enumerate(col_clusters):
+            g = [int(i) for i in (c.get("stroke_indexes") or [])]
+            if not g:
+                continue
+
+            bb = _cluster_bbox(bboxes_img_raw, g)
             x0, y0, x1, y1 = bb
 
             x0p = max(0, int(math.floor(x0 - CLUSTER_CROP_PAD)))
@@ -746,7 +1339,8 @@ def process_one(processed_img_path: Path) -> None:
             Image.fromarray(full_with_box).save(bbox_path, compress_level=int(PNG_COMPRESS_LEVEL))
 
             # masked crop (new behavior)
-            crop_arr = _render_cluster_crop_keep_strokes_color(
+            # NOTE: crop uses padded bbox for the crop region (x0p..x1p etc)
+            crop_arr = _render_cluster_crop_keep_strokes_color_filled(
                 img_rgb=img_rgb,
                 x0p=int(x0p), y0p=int(y0p), x1p=int(x1p), y1p=int(y1p),
                 stroke_indices=[int(i) for i in g],
@@ -779,6 +1373,7 @@ def process_one(processed_img_path: Path) -> None:
     map_path.write_text(json.dumps(cluster_map, ensure_ascii=False, indent=2), encoding="utf-8")
 
     print(f"[ok] {processed_img_path.name}: strokes={len(strokes)} clusters={len(cluster_entries)} -> {map_path}")
+
 
 
 def main() -> None:

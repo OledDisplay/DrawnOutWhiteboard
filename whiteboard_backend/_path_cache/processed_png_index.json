@@ -1,16 +1,12 @@
 {
-  "created_utc": 1768432720.8978791,
-  "root": "C:\\Users\\marti\\Code\\DrawnOutWhiteboard\\whiteboard_backend\\ProccessedImages",
+  "created_utc": 1768730690.076942,
+  "root": "C:\\Users\\marti\\allFolder\\code\\DRAWNOUT\\whiteboard_backend\\ProccessedImages",
   "map": {
-    "0": "C:\\Users\\marti\\Code\\DrawnOutWhiteboard\\whiteboard_backend\\ProccessedImages\\processed_0.png",
-    "1": "C:\\Users\\marti\\Code\\DrawnOutWhiteboard\\whiteboard_backend\\ProccessedImages\\processed_1.png",
-    "2": "C:\\Users\\marti\\Code\\DrawnOutWhiteboard\\whiteboard_backend\\ProccessedImages\\processed_2.png",
-    "3": "C:\\Users\\marti\\Code\\DrawnOutWhiteboard\\whiteboard_backend\\ProccessedImages\\processed_3.png",
-    "4": "C:\\Users\\marti\\Code\\DrawnOutWhiteboard\\whiteboard_backend\\ProccessedImages\\processed_4.png",
-    "5": "C:\\Users\\marti\\Code\\DrawnOutWhiteboard\\whiteboard_backend\\ProccessedImages\\processed_5.png",
-    "6": "C:\\Users\\marti\\Code\\DrawnOutWhiteboard\\whiteboard_backend\\ProccessedImages\\processed_6.png",
-    "7": "C:\\Users\\marti\\Code\\DrawnOutWhiteboard\\whiteboard_backend\\ProccessedImages\\processed_7.png",
-    "8": "C:\\Users\\marti\\Code\\DrawnOutWhiteboard\\whiteboard_backend\\ProccessedImages\\processed_8.png",
-    "9": "C:\\Users\\marti\\Code\\DrawnOutWhiteboard\\whiteboard_backend\\ProccessedImages\\processed_9.png"
+    "0": "C:\\Users\\marti\\allFolder\\code\\DRAWNOUT\\whiteboard_backend\\ProccessedImages\\processed_0.png",
+    "1": "C:\\Users\\marti\\allFolder\\code\\DRAWNOUT\\whiteboard_backend\\ProccessedImages\\processed_1.png",
+    "2": "C:\\Users\\marti\\allFolder\\code\\DRAWNOUT\\whiteboard_backend\\ProccessedImages\\processed_2.png",
+    "3": "C:\\Users\\marti\\allFolder\\code\\DRAWNOUT\\whiteboard_backend\\ProccessedImages\\processed_3.png",
+    "4": "C:\\Users\\marti\\allFolder\\code\\DRAWNOUT\\whiteboard_backend\\ProccessedImages\\processed_4.png",
+    "5": "C:\\Users\\marti\\allFolder\\code\\DRAWNOUT\\whiteboard_backend\\ProccessedImages\\processed_5.png"
   }
 }

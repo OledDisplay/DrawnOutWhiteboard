@@ -50,7 +50,7 @@ BRANCH_W_LEN               = 0.5  # weight for length (subtracted)
 # junction continuation gating:
 #ONLY angle is used to decide if we stop at a junction;
 # curvature is NOT a hard gate here (corner splitting happens later).
-JUNC_CONTINUE_ANG_MAX      = 45.0   # deg – how much deflection we still accept
+JUNC_CONTINUE_ANG_MAX      = 60   # deg – how much deflection we still accept
 
 # per-stroke segmentation (corner detection) knobs
 CURV_WIN_RADIUS_SMALL      = 4      # half-window for local orientation smoothing
@@ -68,9 +68,9 @@ MIN_STROKE_POINTS          = 2      # drop only single-pixel "strokes"
 
 # merge-small-strokes knobs
 MERGE_SMALL_LEN_PERCENTILE = 75.0   # strokes below this length percentile are "small"
-MERGE_SMALL_LEN_MIN        = 65.0    # absolute minimum length (px) to consider "not tiny"
+MERGE_SMALL_LEN_MIN        = 65.0   # absolute minimum length (px) to consider "not tiny"
 MERGE_DIST_FRAC_DIAG       = 0.004  # relative distance gate vs image diagonal
-MERGE_DIST_MIN             = 2.0    # px
+MERGE_DIST_MIN             = 2   # px
 MERGE_DIST_MAX             = 10.0    # px
 MERGE_ANGLE_MAX            = 90.0  # deg – max angle at join to allow merge
 

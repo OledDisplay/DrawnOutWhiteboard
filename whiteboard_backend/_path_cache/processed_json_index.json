@@ -1,16 +1,12 @@
 {
-  "created_utc": 1768432720.8998828,
-  "root": "C:\\Users\\marti\\Code\\DrawnOutWhiteboard\\whiteboard_backend\\ProccessedImages",
+  "created_utc": 1768730690.0814617,
+  "root": "C:\\Users\\marti\\allFolder\\code\\DRAWNOUT\\whiteboard_backend\\ProccessedImages",
   "map": {
-    "0": "C:\\Users\\marti\\Code\\DrawnOutWhiteboard\\whiteboard_backend\\ProccessedImages\\processed_0.json",
-    "1": "C:\\Users\\marti\\Code\\DrawnOutWhiteboard\\whiteboard_backend\\ProccessedImages\\processed_1.json",
-    "2": "C:\\Users\\marti\\Code\\DrawnOutWhiteboard\\whiteboard_backend\\ProccessedImages\\processed_2.json",
-    "3": "C:\\Users\\marti\\Code\\DrawnOutWhiteboard\\whiteboard_backend\\ProccessedImages\\processed_3.json",
-    "4": "C:\\Users\\marti\\Code\\DrawnOutWhiteboard\\whiteboard_backend\\ProccessedImages\\processed_4.json",
-    "5": "C:\\Users\\marti\\Code\\DrawnOutWhiteboard\\whiteboard_backend\\ProccessedImages\\processed_5.json",
-    "6": "C:\\Users\\marti\\Code\\DrawnOutWhiteboard\\whiteboard_backend\\ProccessedImages\\processed_6.json",
-    "7": "C:\\Users\\marti\\Code\\DrawnOutWhiteboard\\whiteboard_backend\\ProccessedImages\\processed_7.json",
-    "8": "C:\\Users\\marti\\Code\\DrawnOutWhiteboard\\whiteboard_backend\\ProccessedImages\\processed_8.json",
-    "9": "C:\\Users\\marti\\Code\\DrawnOutWhiteboard\\whiteboard_backend\\ProccessedImages\\processed_9.json"
+    "0": "C:\\Users\\marti\\allFolder\\code\\DRAWNOUT\\whiteboard_backend\\ProccessedImages\\processed_0.json",
+    "1": "C:\\Users\\marti\\allFolder\\code\\DRAWNOUT\\whiteboard_backend\\ProccessedImages\\processed_1.json",
+    "2": "C:\\Users\\marti\\allFolder\\code\\DRAWNOUT\\whiteboard_backend\\ProccessedImages\\processed_2.json",
+    "3": "C:\\Users\\marti\\allFolder\\code\\DRAWNOUT\\whiteboard_backend\\ProccessedImages\\processed_3.json",
+    "4": "C:\\Users\\marti\\allFolder\\code\\DRAWNOUT\\whiteboard_backend\\ProccessedImages\\processed_4.json",
+    "5": "C:\\Users\\marti\\allFolder\\code\\DRAWNOUT\\whiteboard_backend\\ProccessedImages\\processed_5.json"
   }
 }

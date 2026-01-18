@@ -34,7 +34,7 @@ PROCESSED_DIR = BASE_DIR / "ProccessedImages"
 CLUSTER_RENDER_DIR = BASE_DIR / "ClusterRenders"
 CLUSTER_MAP_DIR = BASE_DIR / "ClusterMaps"
 
-OUT_DIR = BASE_DIR / "SmolVLM2Labels"
+OUT_DIR = BASE_DIR / "ClustersLabeled"
 CACHE_DIR = BASE_DIR / "_path_cache"
 CACHE_DIR.mkdir(parents=True, exist_ok=True)
 IMG_CACHE_PATH = CACHE_DIR / "processed_png_index.json"
@@ -127,9 +127,9 @@ def _clean_word(w: str) -> Optional[str]:
 # ============================
 # DISCOVERY / INDEXING
 # ============================
-_FULL_IMG_RE = re.compile(r"^(?:proccessed|processed)_(\d+)\.png$", re.IGNORECASE)
-_FULL_JSON_RE = re.compile(r"^(?:proccessed|processed)_(\d+)\.json$", re.IGNORECASE)
-_CLUSTER_DIR_RE = re.compile(r"^processed_(\d+)$", re.IGNORECASE)
+_FULL_IMG_RE = re.compile(r"processed_(\d+)\.png$", re.IGNORECASE)
+_FULL_JSON_RE = re.compile(r"processed_(\d+)\.json$", re.IGNORECASE)
+_CLUSTER_DIR_RE = re.compile(r"processed_(\d+)$", re.IGNORECASE)
 
 def find_indices_from_cluster_maps() -> List[int]:
     out: List[int] = []
@@ -203,21 +203,75 @@ def _build_processed_index(regex: re.Pattern, suffix_hint: str) -> Dict[str, str
     print(f"[scan] {suffix_hint} index built: entries={len(mapping)} files_seen={seen} ({time.time()-t0:.1f}s)")
     return mapping
 
-def ensure_indexes() -> Tuple[Dict[str, str], Dict[str, str]]:
-    img_map = _load_cache(IMG_CACHE_PATH)
-    json_map = _load_cache(JSON_CACHE_PATH)
+def _load_cache(path: Path) -> tuple[dict[str, str], dict[str, Any]]:
+    """
+    Returns (map, meta). meta may contain 'root', 'created_utc', etc.
+    """
+    if not path.exists():
+        return {}, {}
+    try:
+        obj = json.loads(path.read_text(encoding="utf-8"))
+        if isinstance(obj, dict) and isinstance(obj.get("map"), dict):
+            m = {str(k): str(v) for k, v in obj["map"].items()}
+            return m, obj
+    except Exception:
+        pass
+    return {}, {}
 
-    if not img_map:
-        print("[scan] building PNG index cache (first run only)...")
+
+def _prune_missing_files(mapping: dict[str, str], *, must_be_file: bool = True) -> dict[str, str]:
+    out: dict[str, str] = {}
+    for k, v in mapping.items():
+        p = Path(v)
+        try:
+            if must_be_file:
+                if p.is_file():
+                    out[k] = v
+            else:
+                if p.exists():
+                    out[k] = v
+        except Exception:
+            # Path() can throw on weird Windows path edge cases; treat as invalid.
+            pass
+    return out
+
+
+def ensure_indexes() -> tuple[dict[str, str], dict[str, str]]:
+    # Load (map, meta)
+    img_map, img_meta = _load_cache(IMG_CACHE_PATH)
+    json_map, json_meta = _load_cache(JSON_CACHE_PATH)
+
+    # If cache was built for a different root, rebuild (prevents stale-project issues)
+    cur_root = str(PROCESSED_DIR.resolve())
+    img_root = str(img_meta.get("root", ""))
+    json_root = str(json_meta.get("root", ""))
+
+    # Prune missing entries first (cheap)
+    if img_map:
+        img_map = _prune_missing_files(img_map, must_be_file=True)
+    if json_map:
+        json_map = _prune_missing_files(json_map, must_be_file=True)
+
+    # Rebuild conditions
+    def need_rebuild(map_now: dict[str, str], root_now: str) -> bool:
+        if not map_now:
+            return True
+        if root_now and (Path(root_now).resolve().as_posix() != Path(cur_root).resolve().as_posix()):
+            return True
+        return False
+
+    if need_rebuild(img_map, img_root):
+        print("[scan] rebuilding PNG index cache...")
         img_map = _build_processed_index(_FULL_IMG_RE, "png")
         _save_cache(IMG_CACHE_PATH, img_map)
 
-    if not json_map:
-        print("[scan] building JSON index cache (first run only)...")
+    if need_rebuild(json_map, json_root):
+        print("[scan] rebuilding JSON index cache...")
         json_map = _build_processed_index(_FULL_JSON_RE, "json")
         _save_cache(JSON_CACHE_PATH, json_map)
 
     return img_map, json_map
+
 
 def load_candidate_labels(idx: int, json_index: Dict[str, str]) -> List[str]:
     p = json_index.get(str(idx))
