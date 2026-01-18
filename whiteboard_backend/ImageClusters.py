@@ -63,28 +63,17 @@ CLUSTER_CROP_PAD = 8
 
 # stroke keep-color padding around skeleton line (pixels)
 STROKE_SKELETON_PAD_PX = 3
-# --- SPEED KNOBS ---
-# If False: skips the expensive per-stroke color sampling and does NOT rewrite vectors json.
-ENABLE_STROKE_COLOR_SAMPLING = False
 
 # Faster PNG writes (lower compression = much faster I/O)
 PNG_COMPRESS_LEVEL = 1
 
-
 # ============================
-# COLOR ASSIGNING
+# THICKENED / PADDED BBOXES (per-stroke -> per-cluster)
 # ============================
-SAMPLE_RADIUS_PX_SMALL = 1
-SAMPLE_RADIUS_PX_LARGE = 2
-MIN_CONTRIB_PIXELS_PER_STROKE = 60
-
-# Color bit-shift quantization (RESTORED)
-# (r>>4,g>>4,b>>4) => 16x16x16 bins
-RGB_Q_SHIFT = 10
-
 BBOX_PAD_FRAC = 0.06   # 6% of bbox size
-BBOX_PAD_MIN_PX = 4
+BBOX_PAD_MIN_PX = 5
 BBOX_PAD_MAX_PX = 15
+
 
 # ============================
 # CROSS-COLOUR CLUSTER MERGE
@@ -94,8 +83,6 @@ ENABLE_CROSS_COLOR_CLUSTER_MERGE = True
 # overlap ratio = intersection_area / area_of_smaller_cluster_bbox
 CROSS_COLOR_OVERLAP_RATIO = 0.70  # "high %" overlap
 
-# only merge if also within distance threshold (same as grouping)
-CROSS_COLOR_DISTANCE_PX = GROUP_RADIUS_PX
 
 # ============================
 # FILLED WRAP MASK FOR OUTPUT CROPS
@@ -111,6 +98,7 @@ WRAP_TIGHTEN_PX = 2
 
 # Pixel thickness used when rasterizing stroke lines into the initial mask
 WRAP_STROKE_THICKNESS = 1
+
 
 # ============================
 # OVERLAP MASK FOR MERGING (EXACT PIXEL OVERLAP OF STROKES)
@@ -187,6 +175,7 @@ def _load_rgb_image(path: Path) -> np.ndarray:
 def _save_png_rgb(arr_rgb: np.ndarray, path: Path) -> None:
     Image.fromarray(arr_rgb).save(path, compress_level=int(PNG_COMPRESS_LEVEL))
 
+
 # ============================
 # Full-image render helper
 # ============================
@@ -224,7 +213,6 @@ def _render_full_with_red_bbox(img_rgb: np.ndarray, bbox_xyxy: List[int], thickn
     return out
 
 
-
 # ============================
 # Geometry
 # ============================
@@ -258,7 +246,6 @@ def _cluster_bbox(bboxes: List[Tuple[float,float,float,float]], idxs: List[int])
 def _bbox_area(bb: Tuple[float, float, float, float]) -> float:
     x0, y0, x1, y1 = bb
     return max(0.0, x1 - x0) * max(0.0, y1 - y0)
-
 
 
 # ============================
@@ -327,6 +314,56 @@ def _color_name_from_id(cid_1based: int) -> str:
     if 1 <= cid_1based <= len(COLOR_ORDER_LIGHT_TO_DARK):
         return COLOR_ORDER_LIGHT_TO_DARK[cid_1based - 1]
     return "unknown"
+
+
+def _eval_cubic(p0, c1, c2, p1, t: float) -> Tuple[float, float]:
+    mt = 1.0 - t
+    mt2 = mt * mt
+    t2 = t * t
+    x = (mt2 * mt) * p0[0] + 3 * (mt2 * t) * c1[0] + 3 * (mt * t2) * c2[0] + (t2 * t) * p1[0]
+    y = (mt2 * mt) * p0[1] + 3 * (mt2 * t) * c1[1] + 3 * (mt * t2) * c2[1] + (t2 * t) * p1[1]
+    return x, y
+
+def _stroke_samples_json_from_beziers(stroke: Dict[str, Any]) -> List[Tuple[float, float]]:
+    segs = stroke.get("segments") or []
+    if not isinstance(segs, list) or not segs:
+        return []
+
+    pts: List[Tuple[float, float]] = []
+    steps = 18
+
+    last = None
+    for seg in segs:
+        if not isinstance(seg, list) or len(seg) < 8:
+            continue
+        p0 = (float(seg[0]), float(seg[1]))
+        c1 = (float(seg[2]), float(seg[3]))
+        c2 = (float(seg[4]), float(seg[5]))
+        p1 = (float(seg[6]), float(seg[7]))
+
+        for i in range(steps + 1):
+            t = i / steps
+            x, y = _eval_cubic(p0, c1, c2, p1, t)
+            if last is not None and (abs(x - last[0]) + abs(y - last[1]) < 0.05):
+                continue
+            pts.append((x, y))
+            last = (x, y)
+
+    return pts
+
+def _stroke_samples_json_from_polyline(stroke: Dict[str, Any]) -> List[Tuple[float, float]]:
+    pts = stroke.get("points") or []
+    if not isinstance(pts, list) or len(pts) < 2:
+        return []
+    out: List[Tuple[float, float]] = []
+    for p in pts:
+        if isinstance(p, list) and len(p) >= 2:
+            out.append((float(p[0]), float(p[1])))
+    if len(out) < 2:
+        return []
+    step = max(1, len(out) // 80)
+    return out[::step]
+
 
 #POLYLINE COMP LOGIC
 def _min_pointset_d2(a: np.ndarray, b: np.ndarray) -> float:
@@ -397,171 +434,6 @@ def _polyline_min_distance_d2(a: np.ndarray, b: np.ndarray) -> float:
     d2_1 = _min_points_to_polyline_d2(a, b)
     d2_2 = _min_points_to_polyline_d2(b, a)
     return float(min(d2_1, d2_2))
-
-
-
-# ============================
-# Color helpers
-# ============================
-def _clamp(v: float, lo: float, hi: float) -> float:
-    return max(lo, min(hi, v))
-
-def _estimate_background_rgb(img_rgb: np.ndarray) -> Tuple[int, int, int]:
-    h, w, _ = img_rgb.shape
-    patch = max(10, min(40, min(h, w) // 20))
-    corners = np.concatenate([
-        img_rgb[0:patch, 0:patch].reshape(-1, 3),
-        img_rgb[0:patch, w-patch:w].reshape(-1, 3),
-        img_rgb[h-patch:h, 0:patch].reshape(-1, 3),
-        img_rgb[h-patch:h, w-patch:w].reshape(-1, 3),
-    ], axis=0)
-    med = np.median(corners, axis=0)
-    return (int(med[0]), int(med[1]), int(med[2]))
-
-def _rgb_to_lab_u8(img_rgb: np.ndarray) -> np.ndarray:
-    return cv2.cvtColor(img_rgb, cv2.COLOR_RGB2LAB)
-
-def _lab_of_rgb(rgb: Tuple[int, int, int]) -> Tuple[float, float, float]:
-    arr = np.array([[list(rgb)]], dtype=np.uint8)
-    lab = cv2.cvtColor(arr, cv2.COLOR_RGB2LAB)[0, 0]
-    return (float(lab[0]), float(lab[1]), float(lab[2]))
-
-def _delta_e_lab(lab_img_u8: np.ndarray, lab_bg: Tuple[float, float, float]) -> np.ndarray:
-    dl = lab_img_u8[..., 0].astype(np.float32) - lab_bg[0]
-    da = lab_img_u8[..., 1].astype(np.float32) - lab_bg[1]
-    db = lab_img_u8[..., 2].astype(np.float32) - lab_bg[2]
-    return np.sqrt(dl*dl + da*da + db*db)
-
-def _otsu_threshold_deltae(deltae: np.ndarray) -> float:
-    d = np.clip(deltae, 0.0, 60.0)
-    u8 = (d * (255.0 / 60.0)).astype(np.uint8)
-    thr_u8, _ = cv2.threshold(u8, 0, 255, cv2.THRESH_BINARY + cv2.THRESH_OTSU)
-    thr_de = thr_u8 * (60.0 / 255.0)
-    thr_de = max(6.0, min(26.0, thr_de * 0.85))
-    return float(thr_de)
-
-def _quant_key(rgb: np.ndarray) -> np.ndarray:
-    r = (rgb[..., 0] >> RGB_Q_SHIFT).astype(np.int32)
-    g = (rgb[..., 1] >> RGB_Q_SHIFT).astype(np.int32)
-    b = (rgb[..., 2] >> RGB_Q_SHIFT).astype(np.int32)
-    return (r << 8) | (g << 4) | b  # 12-bit key
-
-def _eval_cubic(p0, c1, c2, p1, t: float) -> Tuple[float, float]:
-    mt = 1.0 - t
-    mt2 = mt * mt
-    t2 = t * t
-    x = (mt2 * mt) * p0[0] + 3 * (mt2 * t) * c1[0] + 3 * (mt * t2) * c2[0] + (t2 * t) * p1[0]
-    y = (mt2 * mt) * p0[1] + 3 * (mt2 * t) * c1[1] + 3 * (mt * t2) * c2[1] + (t2 * t) * p1[1]
-    return x, y
-
-def _stroke_samples_json_from_beziers(stroke: Dict[str, Any]) -> List[Tuple[float, float]]:
-    segs = stroke.get("segments") or []
-    if not isinstance(segs, list) or not segs:
-        return []
-
-    pts: List[Tuple[float, float]] = []
-    steps = 18
-
-    last = None
-    for seg in segs:
-        if not isinstance(seg, list) or len(seg) < 8:
-            continue
-        p0 = (float(seg[0]), float(seg[1]))
-        c1 = (float(seg[2]), float(seg[3]))
-        c2 = (float(seg[4]), float(seg[5]))
-        p1 = (float(seg[6]), float(seg[7]))
-
-        for i in range(steps + 1):
-            t = i / steps
-            x, y = _eval_cubic(p0, c1, c2, p1, t)
-            if last is not None and (abs(x - last[0]) + abs(y - last[1]) < 0.05):
-                continue
-            pts.append((x, y))
-            last = (x, y)
-
-    return pts
-
-def _stroke_samples_json_from_polyline(stroke: Dict[str, Any]) -> List[Tuple[float, float]]:
-    pts = stroke.get("points") or []
-    if not isinstance(pts, list) or len(pts) < 2:
-        return []
-    out: List[Tuple[float, float]] = []
-    for p in pts:
-        if isinstance(p, list) and len(p) >= 2:
-            out.append((float(p[0]), float(p[1])))
-    if len(out) < 2:
-        return []
-    step = max(1, len(out) // 80)
-    return out[::step]
-
-def _estimate_stroke_color(
-    img_rgb: np.ndarray,
-    img_lab: np.ndarray,
-    bg_lab: Tuple[float, float, float],
-    deltae_thr: float,
-    stroke_samples_json: List[Tuple[float, float]],
-    scale_x: float,
-    scale_y: float,
-    radius: int,
-) -> Tuple[Tuple[int, int, int], float, int]:
-    h, w, _ = img_rgb.shape
-    if not stroke_samples_json:
-        return (0, 0, 0), 0.0, 0
-
-    counts: Dict[int, int] = {}
-    sums: Dict[int, np.ndarray] = {}
-    contrib = 0
-    sampled = 0
-
-    for (xj, yj) in stroke_samples_json:
-        x = int(round(xj * scale_x))
-        y = int(round(yj * scale_y))
-        if x < 0 or y < 0 or x >= w or y >= h:
-            continue
-        sampled += 1
-
-        x0 = max(0, x - radius)
-        x1 = min(w, x + radius + 1)
-        y0 = max(0, y - radius)
-        y1 = min(h, y + radius + 1)
-
-        patch_rgb = img_rgb[y0:y1, x0:x1]
-        patch_lab = img_lab[y0:y1, x0:x1]
-
-        de = _delta_e_lab(patch_lab, bg_lab)
-        mask = de >= float(deltae_thr)
-        if not np.any(mask):
-            continue
-
-        pix = patch_rgb[mask]
-        if pix.size == 0:
-            continue
-
-        keys = _quant_key(pix.reshape(-1, 3))
-        for k, rgbpix in zip(keys.tolist(), pix.reshape(-1, 3)):
-            counts[k] = counts.get(k, 0) + 1
-            if k not in sums:
-                sums[k] = rgbpix.astype(np.int64).copy()
-            else:
-                sums[k] += rgbpix.astype(np.int64)
-        contrib += int(pix.shape[0])
-
-    if not counts:
-        return (0, 0, 0), 0.0, 0
-
-    best_k = max(counts.keys(), key=lambda k: counts[k])
-    c = counts[best_k]
-    mean_rgb = (sums[best_k] / max(1, c)).astype(np.int64)
-    rgb = (int(mean_rgb[0]), int(mean_rgb[1]), int(mean_rgb[2]))
-
-    denom = max(1, sampled * ((2 * radius + 1) * (2 * radius + 1)))
-    conf = _clamp(contrib / denom, 0.0, 1.0)
-
-    return rgb, float(conf), int(contrib)
-
-
-
-
 
 
 # ============================
@@ -652,76 +524,6 @@ def _cluster_indices_by_polyline_proximity(
 
     out = list(groups.values())
     out.sort(key=lambda g: (min(bboxes[i][0] for i in g), min(bboxes[i][1] for i in g)))
-    return out
-
-
-def _render_cluster_crop_keep_strokes_color(
-    img_rgb: np.ndarray,
-    x0p: int,
-    y0p: int,
-    x1p: int,
-    y1p: int,
-    stroke_indices: List[int],
-    stroke_samples_px_cache: List[Optional[np.ndarray]],
-    pad_px: int,
-) -> np.ndarray:
-    """
-    Returns an RGB crop where pixels within (skeleton line dilated by pad_px)
-    remain in original color, and everything else is grayscaled.
-    """
-    crop_rgb = img_rgb[y0p:y1p, x0p:x1p]
-    ch, cw, _ = crop_rgb.shape
-    if ch <= 0 or cw <= 0:
-        return crop_rgb
-
-    mask = np.zeros((ch, cw), dtype=np.uint8)
-
-    # Draw skeletons using precomputed pixel coords; use polylines to reduce overhead
-    extra = int(pad_px) + 2
-    min_x = x0p - extra
-    max_x = x1p + extra
-    min_y = y0p - extra
-    max_y = y1p + extra
-
-    for si in stroke_indices:
-        if si < 0 or si >= len(stroke_samples_px_cache):
-            continue
-        pts_img = stroke_samples_px_cache[si]
-        if pts_img is None or pts_img.shape[0] < 2:
-            continue
-
-        # Keep points that are near this crop
-        x = pts_img[:, 0]
-        y = pts_img[:, 1]
-        keep = (x >= min_x) & (x < max_x) & (y >= min_y) & (y < max_y)
-        if not np.any(keep):
-            continue
-
-        pts = pts_img[keep].copy()
-        pts[:, 0] -= int(x0p)
-        pts[:, 1] -= int(y0p)
-
-        # Clip to crop bounds to avoid cv2 issues
-        pts[:, 0] = np.clip(pts[:, 0], 0, cw - 1)
-        pts[:, 1] = np.clip(pts[:, 1], 0, ch - 1)
-
-        cv2.polylines(mask, [pts.reshape(-1, 1, 2)], isClosed=False, color=255, thickness=1, lineType=cv2.LINE_8)
-
-    if not np.any(mask):
-        # If something went wrong, keep original crop rather than outputting all gray.
-        return crop_rgb
-
-    # Expand outward from skeleton by pad_px
-    if pad_px > 0:
-        k = 2 * int(pad_px) + 1
-        kernel = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (k, k))
-        mask = cv2.dilate(mask, kernel, iterations=1)
-
-    # Grayscale background
-    gray = cv2.cvtColor(crop_rgb, cv2.COLOR_RGB2GRAY)
-    gray3 = np.repeat(gray[..., None], 3, axis=2)
-
-    out = np.where(mask[..., None] > 0, crop_rgb, gray3).astype(np.uint8)
     return out
 
 
@@ -1103,10 +905,6 @@ def _merge_overlapping_clusters_across_colors_fast(
     return out
 
 
-
-# ============================
-# Main per-image pipeline
-# ============================
 # ============================
 # Main per-image pipeline
 # ============================
@@ -1143,15 +941,6 @@ def process_one(processed_img_path: Path) -> None:
     scale_x = (w_img / src_w) if src_w > 0 else 1.0
     scale_y = (h_img / src_h) if src_h > 0 else 1.0
 
-    # --------- RESTORED: assign per-stroke color_rgb/hex/conf/contrib (not used for grouping) ---------
-    # This is the slow part. Default OFF via ENABLE_STROKE_COLOR_SAMPLING.
-    if ENABLE_STROKE_COLOR_SAMPLING:
-        bg_rgb = _estimate_background_rgb(img_rgb)
-        img_lab = _rgb_to_lab_u8(img_rgb)
-        bg_lab = _lab_of_rgb(bg_rgb)
-        deltae_thr = _otsu_threshold_deltae(_delta_e_lab(img_lab, bg_lab))
-        radius = SAMPLE_RADIUS_PX_LARGE if max(w_img, h_img) >= 1400 else SAMPLE_RADIUS_PX_SMALL
-
     # Precompute bbox + color_id per stroke
     color_ids_raw: List[Optional[int]] = []
     stroke_samples_px_cache: List[Optional[np.ndarray]] = []
@@ -1184,23 +973,6 @@ def process_one(processed_img_path: Path) -> None:
         else:
             stroke_samples_px_cache.append(None)
 
-        # assign stored color (sampling)
-        if ENABLE_STROKE_COLOR_SAMPLING:
-            rgb, conf, contrib = _estimate_stroke_color(
-                img_rgb=img_rgb,
-                img_lab=img_lab,
-                bg_lab=bg_lab,
-                deltae_thr=deltae_thr,
-                stroke_samples_json=samples_json,
-                scale_x=scale_x,
-                scale_y=scale_y,
-                radius=int(radius),
-            )
-            s["color_rgb"] = [int(rgb[0]), int(rgb[1]), int(rgb[2])]
-            s["color_hex"] = "#{:02x}{:02x}{:02x}".format(int(rgb[0]), int(rgb[1]), int(rgb[2]))
-            s["color_conf"] = float(round(float(conf), 4))
-            s["color_contrib_pixels"] = int(contrib)
-
         cid = _stroke_color_id_raw(s)
         color_ids_raw.append(cid)
 
@@ -1217,15 +989,15 @@ def process_one(processed_img_path: Path) -> None:
             else:
                 x0, y0, x1, y1 = bb
                 raw = (float(x0 * scale_x), float(y0 * scale_y), float(x1 * scale_x), float(y1 * scale_y))
-            x0i, y0i, x1i, y1i = raw
-
-        w = max(1.0, x1i - x0i)
-        h = max(1.0, y1i - y0i)
-
-        pad = max(BBOX_PAD_MIN_PX, min(BBOX_PAD_MAX_PX, BBOX_PAD_FRAC * max(w, h)))
-        padbb = (x0i - pad, y0i - pad, x1i + pad, y1i + pad)
 
         bboxes_img_raw.append(raw)
+
+        # --- thickened bbox (per-stroke) ---
+        x0i, y0i, x1i, y1i = raw
+        w = max(1.0, x1i - x0i)
+        h = max(1.0, y1i - y0i)
+        pad = max(BBOX_PAD_MIN_PX, min(BBOX_PAD_MAX_PX, BBOX_PAD_FRAC * max(w, h)))
+        padbb = (x0i - pad, y0i - pad, x1i + pad, y1i + pad)
         bboxes_img_pad.append(padbb)
 
     # normalize ids (0-based -> 1-based if needed)
@@ -1237,18 +1009,6 @@ def process_one(processed_img_path: Path) -> None:
             s["color_id"] = int(cid)
             if not isinstance(s.get("color_name"), str) or not s.get("color_name").strip():
                 s["color_name"] = _color_name_from_id(int(cid))
-
-    # persist stroke updates
-    if ENABLE_STROKE_COLOR_SAMPLING:
-        # write color sampling params back (kept simple)
-        data["stroke_color_sampling"] = {
-            "bg_rgb": list(bg_rgb),
-            "deltae_threshold": float(round(float(deltae_thr), 3)),
-            "radius_px": int(radius),
-            "rgb_quant_shift": int(RGB_Q_SHIFT),
-        }
-        data["strokes"] = strokes
-        vectors_path.write_text(json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8")
 
     # --------- grouping strictly by color_id (no reassigning) ---------
     cluster_entries: List[Dict[str, Any]] = []
@@ -1317,8 +1077,9 @@ def process_one(processed_img_path: Path) -> None:
             if not g:
                 continue
 
-            bb = _cluster_bbox(bboxes_img_raw, g)
-            x0, y0, x1, y1 = bb
+            # use PADDED bbox for output crops (thickened bbox logic)
+            bb_pad = _cluster_bbox(bboxes_img_pad, g)
+            x0, y0, x1, y1 = bb_pad
 
             x0p = max(0, int(math.floor(x0 - CLUSTER_CROP_PAD)))
             y0p = max(0, int(math.floor(y0 - CLUSTER_CROP_PAD)))
@@ -1339,7 +1100,6 @@ def process_one(processed_img_path: Path) -> None:
             Image.fromarray(full_with_box).save(bbox_path, compress_level=int(PNG_COMPRESS_LEVEL))
 
             # masked crop (new behavior)
-            # NOTE: crop uses padded bbox for the crop region (x0p..x1p etc)
             crop_arr = _render_cluster_crop_keep_strokes_color_filled(
                 img_rgb=img_rgb,
                 x0p=int(x0p), y0p=int(y0p), x1p=int(x1p), y1p=int(y1p),
@@ -1373,7 +1133,6 @@ def process_one(processed_img_path: Path) -> None:
     map_path.write_text(json.dumps(cluster_map, ensure_ascii=False, indent=2), encoding="utf-8")
 
     print(f"[ok] {processed_img_path.name}: strokes={len(strokes)} clusters={len(cluster_entries)} -> {map_path}")
-
 
 
 def main() -> None:
