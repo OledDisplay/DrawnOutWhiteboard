@@ -38,7 +38,7 @@ OUT_DIR = BASE / "Skeletonized"       # output: skeleton PNGs (mirrors bundle st
 PEN_WIDTH = 3.0              # try 2.0 or 3.0 like you said
 
 # Small noise kill before everything
-MIN_COMPONENT_AREA = 5      # drop tiny blobs before skeletonizing
+MIN_COMPONENT_AREA = 3      # drop tiny blobs before skeletonizing
 
 # Half-width classification tolerance:
 # if max distance in a component <= PEN_WIDTH + WIDTH_EPS → treat as thin stroke

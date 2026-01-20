@@ -34,6 +34,7 @@ WORD_SET = set(w.lower() for w in nltk_words.words())
 # -----------------------------
 # USER SETTINGS (as provided)
 # -----------------------------
+
 OCR_LANG = "en"
 OCR_VERSION = "PP-OCRv5"
 DEVICE = "gpu:0"
@@ -81,6 +82,7 @@ CC_MIN_AREA_FRAC = 0.0008
 CC_MAX_AREA_FRAC = 0.40
 
 
+METADATA_CORE_PATH = Path(__file__).resolve().parent / "image_metadata_core.json"
 
 
 def is_valid_dictionary_word(
@@ -137,13 +139,12 @@ def is_valid_dictionary_word(
 # -----------------------------
 # MASKING
 # -----------------------------
-# User request: remove "very smart masking" => no inpaint, just white fill
 WHITE_PAD_PX = 2  # expand bbox slightly before filling
 
 SAVE_DEBUG = False
 
 # -----------------------------
-# LOADING LOGIC (DO NOT MODIFY)
+# LOADING LOGIC
 # -----------------------------
 def load_image_cv_unchanged(path: str | Path) -> np.ndarray:
     """
@@ -192,6 +193,38 @@ def load_image_cv_unchanged(path: str | Path) -> np.ndarray:
 
     return img_fallback.astype(np.uint8)
 
+def _norm_path(p: str | Path) -> str:
+    return os.path.normcase(os.path.normpath(str(p)))
+
+def load_base_context_map() -> dict[str, str]:
+    if not METADATA_CORE_PATH.exists():
+        print(f"[WARN] Missing metadata json: {METADATA_CORE_PATH}")
+        return {}
+
+    data = json.loads(METADATA_CORE_PATH.read_text(encoding="utf-8"))
+
+    out: dict[str, str] = {}
+    for img_path, entries in (data or {}).items():
+        if not isinstance(entries, list) or not entries:
+            continue
+
+        first = entries[0]
+        if not isinstance(first, dict):
+            continue
+
+        bc = str(first.get("base_context", "") or "").strip()
+        if not bc:
+            continue
+
+        # normalized full-path key
+        full_norm = _norm_path(img_path)
+        out[full_norm] = bc
+
+        # filename fallback key
+        out[os.path.basename(full_norm).lower()] = bc
+
+    print(f"[META] loaded base_context entries: {len(out)}")
+    return out
 
 # -----------------------------
 # DATA STRUCTURES
@@ -778,6 +811,9 @@ def nms_rectangles(
 def process_all_images():
     ocr = create_paddle_ocr()
 
+    base_context_map = load_base_context_map()
+
+
     if USE_TESSERACT_LAYER2:
         # Force import early so you fail fast if it's missing
         _tess_import()
@@ -841,8 +877,12 @@ def process_all_images():
             out_json = OUTPUT_DIR / f"processed_{index}.json"
             cv2.imwrite(str(out_img), masked_bgr)
 
+            base_context = base_context_map.get(_norm_path(p), "")
+
+
             payload = {
                 "source_path": str(p),
+                "base_context": base_context,   # <<< ADD THIS
                 "image_size": [int(img_bgr.shape[1]), int(img_bgr.shape[0])],
                 "ocr_preprocess": {"border_pad": OCR_BORDER_PAD, "scale": OCR_SCALE},
                 "layer2": {
@@ -853,6 +893,7 @@ def process_all_images():
                 },
                 "words": refined_words,
             }
+
             out_json.write_text(json.dumps(payload, indent=2, ensure_ascii=False), encoding="utf-8")
 
             if SAVE_DEBUG:

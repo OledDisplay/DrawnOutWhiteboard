@@ -2943,14 +2943,14 @@ def research(query: str, subj: str):
             web_sources.append(src)
 
     # DDG: CC-backed images with per-image context
-    ddg_cc_image_harvest(
-        query=query,
-        target_count=20,
-        lemma_obj=lemma_obj_query,
-        encoder=encoder,
-        query_embedding=query_embedding,
-        base_ctx_embedding=base_ctx_embedding,
-    )
+    #ddg_cc_image_harvest(
+    #    query=query,
+    #    target_count=20,
+    #    lemma_obj=lemma_obj_query,
+    #    encoder=encoder,
+    #    query_embedding=query_embedding,
+    #    base_ctx_embedding=base_ctx_embedding,
+    #)
 
     for src in web_sources:
         dbg(f"opened source {src.name}, has no api, starting process..")

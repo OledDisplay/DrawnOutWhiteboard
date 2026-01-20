@@ -14,15 +14,15 @@ import numpy as np
 #RAISE DELETE RATIO
 
 # ------------------- MERGE THRESHOLDS -------------------
-INTERSECT_ABS_MAX = 10         # pixels
-INTERSECT_RATIO_MAX = 0.2     # overlap / smaller_pixels
+INTERSECT_ABS_MAX = 20    # pixels
+INTERSECT_RATIO_MAX = 0.25     # overlap / smaller_pixels
 
-DELETE_RATIO = 0.30        # overlap / smaller_pixels
-DELETE_REMAIN_MAX_PIX = 5       # allow tiny poke-out, still delete
+DELETE_RATIO = 0.45  # overlap / smaller_pixels
+DELETE_REMAIN_MAX_PIX = 5  # allow tiny poke-out, still delete
 
-CUT_RATIO_MIN = 0.35          # overlap / smaller_pixels
+CUT_RATIO_MIN = 0.20      # overlap / smaller_pixels
 
-MIN_STROKE_PIXELS = 3
+MIN_STROKE_PIXELS = 5
 
 TILE_SIZE = 64
 
@@ -33,7 +33,7 @@ TILE_SIZE = 64
 #  - MATCH: used to MEASURE overlap (detect duplicates even if offset by few px)
 #  - CUT:   used when SUBTRACTING pixels (to avoid shaving fine details)
 OVERLAP_TOL_MATCH = 4
-OVERLAP_TOL_CUT   = 4
+OVERLAP_TOL_CUT   = 0
 
 # bbox pad should cover the bigger of the two tolerances
 BBOX_PAD = max(OVERLAP_TOL_MATCH, OVERLAP_TOL_CUT) + 2
@@ -432,6 +432,7 @@ class PolyRec:
     bbox: Tuple[int,int,int,int]
     roi: np.ndarray
     roi_dil_match: np.ndarray
+    roi_match: np.ndarray
     roi_dil_cut: np.ndarray
     pix: int
     p0: np.ndarray
@@ -452,15 +453,16 @@ def _build_poly_rec(poly: np.ndarray, rank: int, group_id: int, W: int, H: int) 
 
     bbox = _poly_bbox(poly, W, H)
     roi = _poly_to_roi_mask(poly, bbox)
+    roi_match = roi
     pix = int(np.count_nonzero(roi))
     if pix < MIN_STROKE_PIXELS:
         return None
 
     # dilated mask for MATCH
     if OVERLAP_TOL_MATCH > 0 and _DILATE_KERNEL_MATCH is not None:
-        roi_dil_match = cv2.dilate(roi, _DILATE_KERNEL_MATCH, iterations=1)
+        roi_dil_match = cv2.dilate(roi_match, _DILATE_KERNEL_MATCH, iterations=1)
     else:
-        roi_dil_match = roi
+        roi_dil_match = roi_match
 
     # dilated mask for CUT
     if OVERLAP_TOL_CUT > 0 and _DILATE_KERNEL_CUT is not None:
@@ -479,6 +481,7 @@ def _build_poly_rec(poly: np.ndarray, rank: int, group_id: int, W: int, H: int) 
         group_id=int(group_id),
         bbox=bbox,
         roi=roi,
+        roi_match = roi_match,
         roi_dil_match=roi_dil_match,
         roi_dil_cut=roi_dil_cut,
         pix=pix,
@@ -539,6 +542,35 @@ def _resolve_join_rank_gid(a: PolyRec, b: PolyRec) -> Tuple[int, int]:
         return int(a.rank), int(a.group_id)
 
     return int(a.rank), int(a.group_id)
+
+def _apply_match_guard(piece: PolyRec, blocker: Optional[PolyRec]):
+    """
+    Fake CUT margin: stop `piece` from matching `blocker` again,
+    WITHOUT changing the visual stroke.
+    We only modify piece.roi_match (used by overlap logic).
+    """
+    if piece is None or blocker is None:
+        return
+
+    # Remove pixels from match-mask that fall inside blocker MATCH dilation
+    guarded = _subtract_roi(
+        piece.bbox, piece.roi_match,
+        blocker.bbox, blocker.roi_dil_match
+    )
+
+    if int(np.count_nonzero(guarded)) < MIN_STROKE_PIXELS:
+        # If it nukes everything, just keep original match mask
+        return
+
+    piece.roi_match = guarded
+
+    # Rebuild MATCH dilation from the guarded match mask
+    if OVERLAP_TOL_MATCH > 0 and _DILATE_KERNEL_MATCH is not None:
+        piece.roi_dil_match = cv2.dilate(piece.roi_match, _DILATE_KERNEL_MATCH, iterations=1)
+    else:
+        piece.roi_dil_match = piece.roi_match
+
+
 
 
 def _find_best_join_candidate(active: Dict[int, PolyRec], order: List[int]) -> Optional[Tuple[int,int,bool,bool,float,float]]:
@@ -612,7 +644,7 @@ def _find_best_join_candidate(active: Dict[int, PolyRec], order: List[int]) -> O
             # duplication check uses MATCH dilation
             small = a if a.pix <= b.pix else b
             big = b if small is a else a
-            ov = _fuzzy_overlap_small_to_big(small.bbox, small.roi, big.bbox, big.roi_dil_match)
+            ov = _fuzzy_overlap_small_to_big(small.bbox, small.roi_match, big.bbox, big.roi_dil_match)
             dup_ratio = float(ov) / float(max(1, small.pix))
             if dup_ratio >= float(JOIN_SKIP_IF_DUP_OVERLAP_RATIO):
                 continue
@@ -743,7 +775,13 @@ def merge_polyline_collections(
         idx.remove(sid, rec.bbox)
         active.pop(sid, None)
 
-    def replace_id_with_polys(sid: int, polys: List[np.ndarray], rank: int, group_id: int):
+    def replace_id_with_polys(
+    sid: int,
+    polys: List[np.ndarray],
+    rank: int,
+    group_id: int,
+    match_guard_blocker: Optional[PolyRec] = None
+    ):
         try:
             pos = order.index(sid)
         except ValueError:
@@ -754,20 +792,29 @@ def merge_polyline_collections(
             return
 
         remove_id(sid)
+
+        new_recs: List[PolyRec] = []
+        for p in polys:
+            pr = _build_poly_rec(p, rank, group_id, W, H)
+            if pr is None:
+                continue
+            _apply_match_guard(pr, match_guard_blocker)
+            new_recs.append(pr)
+
+        if not new_recs:
+            return
+
         if pos is None:
-            for p in polys:
-                pr = _build_poly_rec(p, rank, group_id, W, H)
-                if pr is not None:
-                    add_rec(pr)
+            for pr in new_recs:
+                add_rec(pr)
             return
 
         order.pop(pos)
         insert_pos = pos
-        for p in polys:
-            pr = _build_poly_rec(p, rank, group_id, W, H)
-            if pr is not None:
-                add_rec(pr, insert_at=insert_pos)
-                insert_pos += 1
+        for pr in new_recs:
+            add_rec(pr, insert_at=insert_pos)
+            insert_pos += 1
+
 
     def best_overlap_candidate(curr: PolyRec) -> Tuple[int, int, float]:
         """
@@ -785,10 +832,10 @@ def merge_polyline_collections(
                 continue
 
             if curr.pix <= other.pix:
-                ov = _fuzzy_overlap_small_to_big(curr.bbox, curr.roi, other.bbox, other.roi_dil_match)
+                ov = _fuzzy_overlap_small_to_big(curr.bbox, curr.roi_match, other.bbox, other.roi_dil_match)
                 ratio = float(ov) / float(max(1, curr.pix))
             else:
-                ov = _fuzzy_overlap_small_to_big(other.bbox, other.roi, curr.bbox, curr.roi_dil_match)
+                ov = _fuzzy_overlap_small_to_big(other.bbox, other.roi_match, curr.bbox, curr.roi_dil_match)
                 ratio = float(ov) / float(max(1, other.pix))
 
             if (ratio > best_ratio) or (ratio == best_ratio and ov > best_ov):
@@ -826,11 +873,11 @@ def merge_polyline_collections(
                 break
 
             # recompute overlap using MATCH dilation (duplicate detection / ratios)
-            ov = _fuzzy_overlap_small_to_big(small.bbox, small.roi, big.bbox, big.roi_dil_match)
+            ov = _fuzzy_overlap_small_to_big(small.bbox, small.roi_match, big.bbox, big.roi_dil_match)
             if ov <= 0:
                 break
 
-            ratio = float(ov) / float(small_pix)
+            ratio = float(ov) / float(small_pix + 10)  #Buff up small strokes so they dont get sucked in and ruined
 
             # Case 1: tiny overlap -> treat as intersection, do nothing
             if (ov <= INTERSECT_ABS_MAX) and (ratio <= INTERSECT_RATIO_MAX):
@@ -846,35 +893,61 @@ def merge_polyline_collections(
                     continue
 
             # Case 3: partial overlap -> cut smaller (IMPORTANT: CUT uses CUT dilation)
+            # Case 3: partial overlap -> cut smaller
             if ratio >= CUT_RATIO_MIN:
+
+                # IMPORTANT:
+                # Only CUT when there is REAL pixel overlap (not just fuzzy tolerance).
+                # Otherwise CUT does nothing, but fuzzy overlap keeps re-triggering forever.
+                ov_real = _fuzzy_overlap_small_to_big(small.bbox, small.roi, big.bbox, big.roi)
+                if ov_real <= 0:
+                    break
+
                 if small_is_new:
-                    # CUT uses other.roi_dil_cut
-                    new_roi = _subtract_roi(rec.bbox, rec.roi, other.bbox, other.roi_dil_cut)
+                    # VISUAL CUT = hairline: subtract BIG raw roi (no dilation) from SMALL raw roi
+                    new_roi = _subtract_roi(rec.bbox, rec.roi, other.bbox, other.roi)
+
                     remain_pix = int(np.count_nonzero(new_roi))
                     if remain_pix < MIN_STROKE_PIXELS:
                         rec = None
                         break
+
                     pieces = _roi_to_polys(new_roi, rec.bbox)
                     rec = None
+
+                    # Fake CUT tolerance: prevent re-matching against the blocker,
+                    # without changing visuals.
                     for p in pieces:
                         pr = _build_poly_rec(p, r, gid, W, H)
                         if pr is not None:
+                            _apply_match_guard(pr, other)  # blocker is the existing stroke
                             add_rec(pr)
+
                     break
+
                 else:
-                    # CUT uses rec.roi_dil_cut
-                    new_roi = _subtract_roi(other.bbox, other.roi, rec.bbox, rec.roi_dil_cut)
+                    # Existing stroke is smaller -> cut that existing stroke against the new stroke (rec)
+                    new_roi = _subtract_roi(other.bbox, other.roi, rec.bbox, rec.roi)
+
                     remain_pix = int(np.count_nonzero(new_roi))
                     if remain_pix < MIN_STROKE_PIXELS:
                         remove_id(sid)
                         continue
+
                     pieces = _roi_to_polys(new_roi, other.bbox)
                     if not pieces:
                         remove_id(sid)
                         continue
-                    replace_id_with_polys(sid, pieces, other.rank, other.group_id)
-                    continue
 
+                    # Replace old stroke with pieces + apply match guard against the new blocker (rec)
+                    replace_id_with_polys(
+                        sid,
+                        pieces,
+                        other.rank,
+                        other.group_id,
+                        match_guard_blocker=rec
+                    )
+                    continue
             break
 
         if rec is not None:

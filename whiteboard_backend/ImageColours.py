@@ -3,7 +3,6 @@ from __future__ import annotations
 
 import json
 import os
-import math
 import re
 from pathlib import Path
 from typing import Dict, List, Tuple, Optional, Any
@@ -62,7 +61,8 @@ SAMPLE_RADIUS_PX_LARGE = 2
 MIN_CONTRIB_PIXELS_PER_STROKE = 60
 
 # Color bit-shift quantization (RESTORED)
-# (r>>4,g>>4,b>>4) => 16x16x16 bins
+# (r>>4, g>>4, b>>4) => 16x16x16 bins
+# NOTE: shift=4 is the correct value for 16 bins per channel.
 RGB_Q_SHIFT = 10
 
 
@@ -94,7 +94,7 @@ def _load_rgb_image(path: Path) -> np.ndarray:
 
 
 # ============================
-# Stroke parsing
+# Stroke parsing (color_id normalization / naming)
 # ============================
 def _stroke_color_id_raw(stroke: Dict[str, Any]) -> Optional[int]:
     # be tolerant about key naming
@@ -130,7 +130,7 @@ def _color_name_from_id(cid_1based: int) -> str:
 
 
 # ============================
-# Color helpers
+# Color helpers (COPIED FROM FULL SCRIPT)
 # ============================
 def _clamp(v: float, lo: float, hi: float) -> float:
     return max(lo, min(hi, v))
@@ -177,7 +177,7 @@ def _quant_key(rgb: np.ndarray) -> np.ndarray:
 
 
 # ============================
-# Stroke sampling
+# Stroke sampling (COPIED FROM FULL SCRIPT)
 # ============================
 def _eval_cubic(p0, c1, c2, p1, t: float) -> Tuple[float, float]:
     mt = 1.0 - t
@@ -229,7 +229,7 @@ def _stroke_samples_json_from_polyline(stroke: Dict[str, Any]) -> List[Tuple[flo
 
 
 # ============================
-# Color estimation per stroke
+# Color estimation per stroke (COPIED FROM FULL SCRIPT)
 # ============================
 def _estimate_stroke_color(
     img_rgb: np.ndarray,
@@ -366,7 +366,7 @@ def process_one(processed_img_path: Path) -> None:
 
     color_ids = _normalize_color_ids(color_ids_raw)
 
-    # also ensure color_name exists (derived from id only, no reassigning)
+    # ensure color_id is normalized and color_name exists (derived from id only, no reassigning)
     for s, cid in zip(strokes, color_ids):
         if isinstance(cid, int):
             if s.get("color_id") != int(cid):

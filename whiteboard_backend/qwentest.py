@@ -70,7 +70,7 @@ BATCH_SIZE = 4
 # ============================
 # ONE composite image = two square panels side-by-side.
 # PANEL_EDGE = PROC_LONGEST_EDGE//2
-PROC_LONGEST_EDGE = 768 # composite max side; panels ~384 each
+PROC_LONGEST_EDGE = 600 # composite max side;
 
 SUGGESTION_LIMIT = 20
 MAX_NEW_TOKENS = 70
@@ -273,20 +273,29 @@ def ensure_indexes() -> tuple[dict[str, str], dict[str, str]]:
     return img_map, json_map
 
 
-def load_candidate_labels(idx: int, json_index: Dict[str, str]) -> List[str]:
+def load_candidate_labels(idx: int, json_index: Dict[str, str]) -> Tuple[List[str], str]:
     p = json_index.get(str(idx))
     if not p:
-        return []
+        return [], ""
     path = Path(p)
     if not path.exists():
-        return []
+        return [], ""
+
     try:
         data = json.loads(path.read_text(encoding="utf-8"))
     except Exception:
-        return []
+        return [], ""
+
+    # NEW: base_context comes from processed_<idx>.json (added by your other script)
+    base_context = data.get("base_context")
+    if not isinstance(base_context, str):
+        base_context = ""
+    base_context = base_context.strip()
+
     words = data.get("words") or []
     out: List[str] = []
     seen = set()
+
     for item in words:
         t = item.get("text") if isinstance(item, dict) else None
         if not isinstance(t, str):
@@ -299,7 +308,9 @@ def load_candidate_labels(idx: int, json_index: Dict[str, str]) -> List[str]:
             continue
         seen.add(key)
         out.append(c)
-    return out
+
+    return out, base_context
+
 
 
 # ============================
@@ -371,6 +382,138 @@ def _clamp_bbox_xyxy(bbox_xyxy: List[int], w: int, h: int) -> List[int]:
     y0 = max(0, min(h, y0)); y1 = max(0, min(h, y1))
     return [x0, y0, x1, y1]
 
+def build_label_refine_prompt(base_context: str, raw_candidates: List[str]) -> str:
+    bc = (base_context or "").strip()
+    if not bc:
+        bc = "unknown"
+
+    # keep it short to avoid garbage / token spam
+    cand = raw_candidates[:80]
+    cand_text = ", ".join(cand) if cand else "(none)"
+
+    return (
+        "You are given a BASE CONTEXT for a full image, and a noisy list of candidate words.\n\n"
+        "TASK:\n"
+        "Infer what the image is about from BASE CONTEXT + candidates.\n"
+        "Return a NEW label list of OBJECT COMPONENTS / PARTS that the main object is built from.\n"
+        "These must be plausible sub-objects/components that could appear in a diagram/photo.\n\n"
+        "Examples:\n"
+        "- face -> eye, iris, pupil, nose, nostril, mouth, lip, ear, eyebrow\n"
+        "- eukaryotic cell -> nucleus, nucleolus, mitochondrion, ribosome, golgi apparatus, er, membrane\n"
+        "- car -> wheel, tire, rim, door, window, headlight, bumper, hood\n\n"
+        f"BASE CONTEXT: {bc}\n"
+        f"RAW CANDIDATES: {cand_text}\n\n"
+        "RULES:\n"
+        "- Output ONLY JSON\n"
+        "- JSON format: {\"labels\":[\"...\",\"...\",...]}\n"
+        "- labels must be short strings (1-4 words max)\n"
+        "- 8 to 30 labels max\n"
+        "- no duplicates\n"
+        "- no full sentences\n"
+        "- prefer lowercase\n"
+    )
+
+
+def _parse_refined_labels(text_out: str) -> List[str]:
+    obj = extract_json_object(text_out)
+    if isinstance(obj, dict):
+        labels = obj.get("labels")
+        if isinstance(labels, list):
+            out: List[str] = []
+            seen = set()
+            for x in labels:
+                if not isinstance(x, str):
+                    continue
+                # reuse your cleaner to keep format consistent
+                c = _clean_word(x)
+                if not c:
+                    continue
+                k = c.lower()
+                if k in seen:
+                    continue
+                seen.add(k)
+                out.append(c)
+            return out
+
+    # fallback: try comma/newline split if model didn't follow JSON
+    out: List[str] = []
+    seen = set()
+    for part in re.split(r"[,;\n]+", (text_out or "").strip()):
+        c = _clean_word(part)
+        if not c:
+            continue
+        k = c.lower()
+        if k in seen:
+            continue
+        seen.add(k)
+        out.append(c)
+    return out
+
+
+def refine_candidate_labels_with_qwen(
+    model,
+    processor,
+    device,
+    base_context: str,
+    raw_candidates: List[str],
+) -> List[str]:
+    SYSTEM_MSG = (
+        "You are a label-refinement engine.\n"
+        "You produce component/part labels, not generic category names.\n"
+        "Return only JSON.\n"
+    )
+
+    prompt_text = build_label_refine_prompt(base_context, raw_candidates)
+
+    conv = [
+        {"role": "system", "content": [{"type": "text", "text": SYSTEM_MSG}]},
+        {"role": "user", "content": [{"type": "text", "text": prompt_text}]},
+    ]
+    prompt_str = processor.apply_chat_template(conv, tokenize=False, add_generation_prompt=True)
+
+    # slightly more tokens than the main run because it must output a list
+    gen_kwargs_refine = dict(
+        max_new_tokens=140,
+        do_sample=False,
+        num_beams=1,
+        use_cache=True,
+    )
+
+    try:
+        inputs = processor(
+            text=[prompt_str],
+            return_tensors="pt",
+            padding=True,
+            truncation=True,
+        )
+
+        for k, v in list(inputs.items()):
+            if torch.is_tensor(v):
+                inputs[k] = v.to(device=device, non_blocking=True)
+
+        with torch.inference_mode():
+            out_ids = model.generate(**inputs, **gen_kwargs_refine)
+
+        if "input_ids" in inputs and torch.is_tensor(inputs["input_ids"]):
+            prompt_len = int(inputs["input_ids"].shape[1])
+            gen_only_ids = out_ids[:, prompt_len:]
+        else:
+            gen_only_ids = out_ids
+
+        text_out = processor.batch_decode(gen_only_ids, skip_special_tokens=True)[0]
+        refined = _parse_refined_labels(text_out)
+
+        # if model produced nothing useful -> fallback to original candidates
+        if not refined:
+            return raw_candidates[:SUGGESTION_LIMIT]
+
+        return refined
+
+    except Exception as e:
+        print(f"[warn] refine_candidate_labels_with_qwen failed: {e}")
+        return raw_candidates[:SUGGESTION_LIMIT]
+
+
 
 # ============================
 # Prompt + parse (ONE IMAGE)
@@ -378,7 +521,9 @@ def _clamp_bbox_xyxy(bbox_xyxy: List[int], w: int, h: int) -> List[int]:
 def build_prompt(
     colour_hint: Optional[str],
     suggestions: List[str],
+    base_context: str,
 ) -> str:
+
     colour_txt = colour_hint if colour_hint else "unknown"
     sug = suggestions[:SUGGESTION_LIMIT]
 
@@ -391,10 +536,10 @@ def build_prompt(
     return (
         "Here is an image with LEFT and RIGHT panels.\n"
         "- LEFT: a cropped target region with highlighted object\n"
-        "- RIGHT: the full image with a red rectangle marking where LEFT came from(coloured)\n\n"
+        f"- RIGHT: the full image ({base_context}) with a red rectangle marking where LEFT came from(coloured)\n\n"
         "Identify, count and describe pure shapes building up LEFT - big / small circles, lines, squares\n"
         "Analyze RIGHT + coloured crop for semantic context.\n"
-        "Based on shapes and visual characteristics pick the closest label:\n\n"
+        "Based on known shapes and visual characteristics label LEFT (pick one label):\n\n"
         f"{sug_text}\n\n"
         "Return ONLY JSON with REQUIRED keys:\n"
         "{"
@@ -607,7 +752,20 @@ def main() -> None:
             print(f"[skip] processed_{idx}: no clusters")
             continue
 
-        suggestions = load_candidate_labels(idx, json_index)[: int(SUGGESTION_LIMIT)]
+        suggestions_all, base_context = load_candidate_labels(idx, json_index)
+
+        # NEW: first Qwen run to refine candidate labels into component/part labels
+        refined_labels = refine_candidate_labels_with_qwen(
+            model=model,
+            processor=processor,
+            device=device,
+            base_context=base_context,
+            raw_candidates=suggestions_all,
+        )
+
+        suggestions = refined_labels[: int(SUGGESTION_LIMIT)]
+
+
 
         # Prepare full image base once
         try:
@@ -628,7 +786,9 @@ def main() -> None:
             "image_index": idx,
             "full_image_source": str(full_img_path),
             "clusters_json": str(cmap_path),
-            "candidate_labels": suggestions,
+            "candidate_labels_raw": suggestions_all[: int(SUGGESTION_LIMIT)],
+            "candidate_labels_refined": suggestions,
+            "base_context": base_context,
             "model_id": MODEL_ID,
             "quant_mode": QUANT_MODE,
             "used_quant": bool(used_quant),
@@ -751,6 +911,7 @@ def main() -> None:
                 prompt_text = build_prompt(
                     colour_hint=colour_hint,
                     suggestions=suggestions,
+                    base_context=base_context
                 )
                 SYSTEM_MSG = (
                     "You are a visual object labeling engine\n"
