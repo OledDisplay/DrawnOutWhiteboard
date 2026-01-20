@@ -86,11 +86,11 @@ class _VectorViewerScreenState extends State<VectorViewerScreen>
   // ------------------- CORE TIMING PARAMETERS (NON-TEXT) -------------------
 
   // Stroke draw timing (seconds) for normal objects/images
-  double _minStrokeTimeSec = 0.18;
-  double _maxStrokeTimeSec = 0.32;
+  double _minStrokeTimeSec = 0.29;
+  double _maxStrokeTimeSec = 0.8;
 
   // Extra time from length: seconds per 1000px of stroke length
-  double _lengthTimePerKPxSec = 0.08;
+  double _lengthTimePerKPxSec = 0.3;
 
   // Extra time from curvature: max seconds added at "full" curvature
   double _curvatureExtraMaxSec = 0.08;
@@ -109,6 +109,17 @@ class _VectorViewerScreenState extends State<VectorViewerScreen>
   double _globalSpeedMultiplier = 1.0;
 
   double _textLetterGapPx = 20.0; // default gap in board pixels between letters
+
+    // ------------------- WITHIN-STROKE SPEED ENVELOPE -------------------
+  // Human-like accel -> peak -> decel inside a single stroke.
+  // start/end are fractions of stroke time (0..1).
+  // peakMult is the peak speed relative to baseline cruise=1.
+  // peakTime is where the peak happens (0..1).
+  double _strokeSpeedStartPct = 0.08;  // 0..0.35
+  double _strokeSpeedEndPct = 0.25;    // 0..0.35
+  double _strokeSpeedPeakMult = 2.50;  // 1..4
+  double _strokeSpeedPeakTime = 0.6;  // 0..1
+
 
 
   // --------------- MULTI-OBJECT SUPPORT ---------------
@@ -1073,6 +1084,11 @@ class _VectorViewerScreenState extends State<VectorViewerScreen>
                   stepStrokeCount: _stepStrokeCount,
                   boardWidth: _boardWidth,
                   boardHeight: _boardHeight,
+
+                  speedStartPct: _strokeSpeedStartPct,
+                  speedEndPct: _strokeSpeedEndPct,
+                  speedPeakMult: _strokeSpeedPeakMult,
+                  speedPeakTime: _strokeSpeedPeakTime,
                 ),
               ),
             ),
@@ -1560,6 +1576,110 @@ class _VectorViewerScreenState extends State<VectorViewerScreen>
                   const SizedBox(height: 16),
                   const Divider(color: Colors.white24),
                   const SizedBox(height: 8),
+
+                  //SPEED FLUCTUATE
+                                    const SizedBox(height: 16),
+                  const Divider(color: Colors.white24),
+                  const SizedBox(height: 8),
+
+                  // --------------- WITHIN-STROKE SPEED CURVE ---------------
+                  const Text(
+                    'Within-stroke speed curve',
+                    style: TextStyle(
+                      color: Colors.white,
+                      fontSize: 14,
+                      fontWeight: FontWeight.bold,
+                    ),
+                  ),
+                  const SizedBox(height: 4),
+
+                  Text(
+                    'Start ease: ${(_strokeSpeedStartPct * 100).toStringAsFixed(0)}%',
+                    style: const TextStyle(color: Colors.white70, fontSize: 11),
+                  ),
+                  Slider(
+                    value: _strokeSpeedStartPct,
+                    min: 0.0,
+                    max: 0.35,
+                    divisions: 35,
+                    label: (_strokeSpeedStartPct * 100).toStringAsFixed(0),
+                    onChanged: (v) {
+                      setState(() {
+                        _strokeSpeedStartPct = v;
+                      });
+                    },
+                    onChangeEnd: (_) {
+                      if (_animStrokes.isNotEmpty) {
+                        _restartAnimationMode();
+                      }
+                    },
+                  ),
+
+                  Text(
+                    'End ease: ${(_strokeSpeedEndPct * 100).toStringAsFixed(0)}%',
+                    style: const TextStyle(color: Colors.white70, fontSize: 11),
+                  ),
+                  Slider(
+                    value: _strokeSpeedEndPct,
+                    min: 0.0,
+                    max: 0.35,
+                    divisions: 35,
+                    label: (_strokeSpeedEndPct * 100).toStringAsFixed(0),
+                    onChanged: (v) {
+                      setState(() {
+                        _strokeSpeedEndPct = v;
+                      });
+                    },
+                    onChangeEnd: (_) {
+                      if (_animStrokes.isNotEmpty) {
+                        _restartAnimationMode();
+                      }
+                    },
+                  ),
+
+                  Text(
+                    'Peak speed: ${_strokeSpeedPeakMult.toStringAsFixed(2)}x',
+                    style: const TextStyle(color: Colors.white70, fontSize: 11),
+                  ),
+                  Slider(
+                    value: _strokeSpeedPeakMult,
+                    min: 1.0,
+                    max: 4.0,
+                    divisions: 30,
+                    label: _strokeSpeedPeakMult.toStringAsFixed(2),
+                    onChanged: (v) {
+                      setState(() {
+                        _strokeSpeedPeakMult = v;
+                      });
+                    },
+                    onChangeEnd: (_) {
+                      if (_animStrokes.isNotEmpty) {
+                        _restartAnimationMode();
+                      }
+                    },
+                  ),
+
+                  Text(
+                    'Peak time: ${_strokeSpeedPeakTime.toStringAsFixed(2)}',
+                    style: const TextStyle(color: Colors.white70, fontSize: 11),
+                  ),
+                  Slider(
+                    value: _strokeSpeedPeakTime,
+                    min: 0.0,
+                    max: 1.0,
+                    divisions: 40,
+                    label: _strokeSpeedPeakTime.toStringAsFixed(2),
+                    onChanged: (v) {
+                      setState(() {
+                        _strokeSpeedPeakTime = v;
+                      });
+                    },
+                    onChangeEnd: (_) {
+                      if (_animStrokes.isNotEmpty) {
+                        _restartAnimationMode();
+                      }
+                    },
+                  ),
 
                   // --------------- TRAVEL TIMING ---------------
                   const Text(
@@ -2241,6 +2361,11 @@ class WhiteboardPainter extends CustomPainter {
   final bool stepMode;
   final int stepStrokeCount;
 
+  final double speedStartPct;
+  final double speedEndPct;
+  final double speedPeakMult;
+  final double speedPeakTime;
+
   // Virtual board size – used to keep 0,0 stable.
   final double boardWidth;
   final double boardHeight;
@@ -2254,6 +2379,11 @@ class WhiteboardPainter extends CustomPainter {
     required this.stepStrokeCount,
     required this.boardWidth,
     required this.boardHeight,
+
+    required this.speedStartPct,
+    required this.speedEndPct,
+    required this.speedPeakMult,
+    required this.speedPeakTime,
   });
 
   @override
@@ -2356,8 +2486,10 @@ class WhiteboardPainter extends CustomPainter {
     if (drawPhase >= 1.0 || totalCost <= 0.0) {
       idxMax = n - 1;
     } else {
-      final targetCost = drawPhase * totalCost;
+      final warped = _warpStrokePhase(drawPhase);
+      final targetCost = warped * totalCost;
       idxMax = _findIndexForCost(stroke.cumDrawCost, targetCost);
+
       if (idxMax < 1) idxMax = 1;
       if (idxMax >= n) idxMax = n - 1;
     }
@@ -2381,6 +2513,109 @@ class WhiteboardPainter extends CustomPainter {
 
     canvas.drawPath(path, paintLine);
   }
+
+  // Maps linear time t=[0..1] to a warped progress=[0..1]
+  // Each segment uses "smootherstep" for smooth accel/decel,
+  double _warpStrokePhase(double t) {
+    t = t.clamp(0.0, 1.0);
+
+    double start = speedStartPct.clamp(0.0, 0.49);
+    double end = speedEndPct.clamp(0.0, 0.49);
+
+    final t1 = start;
+    final t3 = (1.0 - end);
+
+    // If user settings are invalid (overlap), fallback linear
+    if (t3 <= t1 + 1e-4) return t;
+
+    // Clamp peak time between (t1..t3)
+    double t2 = speedPeakTime.clamp(0.0, 1.0);
+    t2 = t2.clamp(t1 + 1e-4, t3 - 1e-4);
+
+    final peak = speedPeakMult.clamp(1.0, 10.0);
+
+    // Segment definition: [a,b] with values vA->vB
+    double segFull(double vA, double vB, double L) {
+      if (L <= 0.0) return 0.0;
+      // integral over smootherstep interpolation = L*(vA+vB)/2
+      return L * (vA + vB) * 0.5;
+    }
+
+    double smoothInt(double x) {
+      // ∫ smootherstep(x) dx from 0..x
+      // smootherstep = 6x^5 -15x^4 +10x^3
+      // integral = x^6 -3x^5 +2.5x^4
+      final x2 = x * x;
+      final x3 = x2 * x;
+      final x4 = x2 * x2;
+      final x5 = x4 * x;
+      final x6 = x5 * x;
+      return (x6 - 3.0 * x5 + 2.5 * x4);
+    }
+
+    double segPartial(double vA, double vB, double L, double x) {
+      // x in [0..1], integrate interpolation from 0..x:
+      // v(x) = vA + (vB-vA)*smootherstep(x)
+      // ∫ v = L * [vA*x + (vB-vA)*smoothInt(x)]
+      if (L <= 0.0) return 0.0;
+      x = x.clamp(0.0, 1.0);
+      return L * (vA * x + (vB - vA) * smoothInt(x));
+    }
+
+    // Segment lengths
+    final L01 = t1;          // [0..t1]     0 -> 1
+    final L12 = t2 - t1;     // [t1..t2]    1 -> peak
+    final L23 = t3 - t2;     // [t2..t3]    peak -> 1
+    final L34 = 1.0 - t3;    // [t3..1]     1 -> 0
+
+    // Total integral over whole stroke time
+    final total =
+        segFull(0.0, 1.0, L01) +
+        segFull(1.0, peak, L12) +
+        segFull(peak, 1.0, L23) +
+        segFull(1.0, 0.0, L34);
+
+    if (total <= 1e-9) return t;
+
+    double acc = 0.0;
+
+    // Segment [0..t1]
+    if (t < t1 && L01 > 0.0) {
+      final x = t / L01;
+      acc += segPartial(0.0, 1.0, L01, x);
+      return (acc / total).clamp(0.0, 1.0);
+    } else {
+      acc += segFull(0.0, 1.0, L01);
+    }
+
+    // Segment [t1..t2]
+    if (t < t2 && L12 > 0.0) {
+      final x = (t - t1) / L12;
+      acc += segPartial(1.0, peak, L12, x);
+      return (acc / total).clamp(0.0, 1.0);
+    } else {
+      acc += segFull(1.0, peak, L12);
+    }
+
+    // Segment [t2..t3]
+    if (t < t3 && L23 > 0.0) {
+      final x = (t - t2) / L23;
+      acc += segPartial(peak, 1.0, L23, x);
+      return (acc / total).clamp(0.0, 1.0);
+    } else {
+      acc += segFull(peak, 1.0, L23);
+    }
+
+    // Segment [t3..1]
+    if (t < 1.0 && L34 > 0.0) {
+      final x = (t - t3) / L34;
+      acc += segPartial(1.0, 0.0, L34, x);
+      return (acc / total).clamp(0.0, 1.0);
+    }
+
+    return 1.0;
+  }
+
 
   int _findIndexForCost(List<double> cumCost, double target) {
     final last = cumCost.length - 1;
@@ -2427,5 +2662,9 @@ class WhiteboardPainter extends CustomPainter {
       old.stepMode != stepMode ||
       old.stepStrokeCount != stepStrokeCount ||
       old.boardWidth != boardWidth ||
-      old.boardHeight != boardHeight;
+      old.boardHeight != boardHeight ||
+      old.speedStartPct != speedStartPct ||
+      old.speedEndPct != speedEndPct ||
+      old.speedPeakMult != speedPeakMult ||
+      old.speedPeakTime != speedPeakTime;
 }
