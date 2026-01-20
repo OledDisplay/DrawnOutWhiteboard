@@ -38,6 +38,7 @@ COLOR_ORDER_LIGHT_TO_DARK = [
     "black",
 ]
 
+
 def color_rank(name: str) -> int:
     n = (name or "").strip().lower()
     try:
@@ -61,15 +62,26 @@ SAMPLE_RADIUS_PX_LARGE = 2
 MIN_CONTRIB_PIXELS_PER_STROKE = 60
 
 # Color bit-shift quantization (RESTORED)
-# (r>>4, g>>4, b>>4) => 16x16x16 bins
-# NOTE: shift=4 is the correct value for 16 bins per channel.
+# (r>>4, g>>4, b>>4) => 16x16x16 bins (4096 total)
 RGB_Q_SHIFT = 10
+
+
+# ============================
+# SPEED KNOBS (NO ARGS)
+# ============================
+PARALLEL = True
+MAX_WORKERS = None  # None => cpu_count()-1
+
+# Stroke sampling density (pure speed lever)
+BEZIER_STEPS = 10
+POLYLINE_TARGET_POINTS = 50
 
 
 # ============================
 # IO helpers
 # ============================
 _PROCESSED_PLAIN_RE = re.compile(r"^(?:proccessed|processed)_(\d+)\.png$", re.IGNORECASE)
+
 
 def _glob_processed_images() -> List[Path]:
     imgs: List[Path] = []
@@ -79,17 +91,24 @@ def _glob_processed_images() -> List[Path]:
     imgs.sort(key=lambda x: str(x).lower())
     return imgs
 
+
 def _extract_index_from_processed_name(name: str) -> Optional[int]:
     m = _PROCESSED_PLAIN_RE.match(name)
     if not m:
         return None
     return int(m.group(1))
 
+
 def _vector_json_path_for_index(n: int) -> Path:
     # vectorizer writes processed_<idx>.json
     return VECTORS_DIR / f"processed_{n}.json"
 
+
 def _load_rgb_image(path: Path) -> np.ndarray:
+    # Prefer OpenCV decode for speed; fallback to PIL if needed.
+    bgr = cv2.imread(str(path), cv2.IMREAD_COLOR)
+    if bgr is not None:
+        return cv2.cvtColor(bgr, cv2.COLOR_BGR2RGB)
     return np.array(Image.open(path).convert("RGB"), dtype=np.uint8)
 
 
@@ -105,6 +124,7 @@ def _stroke_color_id_raw(stroke: Dict[str, Any]) -> Optional[int]:
         if isinstance(v, str) and v.strip().isdigit():
             return int(v.strip())
     return None
+
 
 def _normalize_color_ids(ids: List[Optional[int]]) -> List[Optional[int]]:
     # Support both 0..10 and 1..11 without guessing per-stroke.
@@ -123,6 +143,7 @@ def _normalize_color_ids(ids: List[Optional[int]]) -> List[Optional[int]]:
     # assume already 1-based
     return ids
 
+
 def _color_name_from_id(cid_1based: int) -> str:
     if 1 <= cid_1based <= len(COLOR_ORDER_LIGHT_TO_DARK):
         return COLOR_ORDER_LIGHT_TO_DARK[cid_1based - 1]
@@ -130,36 +151,44 @@ def _color_name_from_id(cid_1based: int) -> str:
 
 
 # ============================
-# Color helpers (COPIED FROM FULL SCRIPT)
+# Color helpers
 # ============================
 def _clamp(v: float, lo: float, hi: float) -> float:
     return max(lo, min(hi, v))
 
+
 def _estimate_background_rgb(img_rgb: np.ndarray) -> Tuple[int, int, int]:
     h, w, _ = img_rgb.shape
     patch = max(10, min(40, min(h, w) // 20))
-    corners = np.concatenate([
-        img_rgb[0:patch, 0:patch].reshape(-1, 3),
-        img_rgb[0:patch, w-patch:w].reshape(-1, 3),
-        img_rgb[h-patch:h, 0:patch].reshape(-1, 3),
-        img_rgb[h-patch:h, w-patch:w].reshape(-1, 3),
-    ], axis=0)
+    corners = np.concatenate(
+        [
+            img_rgb[0:patch, 0:patch].reshape(-1, 3),
+            img_rgb[0:patch, w - patch : w].reshape(-1, 3),
+            img_rgb[h - patch : h, 0:patch].reshape(-1, 3),
+            img_rgb[h - patch : h, w - patch : w].reshape(-1, 3),
+        ],
+        axis=0,
+    )
     med = np.median(corners, axis=0)
     return (int(med[0]), int(med[1]), int(med[2]))
 
+
 def _rgb_to_lab_u8(img_rgb: np.ndarray) -> np.ndarray:
     return cv2.cvtColor(img_rgb, cv2.COLOR_RGB2LAB)
+
 
 def _lab_of_rgb(rgb: Tuple[int, int, int]) -> Tuple[float, float, float]:
     arr = np.array([[list(rgb)]], dtype=np.uint8)
     lab = cv2.cvtColor(arr, cv2.COLOR_RGB2LAB)[0, 0]
     return (float(lab[0]), float(lab[1]), float(lab[2]))
 
+
 def _delta_e_lab(lab_img_u8: np.ndarray, lab_bg: Tuple[float, float, float]) -> np.ndarray:
     dl = lab_img_u8[..., 0].astype(np.float32) - lab_bg[0]
     da = lab_img_u8[..., 1].astype(np.float32) - lab_bg[1]
     db = lab_img_u8[..., 2].astype(np.float32) - lab_bg[2]
-    return np.sqrt(dl*dl + da*da + db*db)
+    return np.sqrt(dl * dl + da * da + db * db)
+
 
 def _otsu_threshold_deltae(deltae: np.ndarray) -> float:
     d = np.clip(deltae, 0.0, 60.0)
@@ -169,15 +198,18 @@ def _otsu_threshold_deltae(deltae: np.ndarray) -> float:
     thr_de = max(6.0, min(26.0, thr_de * 0.85))
     return float(thr_de)
 
+
 def _quant_key(rgb: np.ndarray) -> np.ndarray:
+    # Works for both (H,W,3) and (N,3)
+    rgb = np.asarray(rgb, dtype=np.uint8)
     r = (rgb[..., 0] >> RGB_Q_SHIFT).astype(np.int32)
     g = (rgb[..., 1] >> RGB_Q_SHIFT).astype(np.int32)
     b = (rgb[..., 2] >> RGB_Q_SHIFT).astype(np.int32)
-    return (r << 8) | (g << 4) | b  # 12-bit key
+    return (r << 8) | (g << 4) | b  # 12-bit key, 0..4095
 
 
 # ============================
-# Stroke sampling (COPIED FROM FULL SCRIPT)
+# Stroke sampling
 # ============================
 def _eval_cubic(p0, c1, c2, p1, t: float) -> Tuple[float, float]:
     mt = 1.0 - t
@@ -187,13 +219,14 @@ def _eval_cubic(p0, c1, c2, p1, t: float) -> Tuple[float, float]:
     y = (mt2 * mt) * p0[1] + 3 * (mt2 * t) * c1[1] + 3 * (mt * t2) * c2[1] + (t2 * t) * p1[1]
     return x, y
 
+
 def _stroke_samples_json_from_beziers(stroke: Dict[str, Any]) -> List[Tuple[float, float]]:
     segs = stroke.get("segments") or []
     if not isinstance(segs, list) or not segs:
         return []
 
     pts: List[Tuple[float, float]] = []
-    steps = 18
+    steps = int(BEZIER_STEPS)
 
     last = None
     for seg in segs:
@@ -214,6 +247,7 @@ def _stroke_samples_json_from_beziers(stroke: Dict[str, Any]) -> List[Tuple[floa
 
     return pts
 
+
 def _stroke_samples_json_from_polyline(stroke: Dict[str, Any]) -> List[Tuple[float, float]]:
     pts = stroke.get("points") or []
     if not isinstance(pts, list) or len(pts) < 2:
@@ -224,18 +258,17 @@ def _stroke_samples_json_from_polyline(stroke: Dict[str, Any]) -> List[Tuple[flo
             out.append((float(p[0]), float(p[1])))
     if len(out) < 2:
         return []
-    step = max(1, len(out) // 80)
+    target = int(POLYLINE_TARGET_POINTS)
+    step = max(1, len(out) // max(1, target))
     return out[::step]
 
 
 # ============================
-# Color estimation per stroke (COPIED FROM FULL SCRIPT)
+# Color estimation per stroke (OPTIMIZED)
 # ============================
 def _estimate_stroke_color(
     img_rgb: np.ndarray,
-    img_lab: np.ndarray,
-    bg_lab: Tuple[float, float, float],
-    deltae_thr: float,
+    fg_mask: np.ndarray,
     stroke_samples_json: List[Tuple[float, float]],
     scale_x: float,
     scale_y: float,
@@ -245,53 +278,75 @@ def _estimate_stroke_color(
     if not stroke_samples_json:
         return (0, 0, 0), 0.0, 0
 
-    counts: Dict[int, int] = {}
-    sums: Dict[int, np.ndarray] = {}
-    contrib = 0
-    sampled = 0
-
-    for (xj, yj) in stroke_samples_json:
-        x = int(round(xj * scale_x))
-        y = int(round(yj * scale_y))
-        if x < 0 or y < 0 or x >= w or y >= h:
-            continue
-        sampled += 1
-
-        x0 = max(0, x - radius)
-        x1 = min(w, x + radius + 1)
-        y0 = max(0, y - radius)
-        y1 = min(h, y + radius + 1)
-
-        patch_rgb = img_rgb[y0:y1, x0:x1]
-        patch_lab = img_lab[y0:y1, x0:x1]
-
-        de = _delta_e_lab(patch_lab, bg_lab)
-        mask = de >= float(deltae_thr)
-        if not np.any(mask):
-            continue
-
-        pix = patch_rgb[mask]
-        if pix.size == 0:
-            continue
-
-        keys = _quant_key(pix.reshape(-1, 3))
-        for k, rgbpix in zip(keys.tolist(), pix.reshape(-1, 3)):
-            counts[k] = counts.get(k, 0) + 1
-            if k not in sums:
-                sums[k] = rgbpix.astype(np.int64).copy()
-            else:
-                sums[k] += rgbpix.astype(np.int64)
-        contrib += int(pix.shape[0])
-
-    if not counts:
+    pts = np.asarray(stroke_samples_json, dtype=np.float32)
+    if pts.size == 0:
         return (0, 0, 0), 0.0, 0
 
-    best_k = max(counts.keys(), key=lambda k: counts[k])
-    c = counts[best_k]
-    mean_rgb = (sums[best_k] / max(1, c)).astype(np.int64)
-    rgb = (int(mean_rgb[0]), int(mean_rgb[1]), int(mean_rgb[2]))
+    xs = np.rint(pts[:, 0] * float(scale_x)).astype(np.int32)
+    ys = np.rint(pts[:, 1] * float(scale_y)).astype(np.int32)
 
-    denom = max(1, sampled * ((2 * radius + 1) * (2 * radius + 1)))
+    inside = (xs >= 0) & (ys >= 0) & (xs < w) & (ys < h)
+    if not np.any(inside):
+        return (0, 0, 0), 0.0, 0
+
+    xs = xs[inside]
+    ys = ys[inside]
+    sampled = int(xs.size)
+
+    # Build offset grid once per call
+    r = int(radius)
+    d = np.arange(-r, r + 1, dtype=np.int32)
+    dx, dy = np.meshgrid(d, d, indexing="xy")
+    dx = dx.reshape(-1)
+    dy = dy.reshape(-1)
+
+    # Broadcast sample centers + offsets -> flattened gather coords
+    gx = (xs[:, None] + dx[None, :]).reshape(-1)
+    gy = (ys[:, None] + dy[None, :]).reshape(-1)
+
+    inb = (gx >= 0) & (gy >= 0) & (gx < w) & (gy < h)
+    if not np.any(inb):
+        return (0, 0, 0), 0.0, 0
+
+    gx = gx[inb]
+    gy = gy[inb]
+
+    m = fg_mask[gy, gx]
+    if not np.any(m):
+        return (0, 0, 0), 0.0, 0
+
+    gx = gx[m]
+    gy = gy[m]
+
+    pix = img_rgb[gy, gx]  # (n,3)
+    if pix.size == 0:
+        return (0, 0, 0), 0.0, 0
+
+    contrib = int(pix.shape[0])
+
+    # 16x16x16 bins => 4096
+    BIN_COUNT = 4096
+
+    keys = _quant_key(pix)
+    counts = np.bincount(keys, minlength=BIN_COUNT)
+
+    if counts.max() == 0:
+        return (0, 0, 0), 0.0, 0
+
+    sum_r = np.bincount(keys, weights=pix[:, 0], minlength=BIN_COUNT).astype(np.int64)
+    sum_g = np.bincount(keys, weights=pix[:, 1], minlength=BIN_COUNT).astype(np.int64)
+    sum_b = np.bincount(keys, weights=pix[:, 2], minlength=BIN_COUNT).astype(np.int64)
+
+    best_k = int(np.argmax(counts))
+    c_best = int(counts[best_k])
+
+    rgb = (
+        int(sum_r[best_k] / max(1, c_best)),
+        int(sum_g[best_k] / max(1, c_best)),
+        int(sum_b[best_k] / max(1, c_best)),
+    )
+
+    denom = max(1, sampled * ((2 * r + 1) * (2 * r + 1)))
     conf = _clamp(contrib / denom, 0.0, 1.0)
 
     return rgb, float(conf), int(contrib)
@@ -333,7 +388,12 @@ def process_one(processed_img_path: Path) -> None:
         bg_rgb = _estimate_background_rgb(img_rgb)
         img_lab = _rgb_to_lab_u8(img_rgb)
         bg_lab = _lab_of_rgb(bg_rgb)
-        deltae_thr = _otsu_threshold_deltae(_delta_e_lab(img_lab, bg_lab))
+
+        # Precompute deltaE and a foreground mask ONCE per image
+        deltae = _delta_e_lab(img_lab, bg_lab)
+        deltae_thr = _otsu_threshold_deltae(deltae)
+        fg_mask = deltae >= float(deltae_thr)
+
         radius = SAMPLE_RADIUS_PX_LARGE if max(w_img, h_img) >= 1400 else SAMPLE_RADIUS_PX_SMALL
 
     color_ids_raw: List[Optional[int]] = []
@@ -347,9 +407,7 @@ def process_one(processed_img_path: Path) -> None:
         if ENABLE_STROKE_COLOR_SAMPLING:
             rgb, conf, contrib = _estimate_stroke_color(
                 img_rgb=img_rgb,
-                img_lab=img_lab,
-                bg_lab=bg_lab,
-                deltae_thr=deltae_thr,
+                fg_mask=fg_mask,
                 stroke_samples_json=samples_json,
                 scale_x=scale_x,
                 scale_y=scale_y,
@@ -393,17 +451,46 @@ def process_one(processed_img_path: Path) -> None:
         print(f"[ok] {processed_img_path.name}: no changes")
 
 
+def _worker_process_one(p_str: str) -> Tuple[str, Optional[str]]:
+    # Disable OpenCV internal threading inside each process (avoids oversubscription).
+    try:
+        cv2.setNumThreads(0)
+    except Exception:
+        pass
+
+    p = Path(p_str)
+    try:
+        process_one(p)
+        return (p.name, None)
+    except Exception as e:
+        return (p.name, str(e))
+
+
 def main() -> None:
     imgs = _glob_processed_images()
     if not imgs:
         print(f"[error] no processed_<n>.png images found in {PROCESSED_DIR}")
         return
 
-    for p in imgs:
-        try:
-            process_one(p)
-        except Exception as e:
-            print(f"[fail] {p.name}: {e}")
+    if not PARALLEL:
+        for p in imgs:
+            try:
+                process_one(p)
+            except Exception as e:
+                print(f"[fail] {p.name}: {e}")
+        return
+
+    from concurrent.futures import ProcessPoolExecutor
+
+    cpu = os.cpu_count() or 2
+    max_workers = MAX_WORKERS
+    if max_workers is None:
+        max_workers = max(1, cpu - 1)
+
+    with ProcessPoolExecutor(max_workers=max_workers) as ex:
+        for name, err in ex.map(_worker_process_one, (str(p) for p in imgs)):
+            if err:
+                print(f"[fail] {name}: {err}")
 
 
 if __name__ == "__main__":

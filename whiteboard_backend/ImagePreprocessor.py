@@ -685,6 +685,23 @@ def process_one(path: Path):
         print(f"[ERR] crashed on {path}:\n{traceback.format_exc()}")
 
 
+# ===== PARALLEL WRAPPER =====
+def _worker_process_one(p_str: str):
+    # Prevent OpenCV from spawning its own thread pool inside each process.
+    # If you don't do this you get N processes * M threads oversubscription.
+    try:
+        cv2.setNumThreads(0)
+    except Exception:
+        pass
+
+    p = Path(p_str)
+    try:
+        process_one(p)
+        return (p.name, None)
+    except Exception as e:
+        return (p.name, str(e))
+
+
 def proccess_images(indir: Path):
     print(f"[INFO] IN_DIR={indir}")
     print(f"[INFO] OUT_DIR={OUT_DIR}")
@@ -707,8 +724,17 @@ def proccess_images(indir: Path):
         print(f"[!] No images found in {indir}. Exiting.")
         return
 
-    for p in imgs:
-        process_one(p)
+    # -------- PARALLEL PER IMAGE --------
+    from concurrent.futures import ProcessPoolExecutor
+    cpu = os.cpu_count() or 2
+    max_workers = max(1, cpu - 1)
 
-if "__main__":
+    # NOTE: prints will interleave across processes; that's normal.
+    with ProcessPoolExecutor(max_workers=max_workers) as ex:
+        for name, err in ex.map(_worker_process_one, (str(p) for p in imgs)):
+            if err:
+                print(f"[fail] {name}: {err}")
+
+
+if __name__ == "__main__":
     proccess_images(IN_DIR)

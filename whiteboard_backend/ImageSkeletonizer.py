@@ -50,7 +50,12 @@ BAND_HALF = 0.5
 
 # Thinning passes for strokes / bands (only to make them 1px wide, nothing fancy)
 USE_SKIMAGE = True           # try skimage.thin if available
-MAX_THIN_PASSES = None          
+MAX_THIN_PASSES = None
+
+# Parallelism
+PARALLEL = True
+MAX_WORKERS = None           # None => cpu_count()-1
+
 
 # ===================== BASIC HELPERS =====================
 
@@ -143,31 +148,34 @@ def pen_width_skeleton(fg01: np.ndarray, pen_width: float) -> np.ndarray:
     # B: build iso-distance band for fat blobs
     band_lo = max(0.0, pen_width - BAND_HALF)
     band_hi = pen_width + BAND_HALF
-    band_mask = ((dist >= band_lo) & (dist <= band_hi) & (fg > 0)).astype(np.uint8)
+    band_mask = ((dist >= band_lo) & (dist <= band_hi) & (fg > 0))
+
+    # Vectorized per-component max distance:
+    # max_d[label] = max(dist[pixels in that label])
+    max_d = np.zeros(num, dtype=np.float32)
+    np.maximum.at(max_d, labels, dist)
+
+    areas = stats[:, cv2.CC_STAT_AREA].astype(np.int32)
+    valid_label = areas >= MIN_COMPONENT_AREA
+    valid_label[0] = False
+
+    is_thin_label = (max_d <= (pen_width + WIDTH_EPS)) & valid_label
+    is_fat_label = (~is_thin_label) & valid_label
+
+    is_thin_px = is_thin_label[labels]
+    is_fat_px = is_fat_label[labels]
+    is_fg_px = labels != 0
 
     out = np.zeros_like(fg, dtype=np.uint8)
 
-    for comp_idx in range(1, num):
-        if stats[comp_idx, cv2.CC_STAT_AREA] < MIN_COMPONENT_AREA:
-            continue
+    # thin stroke: centerline only
+    out[(thin_all > 0) & is_thin_px] = 1
 
-        comp_mask = (labels == comp_idx)
-        # local max distance (half-width of thickest section in this component)
-        max_d = float(dist[comp_mask].max()) if np.any(comp_mask) else 0.0
+    # fat blob: offset ring + taper fallback
+    out[(band_mask > 0) & is_fat_px] = 1
 
-        if max_d <= pen_width + WIDTH_EPS:
-            # -------- thin stroke: centerline only --------
-            # use thinned version, but *only* inside this component
-            out[comp_mask & (thin_all > 0)] = 1
-        else:
-             # -------- fat blob: offset ring + taper fallback --------
-            # ring where it exists
-            out[comp_mask & (band_mask > 0)] = 1
-
-            # fallback: if taper is thinner than pen_width, ring disappears.
-            # keep centerline there so ends don't vanish.
-            taper_zone = comp_mask & (dist < band_lo) & (thin_all > 0)
-            out[taper_zone] = 1
+    taper_zone = is_fat_px & is_fg_px & (dist < band_lo) & (thin_all > 0)
+    out[taper_zone] = 1
 
     # one more very light thin pass, just to ensure 1px thickness everywhere
     out = thin_mask(out)
@@ -190,8 +198,22 @@ def process_one(path: Path, out_path: Path):
     print(f"[OK]  wrote {out_path}")
 
 
+def _worker_process_one(args):
+    in_path_str, out_path_str = args
+    process_one(Path(in_path_str), Path(out_path_str))
+
+
 def skeletonize_images():
     import shutil
+    import os
+
+    # Avoid CPU oversubscription when using multi-processing:
+    # OpenCV can spawn internal threads; turning them off per process is typically faster overall.
+    try:
+        cv2.setNumThreads(0)
+    except Exception:
+        pass
+
     if OUT_DIR.exists():
         shutil.rmtree(OUT_DIR)
     OUT_DIR.mkdir(parents=True, exist_ok=True)
@@ -214,11 +236,27 @@ def skeletonize_images():
         print("[!] No images.")
         return
 
+    jobs = []
     for p in imgs:
         rel = p.relative_to(IN_DIR)              # e.g. processed_12/edges_12_red.png
         out_path = OUT_DIR / rel                # mirror structure under Skeletonized
-        process_one(p, out_path)
+        jobs.append((str(p), str(out_path)))
+
+    if not PARALLEL:
+        for in_path_str, out_path_str in jobs:
+            process_one(Path(in_path_str), Path(out_path_str))
+        return
+
+    from concurrent.futures import ProcessPoolExecutor
+
+    cpu = os.cpu_count() or 2
+    max_workers = MAX_WORKERS
+    if max_workers is None:
+        max_workers = max(1, cpu - 1)
+
+    with ProcessPoolExecutor(max_workers=max_workers) as ex:
+        list(ex.map(_worker_process_one, jobs))
 
 
-if "__main__":
+if __name__ == "__main__":
     skeletonize_images()

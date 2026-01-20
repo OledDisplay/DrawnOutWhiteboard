@@ -54,7 +54,7 @@ QWEN_MAX_PIXELS = 512 * 28 * 28
 GPU_INDEX = 0
 FORCE_CPU = False
 
-QUANT_MODE = "4bit" # "4bit" | "8bit" | "none"
+QUANT_MODE = None # "4bit" | "8bit" | "none"
 INT8_CPU_OFFLOAD = False  # only relevant if QUANT_MODE=="8bit"
 
 
@@ -63,7 +63,7 @@ INT8_CPU_OFFLOAD = False  # only relevant if QUANT_MODE=="8bit"
 # ============================
 # Set to 1 => strict cluster-by-cluster (lowest VRAM).
 # Set >1 => batching (faster, more VRAM).
-BATCH_SIZE = 4
+BATCH_SIZE = 8
 
 # ============================
 # SPEED / MEMORY LEVERS
@@ -392,16 +392,15 @@ def build_label_refine_prompt(base_context: str, raw_candidates: List[str]) -> s
     cand_text = ", ".join(cand) if cand else "(none)"
 
     return (
-        "You are given a BASE CONTEXT for a full image, and a noisy list of candidate words.\n\n"
+        "You are given a noisy list of candidate words, part of a main object.\n\n"
         "TASK:\n"
-        "Infer what the image is about from BASE CONTEXT + candidates.\n"
         "Return a NEW label list of OBJECT COMPONENTS / PARTS that the main object is built from.\n"
         "These must be plausible sub-objects/components that could appear in a diagram/photo.\n\n"
         "Examples:\n"
-        "- face -> eye, iris, pupil, nose, nostril, mouth, lip, ear, eyebrow\n"
-        "- eukaryotic cell -> nucleus, nucleolus, mitochondrion, ribosome, golgi apparatus, er, membrane\n"
-        "- car -> wheel, tire, rim, door, window, headlight, bumper, hood\n\n"
-        f"BASE CONTEXT: {bc}\n"
+        "- face -> face parts\n"
+        "- eukaryotic cell -> organels\n"
+        "- car -> wheel, tire, rim, door...n\n"
+        f"MAIN OBJECT: {bc}\n"
         f"RAW CANDIDATES: {cand_text}\n\n"
         "RULES:\n"
         "- Output ONLY JSON\n"
@@ -536,10 +535,10 @@ def build_prompt(
     return (
         "Here is an image with LEFT and RIGHT panels.\n"
         "- LEFT: a cropped target region with highlighted object\n"
-        f"- RIGHT: the full image ({base_context}) with a red rectangle marking where LEFT came from(coloured)\n\n"
+        f"- RIGHT: the full image ({base_context}) with a red rectangle marking where LEFT came from (coloured)\n\n"
         "Identify, count and describe pure shapes building up LEFT - big / small circles, lines, squares\n"
         "Analyze RIGHT + coloured crop for semantic context.\n"
-        "Based on known shapes and visual characteristics label LEFT (pick one label):\n\n"
+        "Based on known shapes and visual characteristics pick the best LEFT label:\n\n"
         f"{sug_text}\n\n"
         "Return ONLY JSON with REQUIRED keys:\n"
         "{"
@@ -660,20 +659,43 @@ def load_model_and_processor():
 
     used_quant = False
 
-    # If you're judging QUALITY: do NOT quantize. Use the base BF16/FP16 path.
-    # Qwen3-VL-2B weights are BF16 on HF. :contentReference[oaicite:6]{index=6}
+    # Use disk offload to avoid CPU RAM spikes during loading
+    offload_dir = str((BASE_DIR / "_hf_offload").resolve())
+    os.makedirs(offload_dir, exist_ok=True)
+
+    # Quant config (actually used now)
+    quant_config = None
+    if have_cuda and QUANT_MODE in ("4bit", "8bit") and _HAS_BNB:
+        if QUANT_MODE == "4bit":
+            quant_config = BitsAndBytesConfig(
+                load_in_4bit=True,
+                bnb_4bit_compute_dtype=DTYPE,
+            )
+            used_quant = True
+        elif QUANT_MODE == "8bit":
+            quant_config = BitsAndBytesConfig(
+                load_in_8bit=True,
+                llm_int8_enable_fp32_cpu_offload=bool(INT8_CPU_OFFLOAD),
+            )
+            used_quant = True
+
     if have_cuda:
-        # Qwen3 model card uses dtype="auto" and device_map="auto". :contentReference[oaicite:7]{index=7}
+        # Prefer auto placement + offload knobs (reduces CPU peak)
         model = Qwen3VLForConditionalGeneration.from_pretrained(
             MODEL_ID,
-            torch_dtype=torch.float16,
-            device_map={"": 0},  
+            torch_dtype="auto" if not used_quant else None,
+            device_map="auto",
             low_cpu_mem_usage=True,
+            offload_state_dict=True,
+            offload_folder=offload_dir,
+            quantization_config=quant_config,
         ).eval()
     else:
         model = Qwen3VLForConditionalGeneration.from_pretrained(
             MODEL_ID,
             low_cpu_mem_usage=True,
+            offload_state_dict=True,
+            offload_folder=offload_dir,
         ).eval().to(device)
 
     if tok is not None and hasattr(model, "generation_config"):
@@ -686,6 +708,7 @@ def load_model_and_processor():
         pass
 
     return model, processor, device, used_quant
+
 
 
 

@@ -81,8 +81,14 @@ REFINE_MIN_PAD_PX = 10
 CC_MIN_AREA_FRAC = 0.0008
 CC_MAX_AREA_FRAC = 0.40
 
+SCRIPT_DIR = Path(__file__).resolve().parent
+INPUT_DIR = SCRIPT_DIR / "ResearchImages" / "UniqueImages"
+OUTPUT_DIR = SCRIPT_DIR / "ProccessedImages"
+OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
 
-METADATA_CORE_PATH = Path(__file__).resolve().parent / "image_metadata_core.json"
+VALID_EXTS = {".png", ".jpg", ".jpeg", ".webp", ".tif", ".tiff", ".bmp"}
+
+METADATA_CORE_PATH = INPUT_DIR / "image_metadata_core.json"
 
 
 def is_valid_dictionary_word(
@@ -238,14 +244,7 @@ class WordDet:
 
 # -----------------------------
 # PATHS
-# -----------------------------
-SCRIPT_DIR = Path(__file__).resolve().parent
-INPUT_DIR = SCRIPT_DIR / "ResearchImages" / "UniqueImages"
-OUTPUT_DIR = SCRIPT_DIR / "ProccessedImages"
-OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
-
-VALID_EXTS = {".png", ".jpg", ".jpeg", ".webp", ".tif", ".tiff", ".bmp"}
-
+# ----------------------------
 
 # -----------------------------
 # IMAGE PREP
