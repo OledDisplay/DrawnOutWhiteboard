@@ -1335,6 +1335,218 @@ def vectorize_images():
         print(f"[OK] {Path(src).name}: strokes={len(meta['strokes'])}, "
               f"time={meta['stats']['time_sec']}s")
 
+def _process_edges_mask_to_polylines(edges_u8: np.ndarray) -> Tuple[int, int, List[np.ndarray]]:
+    """
+    edges_u8: 0/255 (or 0/1) skeleton/edges mask.
+    Returns (W, H, polys_final) with the SAME pipeline as _process_single_to_polylines().
+    """
+    m = (edges_u8 > 0).astype(np.uint8)
+    H, W = m.shape[:2]
+    diag = math.hypot(W, H)
+
+    polys_raw = _trace_strokes_graph(m)
+
+    polys_seg: List[np.ndarray] = []
+    for p in polys_raw:
+        if p.shape[0] < 2:
+            continue
+        segments = _segment_polyline_on_corners(p)
+        for seg in segments:
+            if seg.shape[0] >= CURV_MIN_SEG_POINTS:
+                polys_seg.append(seg)
+
+    polys_simpl: List[np.ndarray] = []
+    for p in polys_seg:
+        if p.shape[0] < 2:
+            continue
+        simp = _simplify_poly_conservative(p)
+        polys_simpl.append(simp if simp.shape[0] >= 2 else p)
+
+    polys_merged = _merge_small_strokes(polys_simpl, diag)
+
+    if SEG_STRIDE > 1:
+        polys_final = [
+            p[::SEG_STRIDE] if p.shape[0] > SEG_STRIDE else p
+            for p in polys_merged
+        ]
+    else:
+        polys_final = polys_merged
+
+    polys_final = _coverage_safety_pass(m, polys_final)
+
+    return W, H, polys_final
+
+def _vectorize_worker_payload(payload: tuple[int, dict, bool]) -> tuple[int, dict]:
+    idx, item, save_outputs = payload
+    try:
+        cv2.setNumThreads(int(CV2_THREADS_PER_PROCESS))
+    except Exception:
+        pass
+
+    skeletons = item["skeletons"]
+    H, W = item["size"]
+
+    collections: list[tuple[str, List[np.ndarray]]] = []
+    base_W = None
+    base_H = None
+
+    for gname, skel_u8 in skeletons.items():
+        w2, h2, polys = _process_edges_mask_to_polylines(skel_u8)
+        collections.append((str(gname), polys))
+        if base_W is None:
+            base_W = w2
+            base_H = h2
+
+    use_W = int(base_W if base_W is not None else W)
+    use_H = int(base_H if base_H is not None else H)
+
+    merged_items = merge_polyline_collections(collections, width=use_W, height=use_H)
+
+    strokes: list[dict] = []
+    for poly, gid in merged_items:
+        if poly is None or getattr(poly, "shape", None) is None or poly.shape[0] < 2:
+            continue
+
+        beziers = _catmull_rom_to_beziers(poly, alpha=CATMULL_ALPHA)
+        if not beziers:
+            q = poly.astype(float)
+            segs = []
+            for i in range(q.shape[0] - 1):
+                a = q[i]
+                b = q[i + 1]
+                c1 = a + (b - a) / 3.0
+                c2 = a + 2.0 * (b - a) / 3.0
+                seg = [
+                    float(a[0]), float(a[1]),
+                    float(c1[0]), float(c1[1]),
+                    float(c2[0]), float(c2[1]),
+                    float(b[0]), float(b[1]),
+                ]
+                if finite_seq(seg):
+                    segs.append(seg)
+            beziers = segs
+
+        if beziers:
+            strokes.append({"segments": beziers, "color_group_id": int(gid)})
+
+    meta = {
+        "version": 15,
+        "source_image": f"in_memory:{idx}",
+        "width": use_W,
+        "height": use_H,
+        "vector_format": "bezier_cubic",
+        "strokes": strokes,
+    }
+
+    if save_outputs:
+        OUT_DIR.mkdir(parents=True, exist_ok=True)
+        p = OUT_DIR / f"processed_{idx}.json"
+        p.write_text(json.dumps(meta, ensure_ascii=False, indent=2), encoding="utf-8")
+
+    return idx, meta
+
+
+
+def vectorize_in_memory(
+    skel_by_idx: dict[int, dict],
+    *,
+    save_outputs: bool = False,
+    parallel: bool = False,
+) -> dict[int, dict]:
+    """
+    Input: skel_by_idx[idx]["skeletons"][gname] is 0/255 mask
+           skel_by_idx[idx]["size"] is (H, W)
+    Output: same shape as your JSON style: strokes with flat cubic segments.
+    """
+    out: dict[int, dict] = {}
+
+    def _one(idx: int, item: dict) -> tuple[int, dict]:
+        skeletons = item["skeletons"]
+        H, W = item["size"]
+
+        collections: list[tuple[str, List[np.ndarray]]] = []
+
+        base_W = None
+        base_H = None
+
+        for gname, skel_u8 in skeletons.items():
+            w2, h2, polys = _process_edges_mask_to_polylines(skel_u8)
+            collections.append((str(gname), polys))
+
+            if base_W is None:
+                base_W = w2
+                base_H = h2
+
+        # If size metadata disagrees with mask size, trust the mask.
+        use_W = int(base_W if base_W is not None else W)
+        use_H = int(base_H if base_H is not None else H)
+
+        merged_items = merge_polyline_collections(collections, width=use_W, height=use_H)
+
+        strokes: list[dict] = []
+        for poly, gid in merged_items:
+            if poly is None or getattr(poly, "shape", None) is None or poly.shape[0] < 2:
+                continue
+
+            beziers = _catmull_rom_to_beziers(poly, alpha=CATMULL_ALPHA)
+            if not beziers:
+                # keep the exact fallback behavior you use in _process_single_to_data
+                q = poly.astype(float)
+                segs = []
+                for i in range(q.shape[0] - 1):
+                    a = q[i]
+                    b = q[i + 1]
+                    c1 = a + (b - a) / 3.0
+                    c2 = a + 2.0 * (b - a) / 3.0
+                    seg = [
+                        float(a[0]), float(a[1]),
+                        float(c1[0]), float(c1[1]),
+                        float(c2[0]), float(c2[1]),
+                        float(b[0]), float(b[1]),
+                    ]
+                    if finite_seq(seg):
+                        segs.append(seg)
+                beziers = segs
+
+            if beziers:
+                strokes.append({"segments": beziers, "color_group_id": int(gid)})
+
+        meta = {
+            "version": 15,
+            "source_image": f"in_memory:{idx}",
+            "width": use_W,
+            "height": use_H,
+            "vector_format": "bezier_cubic",
+            "strokes": strokes,
+        }
+
+        if save_outputs:
+            OUT_DIR.mkdir(parents=True, exist_ok=True)
+            p = OUT_DIR / f"processed_{idx}.json"
+            p.write_text(json.dumps(meta, ensure_ascii=False, indent=2), encoding="utf-8")
+
+        return idx, meta
+
+    if parallel:
+        cpu = os.cpu_count() or 2
+        workers = max(1, cpu - 1)
+        ctx = mp.get_context("spawn")
+        with ProcessPoolExecutor(max_workers=workers, mp_context=ctx) as ex:
+            futs = []
+            for idx, item in skel_by_idx.items():
+                futs.append(ex.submit(_vectorize_worker_payload, (int(idx), item, bool(save_outputs))))
+            for f in as_completed(futs):
+                idx, meta = f.result()
+                out[idx] = meta
+    else:
+        for idx, item in skel_by_idx.items():
+            idx, meta = _one(idx, item)
+            out[idx] = meta
+
+    return out
+
+
+
 
 if __name__ == "__main__":
     mp.freeze_support()  # Windows-safe for ProcessPool

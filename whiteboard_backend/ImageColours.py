@@ -350,148 +350,135 @@ def _estimate_stroke_color(
     conf = _clamp(contrib / denom, 0.0, 1.0)
 
     return rgb, float(conf), int(contrib)
+    
+def apply_colours_in_memory(
+    preproc_by_idx: Dict[int, Dict[str, Any]],
+    vectors_by_idx: Dict[int, Dict[str, Any]],
+    *,
+    save_outputs: bool = False,
+) -> Dict[int, Dict[str, Any]]:
+    """
+    In-memory version of process_one().
 
+    Inputs:
+      preproc_by_idx[idx]["cleaned_bgr"] : np.ndarray (H,W,3) BGR uint8
+      vectors_by_idx[idx] : dict loaded/produced by vectorizer (same schema as processed_<idx>.json)
 
-# ============================
-# Main
-# ============================
-def process_one(processed_img_path: Path) -> None:
-    idx = _extract_index_from_processed_name(processed_img_path.name)
-    if idx is None:
-        print(f"[skip] can't parse index from {processed_img_path.name}")
-        return
+    Behavior:
+      - Mutates vectors_by_idx[idx] IN PLACE (adds stroke colors + normalized ids + names)
+      - Optionally writes VECTORS_DIR/processed_<idx>.json if save_outputs=True
+      - Returns vectors_by_idx (same dict, mutated)
+    """
+    VECTORS_DIR.mkdir(parents=True, exist_ok=True)
 
-    vectors_path = _vector_json_path_for_index(idx)
-    if not vectors_path.exists():
-        print(f"[skip] missing vectors json: {vectors_path.name}")
-        return
+    for idx, prep in preproc_by_idx.items():
+        data = vectors_by_idx.get(idx)
+        if data is None:
+            # nothing to colourize
+            continue
 
-    data = json.loads(vectors_path.read_text(encoding="utf-8"))
-    strokes = data.get("strokes") or []
-    if not isinstance(strokes, list) or not strokes:
-        print(f"[skip] no strokes in {vectors_path.name}")
-        return
+        strokes = data.get("strokes") or []
+        if not isinstance(strokes, list) or not strokes:
+            continue
 
-    img_rgb = _load_rgb_image(processed_img_path)
-    h_img, w_img, _ = img_rgb.shape
+        img_bgr = prep.get("cleaned_bgr")
+        if img_bgr is None:
+            continue
 
-    fmt = (data.get("vector_format") or "bezier_cubic").lower()
-    src_w = float(data.get("width") or w_img)
-    src_h = float(data.get("height") or h_img)
+        # Ensure RGB for sampling (matches original process_one)
+        if img_bgr.ndim == 2:
+            img_bgr = cv2.cvtColor(img_bgr, cv2.COLOR_GRAY2BGR)
+        elif img_bgr.ndim == 3 and img_bgr.shape[2] == 4:
+            img_bgr = cv2.cvtColor(img_bgr, cv2.COLOR_BGRA2BGR)
 
-    scale_x = (w_img / src_w) if src_w > 0 else 1.0
-    scale_y = (h_img / src_h) if src_h > 0 else 1.0
+        img_rgb = cv2.cvtColor(img_bgr, cv2.COLOR_BGR2RGB)
+        h_img, w_img, _ = img_rgb.shape
 
-    did_change = False
+        fmt = (data.get("vector_format") or "bezier_cubic").lower()
+        src_w = float(data.get("width") or w_img)
+        src_h = float(data.get("height") or h_img)
 
-    if ENABLE_STROKE_COLOR_SAMPLING:
-        bg_rgb = _estimate_background_rgb(img_rgb)
-        img_lab = _rgb_to_lab_u8(img_rgb)
-        bg_lab = _lab_of_rgb(bg_rgb)
+        scale_x = (w_img / src_w) if src_w > 0 else 1.0
+        scale_y = (h_img / src_h) if src_h > 0 else 1.0
 
-        # Precompute deltaE and a foreground mask ONCE per image
-        deltae = _delta_e_lab(img_lab, bg_lab)
-        deltae_thr = _otsu_threshold_deltae(deltae)
-        fg_mask = deltae >= float(deltae_thr)
+        did_change = False
 
-        radius = SAMPLE_RADIUS_PX_LARGE if max(w_img, h_img) >= 1400 else SAMPLE_RADIUS_PX_SMALL
+        # Precompute fg mask once per image (exactly like your process_one)
+        if ENABLE_STROKE_COLOR_SAMPLING:
+            bg_rgb = _estimate_background_rgb(img_rgb)
+            img_lab = _rgb_to_lab_u8(img_rgb)
+            bg_lab = _lab_of_rgb(bg_rgb)
 
-    color_ids_raw: List[Optional[int]] = []
+            deltae = _delta_e_lab(img_lab, bg_lab)
+            deltae_thr = _otsu_threshold_deltae(deltae)
+            fg_mask = deltae >= float(deltae_thr)
 
-    for s in strokes:
-        if fmt == "bezier_cubic":
-            samples_json = _stroke_samples_json_from_beziers(s)
-        else:
-            samples_json = _stroke_samples_json_from_polyline(s)
+            radius = SAMPLE_RADIUS_PX_LARGE if max(w_img, h_img) >= 1400 else SAMPLE_RADIUS_PX_SMALL
+
+        color_ids_raw: List[Optional[int]] = []
+
+        for s in strokes:
+            # Samples along stroke geometry in JSON coords
+            if fmt == "bezier_cubic":
+                samples_json = _stroke_samples_json_from_beziers(s)
+            else:
+                samples_json = _stroke_samples_json_from_polyline(s)
+
+            if ENABLE_STROKE_COLOR_SAMPLING:
+                rgb, conf, contrib = _estimate_stroke_color(
+                    img_rgb=img_rgb,
+                    fg_mask=fg_mask,
+                    stroke_samples_json=samples_json,
+                    scale_x=scale_x,
+                    scale_y=scale_y,
+                    radius=int(radius),
+                )
+                s["color_rgb"] = [int(rgb[0]), int(rgb[1]), int(rgb[2])]
+                s["color_hex"] = "#{:02x}{:02x}{:02x}".format(int(rgb[0]), int(rgb[1]), int(rgb[2]))
+                s["color_conf"] = float(round(float(conf), 4))
+                s["color_contrib_pixels"] = int(contrib)
+                did_change = True
+
+            cid = _stroke_color_id_raw(s)
+            color_ids_raw.append(cid)
+
+        # Normalize ids (0..10 => 1..11)
+        color_ids = _normalize_color_ids(color_ids_raw)
+
+        # Ensure normalized 'color_id' and a derived 'color_name' exist
+        for s, cid in zip(strokes, color_ids):
+            if isinstance(cid, int):
+                if s.get("color_id") != int(cid):
+                    s["color_id"] = int(cid)
+                    did_change = True
+                if not isinstance(s.get("color_name"), str) or not s.get("color_name").strip():
+                    s["color_name"] = _color_name_from_id(int(cid))
+                    did_change = True
 
         if ENABLE_STROKE_COLOR_SAMPLING:
-            rgb, conf, contrib = _estimate_stroke_color(
-                img_rgb=img_rgb,
-                fg_mask=fg_mask,
-                stroke_samples_json=samples_json,
-                scale_x=scale_x,
-                scale_y=scale_y,
-                radius=int(radius),
-            )
-            s["color_rgb"] = [int(rgb[0]), int(rgb[1]), int(rgb[2])]
-            s["color_hex"] = "#{:02x}{:02x}{:02x}".format(int(rgb[0]), int(rgb[1]), int(rgb[2]))
-            s["color_conf"] = float(round(float(conf), 4))
-            s["color_contrib_pixels"] = int(contrib)
+            data["stroke_color_sampling"] = {
+                "bg_rgb": list(bg_rgb),
+                "deltae_threshold": float(round(float(deltae_thr), 3)),
+                "radius_px": int(radius),
+                "rgb_quant_shift": int(RGB_Q_SHIFT),
+            }
             did_change = True
 
-        cid = _stroke_color_id_raw(s)
-        color_ids_raw.append(cid)
+        # Persist back into dict and optionally to disk
+        if did_change:
+            data["strokes"] = strokes
+            vectors_by_idx[idx] = data
 
-    color_ids = _normalize_color_ids(color_ids_raw)
+            if save_outputs:
+                out_path = VECTORS_DIR / f"processed_{idx}.json"
+                out_path.write_text(json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8")
 
-    # ensure color_id is normalized and color_name exists (derived from id only, no reassigning)
-    for s, cid in zip(strokes, color_ids):
-        if isinstance(cid, int):
-            if s.get("color_id") != int(cid):
-                s["color_id"] = int(cid)
-                did_change = True
-            if not isinstance(s.get("color_name"), str) or not s.get("color_name").strip():
-                s["color_name"] = _color_name_from_id(int(cid))
-                did_change = True
+            print(f"[ok][mem] processed_{idx}: colours applied" + (f" -> saved" if save_outputs else ""))
+        else:
+            print(f"[ok][mem] processed_{idx}: no changes")
 
-    if ENABLE_STROKE_COLOR_SAMPLING:
-        data["stroke_color_sampling"] = {
-            "bg_rgb": list(bg_rgb),
-            "deltae_threshold": float(round(float(deltae_thr), 3)),
-            "radius_px": int(radius),
-            "rgb_quant_shift": int(RGB_Q_SHIFT),
-        }
-        did_change = True
+    return vectors_by_idx
 
-    if did_change:
-        data["strokes"] = strokes
-        vectors_path.write_text(json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8")
-        print(f"[ok] {processed_img_path.name}: wrote colors -> {vectors_path.name}")
-    else:
-        print(f"[ok] {processed_img_path.name}: no changes")
+    
+    
 
-
-def _worker_process_one(p_str: str) -> Tuple[str, Optional[str]]:
-    # Disable OpenCV internal threading inside each process (avoids oversubscription).
-    try:
-        cv2.setNumThreads(0)
-    except Exception:
-        pass
-
-    p = Path(p_str)
-    try:
-        process_one(p)
-        return (p.name, None)
-    except Exception as e:
-        return (p.name, str(e))
-
-
-def main() -> None:
-    imgs = _glob_processed_images()
-    if not imgs:
-        print(f"[error] no processed_<n>.png images found in {PROCESSED_DIR}")
-        return
-
-    if not PARALLEL:
-        for p in imgs:
-            try:
-                process_one(p)
-            except Exception as e:
-                print(f"[fail] {p.name}: {e}")
-        return
-
-    from concurrent.futures import ProcessPoolExecutor
-
-    cpu = os.cpu_count() or 2
-    max_workers = MAX_WORKERS
-    if max_workers is None:
-        max_workers = max(1, cpu - 1)
-
-    with ProcessPoolExecutor(max_workers=max_workers) as ex:
-        for name, err in ex.map(_worker_process_one, (str(p) for p in imgs)):
-            if err:
-                print(f"[fail] {name}: {err}")
-
-
-if __name__ == "__main__":
-    main()

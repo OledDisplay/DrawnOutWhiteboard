@@ -1,0 +1,1417 @@
+{
+  "image_index": 9,
+  "candidate_labels_raw": [
+    "LHU",
+    "chromosome)",
+    "Prokaryote",
+    "Eukaryote",
+    "Chromatin",
+    "Nucleolus",
+    "Nucleoid",
+    "(folded",
+    "Nucleus"
+  ],
+  "candidate_labels_refined": [
+    "LHU",
+    "chromosome",
+    "Prokaryote",
+    "Eukaryote",
+    "Chromatin",
+    "Nucleolus",
+    "Nucleoid",
+    "Nucleus"
+  ],
+  "base_context": "",
+  "model_id": "Qwen/Qwen3-VL-2B-Instruct",
+  "proc_longest_edge": 600,
+  "panel_edge": 300,
+  "batch_size": 8,
+  "clusters": {
+    "0001_yellow_0_mask.png": {
+      "entry": {
+        "color_id": 2,
+        "color_name": "yellow",
+        "group_index_in_color": 0,
+        "stroke_indexes": [
+          0,
+          1
+        ],
+        "bbox_xyxy": [
+          143,
+          240,
+          202,
+          297
+        ],
+        "crop_file_mask": "yellow_0_mask.png"
+      },
+      "colour_hint": "yellow",
+      "bbox_xyxy": [
+        143,
+        240,
+        202,
+        297
+      ],
+      "bbox_right_panel_xyxy": [
+        46,
+        148,
+        64,
+        167
+      ],
+      "timing_s": 2.7059,
+      "model_raw": "```json\n{\"label\": \"Nucleoid\", \"full_visual_LEFT\": \"A yellow, elongated object with a curved shape, appearing to be a cell structure in a microscopic image.\", \"LEFT_SURROUNDINGS\": \"A grayscale background with faint, curved lines and a black horizontal bar across the image.\"}\n```",
+      "json_objects": [
+        {
+          "label": "Nucleoid",
+          "full_visual_LEFT": "A yellow, elongated object with a curved shape, appearing to be a cell structure in a microscopic image.",
+          "LEFT_SURROUNDINGS": "A grayscale background with faint, curved lines and a black horizontal bar across the image."
+        }
+      ],
+      "parsed": {
+        "label": "Nucleoid",
+        "full_visual_LEFT": "A yellow, elongated object with a curved shape, appearing to be a cell structure in a microscopic image.",
+        "LEFT_SURROUNDINGS": "A grayscale background with faint, curved lines and a black horizontal bar across the image."
+      }
+    },
+    "0002_yellow_1_mask.png": {
+      "entry": {
+        "color_id": 2,
+        "color_name": "yellow",
+        "group_index_in_color": 1,
+        "stroke_indexes": [
+          2
+        ],
+        "bbox_xyxy": [
+          504,
+          363,
+          531,
+          395
+        ],
+        "crop_file_mask": "yellow_1_mask.png"
+      },
+      "colour_hint": "yellow",
+      "bbox_xyxy": [
+        504,
+        363,
+        531,
+        395
+      ],
+      "bbox_right_panel_xyxy": [
+        161,
+        188,
+        169,
+        198
+      ],
+      "timing_s": 2.7059,
+      "model_raw": "```json\n{\"label\": \"Nucleoid\", \"full_visual_LEFT\": \"A blurry image of a yellowish object with a complex structure, possibly a chromosome, in the foreground.\", \"LEFT_SURROUNDINGS\": \"A grayscale background with dark, curved lines, possibly representing a cellular structure or a network of fibers.\"}\n```",
+      "json_objects": [
+        {
+          "label": "Nucleoid",
+          "full_visual_LEFT": "A blurry image of a yellowish object with a complex structure, possibly a chromosome, in the foreground.",
+          "LEFT_SURROUNDINGS": "A grayscale background with dark, curved lines, possibly representing a cellular structure or a network of fibers."
+        }
+      ],
+      "parsed": {
+        "label": "Nucleoid",
+        "full_visual_LEFT": "A blurry image of a yellowish object with a complex structure, possibly a chromosome, in the foreground.",
+        "LEFT_SURROUNDINGS": "A grayscale background with dark, curved lines, possibly representing a cellular structure or a network of fibers."
+      }
+    },
+    "0003_orange_0_mask.png": {
+      "entry": {
+        "color_id": 3,
+        "color_name": "orange",
+        "group_index_in_color": 0,
+        "stroke_indexes": [
+          3,
+          4,
+          5,
+          6,
+          7,
+          8,
+          9,
+          10,
+          11,
+          12,
+          13,
+          15,
+          21,
+          22,
+          23,
+          24,
+          25,
+          26,
+          27
+        ],
+        "bbox_xyxy": [
+          96,
+          0,
+          579,
+          456
+        ],
+        "crop_file_mask": "orange_0_mask.png"
+      },
+      "colour_hint": "orange",
+      "bbox_xyxy": [
+        96,
+        0,
+        579,
+        456
+      ],
+      "bbox_right_panel_xyxy": [
+        31,
+        72,
+        184,
+        217
+      ],
+      "timing_s": 2.7059,
+      "model_raw": "```json\n{\"label\": \"Eukaryote\", \"full_visual_LEFT\": \"A detailed illustration of a eukaryotic cell, showing various organelles such as the nucleus, mitochondria, and endoplasmic reticulum. The nucleus is prominently visible with a dense nucleoplasm and a nucleolus inside. The",
+      "json_objects": [],
+      "parsed": null
+    },
+    "0004_orange_1_mask.png": {
+      "entry": {
+        "color_id": 3,
+        "color_name": "orange",
+        "group_index_in_color": 1,
+        "stroke_indexes": [
+          28
+        ],
+        "bbox_xyxy": [
+          196,
+          274,
+          225,
+          308
+        ],
+        "crop_file_mask": "orange_1_mask.png"
+      },
+      "colour_hint": "orange",
+      "bbox_xyxy": [
+        196,
+        274,
+        225,
+        308
+      ],
+      "bbox_right_panel_xyxy": [
+        62,
+        159,
+        72,
+        170
+      ],
+      "timing_s": 2.7059,
+      "model_raw": "```json\n{\"label\": \"Eukaryote\", \"full_visual_LEFT\": \"A blurry, light-colored, oval-shaped object with two dark, circular structures inside, set against a gray background.\", \"LEFT_SURROUNDINGS\": \"A light gray, blurred background with a faint, out-of-focus shape in the lower right corner.\"}\n```",
+      "json_objects": [
+        {
+          "label": "Eukaryote",
+          "full_visual_LEFT": "A blurry, light-colored, oval-shaped object with two dark, circular structures inside, set against a gray background.",
+          "LEFT_SURROUNDINGS": "A light gray, blurred background with a faint, out-of-focus shape in the lower right corner."
+        }
+      ],
+      "parsed": {
+        "label": "Eukaryote",
+        "full_visual_LEFT": "A blurry, light-colored, oval-shaped object with two dark, circular structures inside, set against a gray background.",
+        "LEFT_SURROUNDINGS": "A light gray, blurred background with a faint, out-of-focus shape in the lower right corner."
+      }
+    },
+    "0005_orange_2_mask.png": {
+      "entry": {
+        "color_id": 3,
+        "color_name": "orange",
+        "group_index_in_color": 2,
+        "stroke_indexes": [
+          14,
+          16
+        ],
+        "bbox_xyxy": [
+          258,
+          272,
+          293,
+          349
+        ],
+        "crop_file_mask": "orange_2_mask.png"
+      },
+      "colour_hint": "orange",
+      "bbox_xyxy": [
+        258,
+        272,
+        293,
+        349
+      ],
+      "bbox_right_panel_xyxy": [
+        82,
+        159,
+        93,
+        183
+      ],
+      "timing_s": 2.7059,
+      "model_raw": "```json\n{\"label\": \"Nucleoid\", \"full_visual_LEFT\": \"A long, thin, orange-colored object with a curved shape, surrounded by a gray, textured background. The object has a distinct, segmented appearance with a central core and a surrounding structure, resembling a bacterial cell or a prokaryotic structure.\", \"LEFT_SUR",
+      "json_objects": [],
+      "parsed": null
+    },
+    "0006_orange_3_mask.png": {
+      "entry": {
+        "color_id": 3,
+        "color_name": "orange",
+        "group_index_in_color": 3,
+        "stroke_indexes": [
+          17,
+          18,
+          19,
+          20
+        ],
+        "bbox_xyxy": [
+          649,
+          280,
+          864,
+          452
+        ],
+        "crop_file_mask": "orange_3_mask.png"
+      },
+      "colour_hint": "orange",
+      "bbox_xyxy": [
+        649,
+        280,
+        864,
+        452
+      ],
+      "bbox_right_panel_xyxy": [
+        207,
+        161,
+        275,
+        216
+      ],
+      "timing_s": 2.7059,
+      "model_raw": "```json\n{\n  \"label\": \"Prokaryote\",\n  \"full_visual_LEFT\": \"An illustration of a prokaryotic cell, specifically a bacterium, with a long, whip-like tail and a rounded body containing a cluster of circular structures.\",\n  \"LEFT_SURROUNDINGS\": \"A white background with a black line indicating",
+      "json_objects": [],
+      "parsed": null
+    },
+    "0007_cyan_0_mask.png": {
+      "entry": {
+        "color_id": 4,
+        "color_name": "cyan",
+        "group_index_in_color": 0,
+        "stroke_indexes": [
+          29,
+          30,
+          31,
+          32,
+          33,
+          34,
+          35,
+          36,
+          37,
+          38
+        ],
+        "bbox_xyxy": [
+          318,
+          138,
+          436,
+          212
+        ],
+        "crop_file_mask": "cyan_0_mask.png"
+      },
+      "colour_hint": "cyan",
+      "bbox_xyxy": [
+        318,
+        138,
+        436,
+        212
+      ],
+      "bbox_right_panel_xyxy": [
+        101,
+        116,
+        139,
+        140
+      ],
+      "timing_s": 2.7059,
+      "model_raw": "```json\n{\"label\": \"Eukaryote\", \"full_visual_LEFT\": \"A close-up of a cell with numerous blue, oval-shaped organelles, likely representing the endoplasmic reticulum, and a large, complex structure in the background, possibly the nucleus. The surrounding area is gray and textured, suggesting a cellular",
+      "json_objects": [],
+      "parsed": null
+    },
+    "0008_green_0_mask.png": {
+      "entry": {
+        "color_id": 5,
+        "color_name": "green",
+        "group_index_in_color": 0,
+        "stroke_indexes": [
+          39
+        ],
+        "bbox_xyxy": [
+          191,
+          42,
+          243,
+          92
+        ],
+        "crop_file_mask": "green_0_mask.png"
+      },
+      "colour_hint": "green",
+      "bbox_xyxy": [
+        191,
+        42,
+        243,
+        92
+      ],
+      "bbox_right_panel_xyxy": [
+        61,
+        85,
+        77,
+        101
+      ],
+      "timing_s": 2.7059,
+      "model_raw": "```json\n{\"label\": \"chromosome\", \"full_visual_LEFT\": \"A green, elongated structure with a distinct shape, appearing as a single, thick, and tightly coiled strand, positioned in the center of the image with a blurred background of dark gray lines.\", \"LEFT_SURROUNDINGS\": \"A blurred, grayish background with",
+      "json_objects": [],
+      "parsed": null
+    },
+    "0009_green_1_mask.png": {
+      "entry": {
+        "color_id": 5,
+        "color_name": "green",
+        "group_index_in_color": 1,
+        "stroke_indexes": [
+          44
+        ],
+        "bbox_xyxy": [
+          272,
+          36,
+          309,
+          84
+        ],
+        "crop_file_mask": "green_1_mask.png"
+      },
+      "colour_hint": "green",
+      "bbox_xyxy": [
+        272,
+        36,
+        309,
+        84
+      ],
+      "bbox_right_panel_xyxy": [
+        87,
+        83,
+        98,
+        99
+      ],
+      "timing_s": 2.5355,
+      "model_raw": "```json\n{\"label\": \"Eukaryote\", \"full_visual_LEFT\": \"A green circular object with a light green center and a white outer edge, set against a blurred background with gray and white tones.\", \"LEFT_SURROUNDINGS\": \"A blurred background with gray and white tones, featuring a faint gray line at the bottom and a",
+      "json_objects": [],
+      "parsed": null
+    },
+    "0010_green_2_mask.png": {
+      "entry": {
+        "color_id": 5,
+        "color_name": "green",
+        "group_index_in_color": 2,
+        "stroke_indexes": [
+          40,
+          41,
+          42
+        ],
+        "bbox_xyxy": [
+          456,
+          151,
+          512,
+          224
+        ],
+        "crop_file_mask": "green_2_mask.png"
+      },
+      "colour_hint": "green",
+      "bbox_xyxy": [
+        456,
+        151,
+        512,
+        224
+      ],
+      "bbox_right_panel_xyxy": [
+        145,
+        120,
+        163,
+        143
+      ],
+      "timing_s": 2.5355,
+      "model_raw": "```json\n{\"label\": \"Eukaryote\", \"full_visual_LEFT\": \"Two green circular objects\", \"LEFT_SURROUNDINGS\": \"Grayscaled surroundings\"}\n```",
+      "json_objects": [
+        {
+          "label": "Eukaryote",
+          "full_visual_LEFT": "Two green circular objects",
+          "LEFT_SURROUNDINGS": "Grayscaled surroundings"
+        }
+      ],
+      "parsed": {
+        "label": "Eukaryote",
+        "full_visual_LEFT": "Two green circular objects",
+        "LEFT_SURROUNDINGS": "Grayscaled surroundings"
+      }
+    },
+    "0011_green_3_mask.png": {
+      "entry": {
+        "color_id": 5,
+        "color_name": "green",
+        "group_index_in_color": 3,
+        "stroke_indexes": [
+          43
+        ],
+        "bbox_xyxy": [
+          486,
+          296,
+          531,
+          382
+        ],
+        "crop_file_mask": "green_3_mask.png"
+      },
+      "colour_hint": "green",
+      "bbox_xyxy": [
+        486,
+        296,
+        531,
+        382
+      ],
+      "bbox_right_panel_xyxy": [
+        155,
+        166,
+        169,
+        194
+      ],
+      "timing_s": 2.5355,
+      "model_raw": "```json\n{\"label\": \"Nucleoid\", \"full_visual_LEFT\": \"A green, elongated, curved object with a lighter green center and a darker green edge, surrounded by a gray background with circular shapes.\", \"LEFT_SURROUNDINGS\": \"A gray background with several circular shapes, some of which are lighter gray and others are darker",
+      "json_objects": [],
+      "parsed": null
+    },
+    "0012_magenta_0_mask.png": {
+      "entry": {
+        "color_id": 6,
+        "color_name": "magenta",
+        "group_index_in_color": 0,
+        "stroke_indexes": [
+          47,
+          48,
+          49,
+          50
+        ],
+        "bbox_xyxy": [
+          258,
+          176,
+          337,
+          271
+        ],
+        "crop_file_mask": "magenta_0_mask.png"
+      },
+      "colour_hint": "magenta",
+      "bbox_xyxy": [
+        258,
+        176,
+        337,
+        271
+      ],
+      "bbox_right_panel_xyxy": [
+        82,
+        128,
+        107,
+        158
+      ],
+      "timing_s": 2.5355,
+      "model_raw": "```json\n{\"label\": \"Nucleus\", \"full_visual_LEFT\": \"A magnified view of a cellular structure with a complex, folded appearance, featuring a central, dense, purple nucleus surrounded by a lighter, granular cytoplasmic environment. The structure is composed of numerous interconnected, elongated, and folded elements, with a",
+      "json_objects": [],
+      "parsed": null
+    },
+    "0013_magenta_1_mask.png": {
+      "entry": {
+        "color_id": 6,
+        "color_name": "magenta",
+        "group_index_in_color": 1,
+        "stroke_indexes": [
+          51,
+          52
+        ],
+        "bbox_xyxy": [
+          295,
+          351,
+          407,
+          418
+        ],
+        "crop_file_mask": "magenta_1_mask.png"
+      },
+      "colour_hint": "magenta",
+      "bbox_xyxy": [
+        295,
+        351,
+        407,
+        418
+      ],
+      "bbox_right_panel_xyxy": [
+        94,
+        184,
+        130,
+        205
+      ],
+      "timing_s": 2.5355,
+      "model_raw": "```json\n{\"label\": \"Nucleus\", \"full_visual_LEFT\": \"A magnified view of a cell's nucleus, showing a dense, circular structure with a granular texture, surrounded by a thin membrane, with red and purple coloring indicating the nucleus's internal components.\", \"LEFT_SURROUNDINGS\": \"A grayscale image of a cell",
+      "json_objects": [],
+      "parsed": null
+    },
+    "0014_magenta_2_mask.png": {
+      "entry": {
+        "color_id": 6,
+        "color_name": "magenta",
+        "group_index_in_color": 2,
+        "stroke_indexes": [
+          46
+        ],
+        "bbox_xyxy": [
+          371,
+          115,
+          406,
+          142
+        ],
+        "crop_file_mask": "magenta_2_mask.png"
+      },
+      "colour_hint": "magenta",
+      "bbox_xyxy": [
+        371,
+        115,
+        406,
+        142
+      ],
+      "bbox_right_panel_xyxy": [
+        118,
+        109,
+        129,
+        117
+      ],
+      "timing_s": 2.5355,
+      "model_raw": "```json\n{\"label\": \"Chromosome\", \"full_visual_LEFT\": \"A pinkish, elongated, and somewhat cross-shaped structure in the center of a blurred background, with a magenta color.\", \"LEFT_SURROUNDINGS\": \"A grayscale, blurred background with dark gray lines and a faint, out-of-focus shape in the center.\"",
+      "json_objects": [],
+      "parsed": null
+    },
+    "0015_magenta_3_mask.png": {
+      "entry": {
+        "color_id": 6,
+        "color_name": "magenta",
+        "group_index_in_color": 3,
+        "stroke_indexes": [
+          45
+        ],
+        "bbox_xyxy": [
+          403,
+          108,
+          441,
+          136
+        ],
+        "crop_file_mask": "magenta_3_mask.png"
+      },
+      "colour_hint": "magenta",
+      "bbox_xyxy": [
+        403,
+        108,
+        441,
+        136
+      ],
+      "bbox_right_panel_xyxy": [
+        128,
+        106,
+        140,
+        115
+      ],
+      "timing_s": 2.5355,
+      "model_raw": "```json\n{\"label\": \"Nucleus\", \"full_visual_LEFT\": \"A purple, circular structure with a dense center and surrounding granular material, located in the center of a larger, oval-shaped cell. The structure is surrounded by a thin, light-colored membrane, and it is positioned in the foreground of the image.\", \"LEFT_SUR",
+      "json_objects": [],
+      "parsed": null
+    },
+    "0016_red_0_mask.png": {
+      "entry": {
+        "color_id": 7,
+        "color_name": "red",
+        "group_index_in_color": 0,
+        "stroke_indexes": [
+          68,
+          73,
+          78,
+          79,
+          80,
+          81,
+          82,
+          83,
+          84,
+          85,
+          86,
+          87,
+          88,
+          90,
+          94,
+          95,
+          96
+        ],
+        "bbox_xyxy": [
+          129,
+          218,
+          544,
+          432
+        ],
+        "crop_file_mask": "red_0_mask.png"
+      },
+      "colour_hint": "red",
+      "bbox_xyxy": [
+        129,
+        218,
+        544,
+        432
+      ],
+      "bbox_right_panel_xyxy": [
+        41,
+        141,
+        173,
+        210
+      ],
+      "timing_s": 2.5355,
+      "model_raw": "```json\n{\"label\": \"Eukaryote\", \"full_visual_LEFT\": \"A detailed diagram of a eukaryotic cell, showing the nucleus with a dense nucleoplasm and a prominent nucleolus, surrounded by a complex network of organelles and cytoplasmic structures.\", \"LEFT_SURROUNDINGS\": \"A grayscale",
+      "json_objects": [],
+      "parsed": null
+    },
+    "0017_red_1_mask.png": {
+      "entry": {
+        "color_id": 7,
+        "color_name": "red",
+        "group_index_in_color": 1,
+        "stroke_indexes": [
+          63,
+          64,
+          66,
+          69,
+          70,
+          71,
+          75,
+          76,
+          77
+        ],
+        "bbox_xyxy": [
+          240,
+          198,
+          338,
+          306
+        ],
+        "crop_file_mask": "red_1_mask.png"
+      },
+      "colour_hint": "red",
+      "bbox_xyxy": [
+        240,
+        198,
+        338,
+        306
+      ],
+      "bbox_right_panel_xyxy": [
+        76,
+        135,
+        108,
+        169
+      ],
+      "timing_s": 2.5425,
+      "model_raw": "```json\n{\"label\": \"Nucleolus\", \"full_visual_LEFT\": \"A close-up of a cellular structure with red dots representing nucleolus, surrounded by gray and blue structures.\", \"LEFT_SURROUNDINGS\": \"A grayscale image of a cellular structure with red dots and blue and gray structures surrounding the red dots.\"}\n```",
+      "json_objects": [
+        {
+          "label": "Nucleolus",
+          "full_visual_LEFT": "A close-up of a cellular structure with red dots representing nucleolus, surrounded by gray and blue structures.",
+          "LEFT_SURROUNDINGS": "A grayscale image of a cellular structure with red dots and blue and gray structures surrounding the red dots."
+        }
+      ],
+      "parsed": {
+        "label": "Nucleolus",
+        "full_visual_LEFT": "A close-up of a cellular structure with red dots representing nucleolus, surrounded by gray and blue structures.",
+        "LEFT_SURROUNDINGS": "A grayscale image of a cellular structure with red dots and blue and gray structures surrounding the red dots."
+      }
+    },
+    "0018_red_2_mask.png": {
+      "entry": {
+        "color_id": 7,
+        "color_name": "red",
+        "group_index_in_color": 2,
+        "stroke_indexes": [
+          54,
+          55,
+          56,
+          57,
+          58,
+          59,
+          60,
+          61,
+          91
+        ],
+        "bbox_xyxy": [
+          257,
+          63,
+          471,
+          197
+        ],
+        "crop_file_mask": "red_2_mask.png"
+      },
+      "colour_hint": "red",
+      "bbox_xyxy": [
+        257,
+        63,
+        471,
+        197
+      ],
+      "bbox_right_panel_xyxy": [
+        82,
+        92,
+        150,
+        135
+      ],
+      "timing_s": 2.5425,
+      "model_raw": "```json\n{\"label\": \"Eukaryote\", \"full_visual_LEFT\": \"A cropped image showing a red-colored object with a gray background, which is a part of a larger structure.\", \"LEFT_SURROUNDINGS\": \"A gray background with various structures, including a red-colored object and other gray elements.\"}\n```",
+      "json_objects": [
+        {
+          "label": "Eukaryote",
+          "full_visual_LEFT": "A cropped image showing a red-colored object with a gray background, which is a part of a larger structure.",
+          "LEFT_SURROUNDINGS": "A gray background with various structures, including a red-colored object and other gray elements."
+        }
+      ],
+      "parsed": {
+        "label": "Eukaryote",
+        "full_visual_LEFT": "A cropped image showing a red-colored object with a gray background, which is a part of a larger structure.",
+        "LEFT_SURROUNDINGS": "A gray background with various structures, including a red-colored object and other gray elements."
+      }
+    },
+    "0019_red_3_mask.png": {
+      "entry": {
+        "color_id": 7,
+        "color_name": "red",
+        "group_index_in_color": 3,
+        "stroke_indexes": [
+          62,
+          65,
+          67
+        ],
+        "bbox_xyxy": [
+          367,
+          187,
+          449,
+          257
+        ],
+        "crop_file_mask": "red_3_mask.png"
+      },
+      "colour_hint": "red",
+      "bbox_xyxy": [
+        367,
+        187,
+        449,
+        257
+      ],
+      "bbox_right_panel_xyxy": [
+        117,
+        132,
+        143,
+        154
+      ],
+      "timing_s": 2.5425,
+      "model_raw": "```json\n{\"label\": \"Nucleus\", \"full_visual_LEFT\": \"A close-up of a cellular structure with red dots and a blue outline, showing a complex, layered structure with a central core and surrounding granules.\", \"LEFT_SURROUNDINGS\": \"A grayscale image of a similar structure, but with a more blurred and less defined",
+      "json_objects": [],
+      "parsed": null
+    },
+    "0020_red_4_mask.png": {
+      "entry": {
+        "color_id": 7,
+        "color_name": "red",
+        "group_index_in_color": 4,
+        "stroke_indexes": [
+          53
+        ],
+        "bbox_xyxy": [
+          393,
+          46,
+          445,
+          105
+        ],
+        "crop_file_mask": "red_4_mask.png"
+      },
+      "colour_hint": "red",
+      "bbox_xyxy": [
+        393,
+        46,
+        445,
+        105
+      ],
+      "bbox_right_panel_xyxy": [
+        125,
+        87,
+        142,
+        105
+      ],
+      "timing_s": 2.5425,
+      "model_raw": "```json\n{\"label\": \"Eukaryote\", \"full_visual_LEFT\": \"Two pink circular objects with a blurry background\", \"LEFT_SURROUNDINGS\": \"A grayscale image with a red box highlighting a pink circular object, and a gray background with a diagonal line.\"}\n```",
+      "json_objects": [
+        {
+          "label": "Eukaryote",
+          "full_visual_LEFT": "Two pink circular objects with a blurry background",
+          "LEFT_SURROUNDINGS": "A grayscale image with a red box highlighting a pink circular object, and a gray background with a diagonal line."
+        }
+      ],
+      "parsed": {
+        "label": "Eukaryote",
+        "full_visual_LEFT": "Two pink circular objects with a blurry background",
+        "LEFT_SURROUNDINGS": "A grayscale image with a red box highlighting a pink circular object, and a gray background with a diagonal line."
+      }
+    },
+    "0021_red_5_mask.png": {
+      "entry": {
+        "color_id": 7,
+        "color_name": "red",
+        "group_index_in_color": 5,
+        "stroke_indexes": [
+          74
+        ],
+        "bbox_xyxy": [
+          402,
+          252,
+          439,
+          287
+        ],
+        "crop_file_mask": "red_5_mask.png"
+      },
+      "colour_hint": "red",
+      "bbox_xyxy": [
+        402,
+        252,
+        439,
+        287
+      ],
+      "bbox_right_panel_xyxy": [
+        128,
+        152,
+        140,
+        163
+      ],
+      "timing_s": 2.5425,
+      "model_raw": "```json\n{\"label\": \"Nucleus\", \"full_visual_LEFT\": \"A blurry image of a cell with a prominent nucleus, highlighted in red, surrounded by a grayscale background.\", \"LEFT_SURROUNDINGS\": \"A grayscale image of a cell with a nucleus, highlighted in red, surrounded by a grayscale background.\"}\n```",
+      "json_objects": [
+        {
+          "label": "Nucleus",
+          "full_visual_LEFT": "A blurry image of a cell with a prominent nucleus, highlighted in red, surrounded by a grayscale background.",
+          "LEFT_SURROUNDINGS": "A grayscale image of a cell with a nucleus, highlighted in red, surrounded by a grayscale background."
+        }
+      ],
+      "parsed": {
+        "label": "Nucleus",
+        "full_visual_LEFT": "A blurry image of a cell with a prominent nucleus, highlighted in red, surrounded by a grayscale background.",
+        "LEFT_SURROUNDINGS": "A grayscale image of a cell with a nucleus, highlighted in red, surrounded by a grayscale background."
+      }
+    },
+    "0022_red_6_mask.png": {
+      "entry": {
+        "color_id": 7,
+        "color_name": "red",
+        "group_index_in_color": 6,
+        "stroke_indexes": [
+          72,
+          92,
+          93
+        ],
+        "bbox_xyxy": [
+          464,
+          194,
+          542,
+          263
+        ],
+        "crop_file_mask": "red_6_mask.png"
+      },
+      "colour_hint": "red",
+      "bbox_xyxy": [
+        464,
+        194,
+        542,
+        263
+      ],
+      "bbox_right_panel_xyxy": [
+        148,
+        134,
+        173,
+        156
+      ],
+      "timing_s": 2.5425,
+      "model_raw": "```json\n{\"label\": \"Eukaryote\", \"full_visual_LEFT\": \"A red, circular object with a granular texture, surrounded by grayed-out shapes and other red objects.\", \"LEFT_SURROUNDINGS\": \"A grayed-out background with a gray circle and other red objects.\"}\n```",
+      "json_objects": [
+        {
+          "label": "Eukaryote",
+          "full_visual_LEFT": "A red, circular object with a granular texture, surrounded by grayed-out shapes and other red objects.",
+          "LEFT_SURROUNDINGS": "A grayed-out background with a gray circle and other red objects."
+        }
+      ],
+      "parsed": {
+        "label": "Eukaryote",
+        "full_visual_LEFT": "A red, circular object with a granular texture, surrounded by grayed-out shapes and other red objects.",
+        "LEFT_SURROUNDINGS": "A grayed-out background with a gray circle and other red objects."
+      }
+    },
+    "0023_red_7_mask.png": {
+      "entry": {
+        "color_id": 7,
+        "color_name": "red",
+        "group_index_in_color": 7,
+        "stroke_indexes": [
+          89
+        ],
+        "bbox_xyxy": [
+          761,
+          350,
+          818,
+          403
+        ],
+        "crop_file_mask": "red_7_mask.png"
+      },
+      "colour_hint": "red",
+      "bbox_xyxy": [
+        761,
+        350,
+        818,
+        403
+      ],
+      "bbox_right_panel_xyxy": [
+        242,
+        183,
+        261,
+        200
+      ],
+      "timing_s": 2.5425,
+      "model_raw": "```json\n{\"label\": \"Eukaryote\", \"full_visual_LEFT\": \"A red, irregularly shaped, cellular structure with a complex internal structure, possibly a cell nucleus, being examined under a microscope.\", \"LEFT_SURROUNDINGS\": \"A grayscale background with circular patterns, likely a microscope slide or a sample grid.\"}\n```",
+      "json_objects": [
+        {
+          "label": "Eukaryote",
+          "full_visual_LEFT": "A red, irregularly shaped, cellular structure with a complex internal structure, possibly a cell nucleus, being examined under a microscope.",
+          "LEFT_SURROUNDINGS": "A grayscale background with circular patterns, likely a microscope slide or a sample grid."
+        }
+      ],
+      "parsed": {
+        "label": "Eukaryote",
+        "full_visual_LEFT": "A red, irregularly shaped, cellular structure with a complex internal structure, possibly a cell nucleus, being examined under a microscope.",
+        "LEFT_SURROUNDINGS": "A grayscale background with circular patterns, likely a microscope slide or a sample grid."
+      }
+    },
+    "0024_blue_0_mask.png": {
+      "entry": {
+        "color_id": 8,
+        "color_name": "blue",
+        "group_index_in_color": 0,
+        "stroke_indexes": [
+          97,
+          98,
+          99,
+          100,
+          101,
+          102,
+          103,
+          104,
+          105,
+          106,
+          107,
+          108,
+          109,
+          110,
+          111,
+          112,
+          113,
+          114,
+          115,
+          116,
+          117,
+          118,
+          119,
+          120,
+          121,
+          122,
+          123,
+          124,
+          125,
+          126,
+          127,
+          128,
+          129,
+          130
+        ],
+        "bbox_xyxy": [
+          228,
+          178,
+          457,
+          417
+        ],
+        "crop_file_mask": "blue_0_mask.png"
+      },
+      "colour_hint": "blue",
+      "bbox_xyxy": [
+        228,
+        178,
+        457,
+        417
+      ],
+      "bbox_right_panel_xyxy": [
+        73,
+        129,
+        146,
+        205
+      ],
+      "timing_s": 2.5425,
+      "model_raw": "```json\n{\"label\": \"Nucleus\", \"full_visual_LEFT\": \"A detailed diagram of a cell with a large, central nucleus surrounded by a complex network of membranes and structures, including a prominent nucleolus within the nucleus.\", \"LEFT_SURROUNDINGS\": \"A grayscale representation of the cell's cytoplasm and other organel",
+      "json_objects": [],
+      "parsed": null
+    },
+    "0025_purple_0_mask.png": {
+      "entry": {
+        "color_id": 9,
+        "color_name": "purple",
+        "group_index_in_color": 0,
+        "stroke_indexes": [
+          134,
+          135,
+          136
+        ],
+        "bbox_xyxy": [
+          250,
+          230,
+          297,
+          270
+        ],
+        "crop_file_mask": "purple_0_mask.png"
+      },
+      "colour_hint": "purple",
+      "bbox_xyxy": [
+        250,
+        230,
+        297,
+        270
+      ],
+      "bbox_right_panel_xyxy": [
+        80,
+        145,
+        95,
+        158
+      ],
+      "timing_s": 2.5631,
+      "model_raw": "```json\n{\"label\": \"Nucleus\", \"full_visual_LEFT\": \"A blurry image of a cell with a prominent purple nucleus and surrounding grayed-out background.\", \"LEFT_SURROUNDINGS\": \"A grayscale background with a patterned texture, possibly a microscope slide or a cellular structure.\"}\n```",
+      "json_objects": [
+        {
+          "label": "Nucleus",
+          "full_visual_LEFT": "A blurry image of a cell with a prominent purple nucleus and surrounding grayed-out background.",
+          "LEFT_SURROUNDINGS": "A grayscale background with a patterned texture, possibly a microscope slide or a cellular structure."
+        }
+      ],
+      "parsed": {
+        "label": "Nucleus",
+        "full_visual_LEFT": "A blurry image of a cell with a prominent purple nucleus and surrounding grayed-out background.",
+        "LEFT_SURROUNDINGS": "A grayscale background with a patterned texture, possibly a microscope slide or a cellular structure."
+      }
+    },
+    "0026_purple_1_mask.png": {
+      "entry": {
+        "color_id": 9,
+        "color_name": "purple",
+        "group_index_in_color": 1,
+        "stroke_indexes": [
+          138
+        ],
+        "bbox_xyxy": [
+          256,
+          314,
+          288,
+          351
+        ],
+        "crop_file_mask": "purple_1_mask.png"
+      },
+      "colour_hint": "purple",
+      "bbox_xyxy": [
+        256,
+        314,
+        288,
+        351
+      ],
+      "bbox_right_panel_xyxy": [
+        82,
+        172,
+        92,
+        184
+      ],
+      "timing_s": 2.5631,
+      "model_raw": "```json\n{\"label\": \"Nucleoid\", \"full_visual_LEFT\": \"A blurry, colored object with a purple core and surrounding grayish areas, appearing as a central structure in a grayscale image.\", \"LEFT_SURROUNDINGS\": \"A grayscale image with dark, circular shapes surrounding the central object.\"}\n```",
+      "json_objects": [
+        {
+          "label": "Nucleoid",
+          "full_visual_LEFT": "A blurry, colored object with a purple core and surrounding grayish areas, appearing as a central structure in a grayscale image.",
+          "LEFT_SURROUNDINGS": "A grayscale image with dark, circular shapes surrounding the central object."
+        }
+      ],
+      "parsed": {
+        "label": "Nucleoid",
+        "full_visual_LEFT": "A blurry, colored object with a purple core and surrounding grayish areas, appearing as a central structure in a grayscale image.",
+        "LEFT_SURROUNDINGS": "A grayscale image with dark, circular shapes surrounding the central object."
+      }
+    },
+    "0027_purple_2_mask.png": {
+      "entry": {
+        "color_id": 9,
+        "color_name": "purple",
+        "group_index_in_color": 2,
+        "stroke_indexes": [
+          137,
+          139,
+          140,
+          141
+        ],
+        "bbox_xyxy": [
+          268,
+          239,
+          442,
+          413
+        ],
+        "crop_file_mask": "purple_2_mask.png"
+      },
+      "colour_hint": "purple",
+      "bbox_xyxy": [
+        268,
+        239,
+        442,
+        413
+      ],
+      "bbox_right_panel_xyxy": [
+        85,
+        148,
+        141,
+        204
+      ],
+      "timing_s": 2.5631,
+      "model_raw": "```json\n{\n  \"label\": \"Nucleolus\",\n  \"full_visual_LEFT\": \"A circular, purple-colored structure with a dense, granular appearance, surrounded by a gray, textured background.\",\n  \"LEFT_SURROUNDINGS\": \"A grayscale, detailed structure with a complex, layered appearance, featuring a central dark circle and surrounding",
+      "json_objects": [],
+      "parsed": null
+    },
+    "0028_purple_3_mask.png": {
+      "entry": {
+        "color_id": 9,
+        "color_name": "purple",
+        "group_index_in_color": 3,
+        "stroke_indexes": [
+          131,
+          132,
+          133
+        ],
+        "bbox_xyxy": [
+          368,
+          206,
+          433,
+          260
+        ],
+        "crop_file_mask": "purple_3_mask.png"
+      },
+      "colour_hint": "purple",
+      "bbox_xyxy": [
+        368,
+        206,
+        433,
+        260
+      ],
+      "bbox_right_panel_xyxy": [
+        117,
+        138,
+        138,
+        155
+      ],
+      "timing_s": 2.5631,
+      "model_raw": "```json\n{\"label\": \"Nucleoid\", \"full_visual_LEFT\": \"A purple, elongated structure with a complex, irregular shape, surrounded by a gray, textured background.\", \"LEFT_SURROUNDINGS\": \"A gray, textured background with a patterned, somewhat circular shape.\"}\n```",
+      "json_objects": [
+        {
+          "label": "Nucleoid",
+          "full_visual_LEFT": "A purple, elongated structure with a complex, irregular shape, surrounded by a gray, textured background.",
+          "LEFT_SURROUNDINGS": "A gray, textured background with a patterned, somewhat circular shape."
+        }
+      ],
+      "parsed": {
+        "label": "Nucleoid",
+        "full_visual_LEFT": "A purple, elongated structure with a complex, irregular shape, surrounded by a gray, textured background.",
+        "LEFT_SURROUNDINGS": "A gray, textured background with a patterned, somewhat circular shape."
+      }
+    },
+    "0029_black_0_mask.png": {
+      "entry": {
+        "color_id": 11,
+        "color_name": "black",
+        "group_index_in_color": 0,
+        "stroke_indexes": [
+          142
+        ],
+        "bbox_xyxy": [
+          75,
+          243,
+          339,
+          287
+        ],
+        "crop_file_mask": "black_0_mask.png"
+      },
+      "colour_hint": "black",
+      "bbox_xyxy": [
+        75,
+        243,
+        339,
+        287
+      ],
+      "bbox_right_panel_xyxy": [
+        24,
+        149,
+        108,
+        163
+      ],
+      "timing_s": 2.5631,
+      "model_raw": "```json\n{\n  \"label\": \"Nucleus\",\n  \"full_visual_LEFT\": \"A black line with a colored object on the left side of the image, with a grayscale background.\",\n  \"LEFT_SURROUNDINGS\": \"A grayscale image with a black line and a colored object on the left side of the image, with a grayscale",
+      "json_objects": [],
+      "parsed": null
+    },
+    "0030_black_1_mask.png": {
+      "entry": {
+        "color_id": 11,
+        "color_name": "black",
+        "group_index_in_color": 1,
+        "stroke_indexes": [
+          143
+        ],
+        "bbox_xyxy": [
+          92,
+          288,
+          358,
+          332
+        ],
+        "crop_file_mask": "black_1_mask.png"
+      },
+      "colour_hint": "black",
+      "bbox_xyxy": [
+        92,
+        288,
+        358,
+        332
+      ],
+      "bbox_right_panel_xyxy": [
+        29,
+        164,
+        114,
+        178
+      ],
+      "timing_s": 2.5631,
+      "model_raw": "```json\n{\"label\": \"Nucleoid\", \"full_visual_LEFT\": \"A black line with a red dot on the left side of the image, with a grayscale background and a black line extending from the red dot.\", \"LEFT_SURROUNDINGS\": \"A grayscale background with a black line and a red dot on the left side of the",
+      "json_objects": [],
+      "parsed": null
+    },
+    "0031_black_2_mask.png": {
+      "entry": {
+        "color_id": 11,
+        "color_name": "black",
+        "group_index_in_color": 2,
+        "stroke_indexes": [
+          145
+        ],
+        "bbox_xyxy": [
+          116,
+          333,
+          373,
+          376
+        ],
+        "crop_file_mask": "black_2_mask.png"
+      },
+      "colour_hint": "black",
+      "bbox_xyxy": [
+        116,
+        333,
+        373,
+        376
+      ],
+      "bbox_right_panel_xyxy": [
+        37,
+        178,
+        119,
+        192
+      ],
+      "timing_s": 2.5631,
+      "model_raw": "```json\n{\"label\": \"Nucleus\", \"full_visual_LEFT\": \"A black line with a purple end and a gray background, with a gray and black background.\", \"LEFT_SURROUNDINGS\": \"A black background with a gray and black background.\"}\n```",
+      "json_objects": [
+        {
+          "label": "Nucleus",
+          "full_visual_LEFT": "A black line with a purple end and a gray background, with a gray and black background.",
+          "LEFT_SURROUNDINGS": "A black background with a gray and black background."
+        }
+      ],
+      "parsed": {
+        "label": "Nucleus",
+        "full_visual_LEFT": "A black line with a purple end and a gray background, with a gray and black background.",
+        "LEFT_SURROUNDINGS": "A black background with a gray and black background."
+      }
+    },
+    "0032_black_3_mask.png": {
+      "entry": {
+        "color_id": 11,
+        "color_name": "black",
+        "group_index_in_color": 3,
+        "stroke_indexes": [
+          144
+        ],
+        "bbox_xyxy": [
+          783,
+          311,
+          842,
+          378
+        ],
+        "crop_file_mask": "black_3_mask.png"
+      },
+      "colour_hint": "black",
+      "bbox_xyxy": [
+        783,
+        311,
+        842,
+        378
+      ],
+      "bbox_right_panel_xyxy": [
+        249,
+        171,
+        268,
+        192
+      ],
+      "timing_s": 2.5631,
+      "model_raw": "```json\n{\"label\": \"Nucleus\", \"full_visual_LEFT\": \"A black object with a yellowish edge, positioned diagonally in a grayscale background.\", \"LEFT_SURROUNDINGS\": \"A grayscale background with curved lines and a dark shape in the lower left corner.\"}\n```",
+      "json_objects": [
+        {
+          "label": "Nucleus",
+          "full_visual_LEFT": "A black object with a yellowish edge, positioned diagonally in a grayscale background.",
+          "LEFT_SURROUNDINGS": "A grayscale background with curved lines and a dark shape in the lower left corner."
+        }
+      ],
+      "parsed": {
+        "label": "Nucleus",
+        "full_visual_LEFT": "A black object with a yellowish edge, positioned diagonally in a grayscale background.",
+        "LEFT_SURROUNDINGS": "A grayscale background with curved lines and a dark shape in the lower left corner."
+      }
+    }
+  },
+  "cluster_order": [
+    "0001_yellow_0_mask.png",
+    "0002_yellow_1_mask.png",
+    "0003_orange_0_mask.png",
+    "0004_orange_1_mask.png",
+    "0005_orange_2_mask.png",
+    "0006_orange_3_mask.png",
+    "0007_cyan_0_mask.png",
+    "0008_green_0_mask.png",
+    "0009_green_1_mask.png",
+    "0010_green_2_mask.png",
+    "0011_green_3_mask.png",
+    "0012_magenta_0_mask.png",
+    "0013_magenta_1_mask.png",
+    "0014_magenta_2_mask.png",
+    "0015_magenta_3_mask.png",
+    "0016_red_0_mask.png",
+    "0017_red_1_mask.png",
+    "0018_red_2_mask.png",
+    "0019_red_3_mask.png",
+    "0020_red_4_mask.png",
+    "0021_red_5_mask.png",
+    "0022_red_6_mask.png",
+    "0023_red_7_mask.png",
+    "0024_blue_0_mask.png",
+    "0025_purple_0_mask.png",
+    "0026_purple_1_mask.png",
+    "0027_purple_2_mask.png",
+    "0028_purple_3_mask.png",
+    "0029_black_0_mask.png",
+    "0030_black_1_mask.png",
+    "0031_black_2_mask.png",
+    "0032_black_3_mask.png"
+  ]
+}

@@ -1,0 +1,3349 @@
+{
+  "image_index": 5,
+  "candidate_labels_raw": [
+    "logarithmic",
+    "microscope",
+    "Mitochondria",
+    "μm",
+    "Relative",
+    "Bacteria",
+    "Electron",
+    "Chicken",
+    "Lipids",
+    "Ostrich",
+    "Protein",
+    "Animal",
+    "Human",
+    "Naked",
+    "Light",
+    "1",
+    "scale",
+    "sizes",
+    "Frog",
+    "Adult",
+    "Plant",
+    "Atom",
+    "virus",
+    "male",
+    "QHIL",
+    "egg",
+    "eye",
+    "100",
+    "1m",
+    "cell!",
+    "cell",
+    "Flu",
+    "0.1",
+    "H",
+    "mm",
+    "nm",
+    "10",
+    "on",
+    "a"
+  ],
+  "candidate_labels_refined": [
+    "labels\": [\"microscope",
+    "cell",
+    "atom",
+    "protein",
+    "lipid",
+    "light",
+    "electron",
+    "mitochondria",
+    "bacteria",
+    "animal",
+    "human",
+    "frog",
+    "chicken",
+    "scale",
+    "relative",
+    "size",
+    "1m",
+    "μm",
+    "nm",
+    "mm",
+    "0.1",
+    "QHIL",
+    "egg",
+    "eye",
+    "male",
+    "virus"
+  ],
+  "base_context": "",
+  "model_id": "Qwen/Qwen3-VL-2B-Instruct",
+  "proc_longest_edge": 600,
+  "panel_edge": 300,
+  "batch_size": 8,
+  "clusters": {
+    "0001_yellow_0_mask.png": {
+      "entry": {
+        "color_id": 2,
+        "color_name": "yellow",
+        "group_index_in_color": 0,
+        "stroke_indexes": [
+          7,
+          8
+        ],
+        "bbox_xyxy": [
+          1013,
+          561,
+          1045,
+          622
+        ],
+        "crop_file_mask": "yellow_0_mask.png"
+      },
+      "colour_hint": "yellow",
+      "bbox_xyxy": [
+        1013,
+        561,
+        1045,
+        622
+      ],
+      "bbox_right_panel_xyxy": [
+        137,
+        133,
+        141,
+        141
+      ],
+      "timing_s": 2.8282,
+      "model_raw": "```json\n{\n  \"label\": \"cell\",\n  \"full_visual_LEFT\": \"A close-up of a cell with a green nucleus and a gray background.\",\n  \"LEFT_SURROUNDINGS\": \"A grayscale background with a faint, blurred image of a cell.\"\n}\n```",
+      "json_objects": [
+        {
+          "label": "cell",
+          "full_visual_LEFT": "A close-up of a cell with a green nucleus and a gray background.",
+          "LEFT_SURROUNDINGS": "A grayscale background with a faint, blurred image of a cell."
+        }
+      ],
+      "parsed": {
+        "label": "cell",
+        "full_visual_LEFT": "A close-up of a cell with a green nucleus and a gray background.",
+        "LEFT_SURROUNDINGS": "A grayscale background with a faint, blurred image of a cell."
+      }
+    },
+    "0002_yellow_1_mask.png": {
+      "entry": {
+        "color_id": 2,
+        "color_name": "yellow",
+        "group_index_in_color": 1,
+        "stroke_indexes": [
+          0
+        ],
+        "bbox_xyxy": [
+          1024,
+          467,
+          1060,
+          500
+        ],
+        "crop_file_mask": "yellow_1_mask.png"
+      },
+      "colour_hint": "yellow",
+      "bbox_xyxy": [
+        1024,
+        467,
+        1060,
+        500
+      ],
+      "bbox_right_panel_xyxy": [
+        138,
+        120,
+        143,
+        124
+      ],
+      "timing_s": 2.8282,
+      "model_raw": "```json\n{\n  \"label\": \"cell\",\n  \"full_visual_LEFT\": \"A close-up of a green, rounded cell with a textured surface, set against a grayscale background.\",\n  \"LEFT_SURROUNDINGS\": \"A grayscale, blurred background with a circular shape, possibly a microscope lens or a biological structure.\"\n}\n```",
+      "json_objects": [
+        {
+          "label": "cell",
+          "full_visual_LEFT": "A close-up of a green, rounded cell with a textured surface, set against a grayscale background.",
+          "LEFT_SURROUNDINGS": "A grayscale, blurred background with a circular shape, possibly a microscope lens or a biological structure."
+        }
+      ],
+      "parsed": {
+        "label": "cell",
+        "full_visual_LEFT": "A close-up of a green, rounded cell with a textured surface, set against a grayscale background.",
+        "LEFT_SURROUNDINGS": "A grayscale, blurred background with a circular shape, possibly a microscope lens or a biological structure."
+      }
+    },
+    "0003_yellow_2_mask.png": {
+      "entry": {
+        "color_id": 2,
+        "color_name": "yellow",
+        "group_index_in_color": 2,
+        "stroke_indexes": [
+          1
+        ],
+        "bbox_xyxy": [
+          1154,
+          473,
+          1200,
+          501
+        ],
+        "crop_file_mask": "yellow_2_mask.png"
+      },
+      "colour_hint": "yellow",
+      "bbox_xyxy": [
+        1154,
+        473,
+        1200,
+        501
+      ],
+      "bbox_right_panel_xyxy": [
+        156,
+        121,
+        162,
+        125
+      ],
+      "timing_s": 2.8282,
+      "model_raw": "```json\n{\n  \"label\": \"cell\",\n  \"full_visual_LEFT\": \"A blurry image of a yellowish, rounded object with a complex, multi-colored pattern, possibly a cell or a biological structure, in the foreground.\",\n  \"LEFT_SURROUNDINGS\": \"A grayscale, blurred background with a faint, abstract pattern, possibly a",
+      "json_objects": [],
+      "parsed": null
+    },
+    "0004_yellow_3_mask.png": {
+      "entry": {
+        "color_id": 2,
+        "color_name": "yellow",
+        "group_index_in_color": 3,
+        "stroke_indexes": [
+          10
+        ],
+        "bbox_xyxy": [
+          1154,
+          639,
+          1193,
+          674
+        ],
+        "crop_file_mask": "yellow_3_mask.png"
+      },
+      "colour_hint": "yellow",
+      "bbox_xyxy": [
+        1154,
+        639,
+        1193,
+        674
+      ],
+      "bbox_right_panel_xyxy": [
+        156,
+        143,
+        161,
+        148
+      ],
+      "timing_s": 2.8282,
+      "model_raw": "```json\n{\n  \"label\": \"bacteria\",\n  \"full_visual_LEFT\": \"A close-up of a bacterial cell with a yellowish-green color, showing its structure and possibly its flagella.\",\n  \"LEFT_SURROUNDINGS\": \"Grayscale, blurry background with circular shapes that resemble other cells or structures.\"\n}\n```",
+      "json_objects": [
+        {
+          "label": "bacteria",
+          "full_visual_LEFT": "A close-up of a bacterial cell with a yellowish-green color, showing its structure and possibly its flagella.",
+          "LEFT_SURROUNDINGS": "Grayscale, blurry background with circular shapes that resemble other cells or structures."
+        }
+      ],
+      "parsed": {
+        "label": "bacteria",
+        "full_visual_LEFT": "A close-up of a bacterial cell with a yellowish-green color, showing its structure and possibly its flagella.",
+        "LEFT_SURROUNDINGS": "Grayscale, blurry background with circular shapes that resemble other cells or structures."
+      }
+    },
+    "0005_yellow_4_mask.png": {
+      "entry": {
+        "color_id": 2,
+        "color_name": "yellow",
+        "group_index_in_color": 4,
+        "stroke_indexes": [
+          2,
+          3,
+          4,
+          5,
+          6
+        ],
+        "bbox_xyxy": [
+          1200,
+          467,
+          1255,
+          654
+        ],
+        "crop_file_mask": "yellow_4_mask.png"
+      },
+      "colour_hint": "yellow",
+      "bbox_xyxy": [
+        1200,
+        467,
+        1255,
+        654
+      ],
+      "bbox_right_panel_xyxy": [
+        162,
+        120,
+        169,
+        145
+      ],
+      "timing_s": 2.8282,
+      "model_raw": "```json\n{\n  \"label\": \"cell\",\n  \"full_visual_LEFT\": \"A detailed, grayscale illustration of a cell, showing various internal structures such as the nucleus, mitochondria, and other organelles, with a prominent green outline highlighting the main cell structure.\",\n  \"LEFT_SURROUNDINGS\": \"A grayscale, detailed view of",
+      "json_objects": [],
+      "parsed": null
+    },
+    "0006_yellow_5_mask.png": {
+      "entry": {
+        "color_id": 2,
+        "color_name": "yellow",
+        "group_index_in_color": 5,
+        "stroke_indexes": [
+          11
+        ],
+        "bbox_xyxy": [
+          2001,
+          645,
+          2031,
+          686
+        ],
+        "crop_file_mask": "yellow_5_mask.png"
+      },
+      "colour_hint": "yellow",
+      "bbox_xyxy": [
+        2001,
+        645,
+        2031,
+        686
+      ],
+      "bbox_right_panel_xyxy": [
+        270,
+        144,
+        274,
+        149
+      ],
+      "timing_s": 2.8282,
+      "model_raw": "```json\n{\n  \"label\": \"egg\",\n  \"full_visual_LEFT\": \"a blurry image of a yellow object with a gray background\",\n  \"LEFT_SURROUNDINGS\": \"a gray background with a yellow object in the foreground\"\n}\n```",
+      "json_objects": [
+        {
+          "label": "egg",
+          "full_visual_LEFT": "a blurry image of a yellow object with a gray background",
+          "LEFT_SURROUNDINGS": "a gray background with a yellow object in the foreground"
+        }
+      ],
+      "parsed": {
+        "label": "egg",
+        "full_visual_LEFT": "a blurry image of a yellow object with a gray background",
+        "LEFT_SURROUNDINGS": "a gray background with a yellow object in the foreground"
+      }
+    },
+    "0007_yellow_6_mask.png": {
+      "entry": {
+        "color_id": 2,
+        "color_name": "yellow",
+        "group_index_in_color": 6,
+        "stroke_indexes": [
+          9
+        ],
+        "bbox_xyxy": [
+          2040,
+          596,
+          2066,
+          641
+        ],
+        "crop_file_mask": "yellow_6_mask.png"
+      },
+      "colour_hint": "yellow",
+      "bbox_xyxy": [
+        2040,
+        596,
+        2066,
+        641
+      ],
+      "bbox_right_panel_xyxy": [
+        275,
+        137,
+        278,
+        143
+      ],
+      "timing_s": 2.8282,
+      "model_raw": "```json\n{\n  \"label\": \"egg\",\n  \"full_visual_LEFT\": \"A yellow object with a blurred background.\",\n  \"LEFT_SURROUNDINGS\": \"A grayed-out background with a white vertical line.\"\n}\n```",
+      "json_objects": [
+        {
+          "label": "egg",
+          "full_visual_LEFT": "A yellow object with a blurred background.",
+          "LEFT_SURROUNDINGS": "A grayed-out background with a white vertical line."
+        }
+      ],
+      "parsed": {
+        "label": "egg",
+        "full_visual_LEFT": "A yellow object with a blurred background.",
+        "LEFT_SURROUNDINGS": "A grayed-out background with a white vertical line."
+      }
+    },
+    "0008_yellow_7_mask.png": {
+      "entry": {
+        "color_id": 2,
+        "color_name": "yellow",
+        "group_index_in_color": 7,
+        "stroke_indexes": [
+          13
+        ],
+        "bbox_xyxy": [
+          2092,
+          732,
+          2126,
+          774
+        ],
+        "crop_file_mask": "yellow_7_mask.png"
+      },
+      "colour_hint": "yellow",
+      "bbox_xyxy": [
+        2092,
+        732,
+        2126,
+        774
+      ],
+      "bbox_right_panel_xyxy": [
+        282,
+        156,
+        287,
+        161
+      ],
+      "timing_s": 2.8282,
+      "model_raw": "```json\n{\n  \"label\": \"egg\",\n  \"full_visual_LEFT\": \"a blurry image of a yellow object with a grayed-out background\",\n  \"LEFT_SURROUNDINGS\": \"a grayed-out background with a yellow object in the foreground\"\n}\n```",
+      "json_objects": [
+        {
+          "label": "egg",
+          "full_visual_LEFT": "a blurry image of a yellow object with a grayed-out background",
+          "LEFT_SURROUNDINGS": "a grayed-out background with a yellow object in the foreground"
+        }
+      ],
+      "parsed": {
+        "label": "egg",
+        "full_visual_LEFT": "a blurry image of a yellow object with a grayed-out background",
+        "LEFT_SURROUNDINGS": "a grayed-out background with a yellow object in the foreground"
+      }
+    },
+    "0009_yellow_8_mask.png": {
+      "entry": {
+        "color_id": 2,
+        "color_name": "yellow",
+        "group_index_in_color": 8,
+        "stroke_indexes": [
+          12
+        ],
+        "bbox_xyxy": [
+          2097,
+          645,
+          2125,
+          678
+        ],
+        "crop_file_mask": "yellow_8_mask.png"
+      },
+      "colour_hint": "yellow",
+      "bbox_xyxy": [
+        2097,
+        645,
+        2125,
+        678
+      ],
+      "bbox_right_panel_xyxy": [
+        283,
+        144,
+        286,
+        148
+      ],
+      "timing_s": 2.6068,
+      "model_raw": "```json\n{\n  \"label\": \"egg\",\n  \"full_visual_LEFT\": \"a blurry, yellowish object with a dark vertical stripe on the left side\",\n  \"LEFT_SURROUNDINGS\": \"a light gray background with a dark vertical stripe\"\n}\n```",
+      "json_objects": [
+        {
+          "label": "egg",
+          "full_visual_LEFT": "a blurry, yellowish object with a dark vertical stripe on the left side",
+          "LEFT_SURROUNDINGS": "a light gray background with a dark vertical stripe"
+        }
+      ],
+      "parsed": {
+        "label": "egg",
+        "full_visual_LEFT": "a blurry, yellowish object with a dark vertical stripe on the left side",
+        "LEFT_SURROUNDINGS": "a light gray background with a dark vertical stripe"
+      }
+    },
+    "0010_orange_0_mask.png": {
+      "entry": {
+        "color_id": 3,
+        "color_name": "orange",
+        "group_index_in_color": 0,
+        "stroke_indexes": [
+          59,
+          62,
+          64,
+          65
+        ],
+        "bbox_xyxy": [
+          257,
+          657,
+          364,
+          752
+        ],
+        "crop_file_mask": "orange_0_mask.png"
+      },
+      "colour_hint": "orange",
+      "bbox_xyxy": [
+        257,
+        657,
+        364,
+        752
+      ],
+      "bbox_right_panel_xyxy": [
+        35,
+        146,
+        49,
+        158
+      ],
+      "timing_s": 2.6068,
+      "model_raw": "```json\n{\n  \"label\": \"bacteria\",\n  \"full_visual_LEFT\": \"Two large, gray, spherical objects with yellow, wavy, elongated appendages extending from them, resembling a jellyfish or a similar organism.\",\n  \"LEFT_SURROUNDINGS\": \"A gray, textured background with a vertical gray line in the center",
+      "json_objects": [],
+      "parsed": null
+    },
+    "0011_orange_1_mask.png": {
+      "entry": {
+        "color_id": 3,
+        "color_name": "orange",
+        "group_index_in_color": 1,
+        "stroke_indexes": [
+          16,
+          18,
+          19,
+          22,
+          23
+        ],
+        "bbox_xyxy": [
+          509,
+          44,
+          685,
+          218
+        ],
+        "crop_file_mask": "orange_1_mask.png"
+      },
+      "colour_hint": "orange",
+      "bbox_xyxy": [
+        509,
+        44,
+        685,
+        218
+      ],
+      "bbox_right_panel_xyxy": [
+        69,
+        63,
+        92,
+        86
+      ],
+      "timing_s": 2.6068,
+      "model_raw": "```json\n{\n  \"label\": \"bacteria\",\n  \"full_visual_LEFT\": \"A grayscale image of a bacterial cell with a prominent orange outer layer and a textured, granular interior.\",\n  \"LEFT_SURROUNDINGS\": \"A grayscale image of a larger, irregularly shaped structure with a textured, granular interior and a prominent orange",
+      "json_objects": [],
+      "parsed": null
+    },
+    "0012_orange_2_mask.png": {
+      "entry": {
+        "color_id": 3,
+        "color_name": "orange",
+        "group_index_in_color": 2,
+        "stroke_indexes": [
+          29,
+          30,
+          32,
+          33,
+          34,
+          35,
+          36,
+          67
+        ],
+        "bbox_xyxy": [
+          713,
+          252,
+          930,
+          421
+        ],
+        "crop_file_mask": "orange_2_mask.png"
+      },
+      "colour_hint": "orange",
+      "bbox_xyxy": [
+        713,
+        252,
+        930,
+        421
+      ],
+      "bbox_right_panel_xyxy": [
+        96,
+        91,
+        125,
+        114
+      ],
+      "timing_s": 2.6068,
+      "model_raw": "```json\n{\n  \"label\": \"mitochondria\",\n  \"full_visual_LEFT\": \"A cartoon illustration of a mitochondrion, depicted as an elongated, oval-shaped organelle with a yellowish interior and a brown outer membrane.\",\n  \"LEFT_SURROUNDINGS\": \"A gray background with a simple road-like design, featuring",
+      "json_objects": [],
+      "parsed": null
+    },
+    "0013_orange_3_mask.png": {
+      "entry": {
+        "color_id": 3,
+        "color_name": "orange",
+        "group_index_in_color": 3,
+        "stroke_indexes": [
+          60,
+          61
+        ],
+        "bbox_xyxy": [
+          720,
+          673,
+          765,
+          715
+        ],
+        "crop_file_mask": "orange_3_mask.png"
+      },
+      "colour_hint": "orange",
+      "bbox_xyxy": [
+        720,
+        673,
+        765,
+        715
+      ],
+      "bbox_right_panel_xyxy": [
+        97,
+        148,
+        103,
+        153
+      ],
+      "timing_s": 2.6068,
+      "model_raw": "```json\n{\n  \"label\": \"cell\",\n  \"full_visual_LEFT\": \"A close-up of a cell with a prominent nucleus and cytoplasm, depicted in a stylized, pixelated manner with orange and gray tones.\",\n  \"LEFT_SURROUNDINGS\": \"A grayscale background with abstract, geometric shapes and patterns, possibly representing a",
+      "json_objects": [],
+      "parsed": null
+    },
+    "0014_orange_4_mask.png": {
+      "entry": {
+        "color_id": 3,
+        "color_name": "orange",
+        "group_index_in_color": 4,
+        "stroke_indexes": [
+          17,
+          20,
+          21,
+          24,
+          25,
+          66
+        ],
+        "bbox_xyxy": [
+          996,
+          28,
+          1260,
+          299
+        ],
+        "crop_file_mask": "orange_4_mask.png"
+      },
+      "colour_hint": "orange",
+      "bbox_xyxy": [
+        996,
+        28,
+        1260,
+        299
+      ],
+      "bbox_right_panel_xyxy": [
+        134,
+        61,
+        170,
+        97
+      ],
+      "timing_s": 2.6068,
+      "model_raw": "```json\n{\n  \"label\": \"cell\",\n  \"full_visual_LEFT\": \"A detailed diagram of a cell with various organelles, including a large nucleus, mitochondria, and other structures, depicted in various colors.\",\n  \"LEFT_SURROUNDINGS\": \"A gray background with a white border, and a white rectangle in the center",
+      "json_objects": [],
+      "parsed": null
+    },
+    "0015_orange_5_mask.png": {
+      "entry": {
+        "color_id": 3,
+        "color_name": "orange",
+        "group_index_in_color": 5,
+        "stroke_indexes": [
+          44,
+          46
+        ],
+        "bbox_xyxy": [
+          1023,
+          472,
+          1079,
+          561
+        ],
+        "crop_file_mask": "orange_5_mask.png"
+      },
+      "colour_hint": "orange",
+      "bbox_xyxy": [
+        1023,
+        472,
+        1079,
+        561
+      ],
+      "bbox_right_panel_xyxy": [
+        138,
+        121,
+        145,
+        133
+      ],
+      "timing_s": 2.6068,
+      "model_raw": "```json\n{\n  \"label\": \"mitochondria\",\n  \"full_visual_LEFT\": \"A close-up of a mitochondrion, depicted with an orange, oval-shaped structure with a brownish outline and a yellowish glow, set against a gray, rounded background.\",\n  \"LEFT_SURROUNDINGS\": \"A gray, rounded object with",
+      "json_objects": [],
+      "parsed": null
+    },
+    "0016_orange_6_mask.png": {
+      "entry": {
+        "color_id": 3,
+        "color_name": "orange",
+        "group_index_in_color": 6,
+        "stroke_indexes": [
+          49,
+          52,
+          54,
+          55,
+          57
+        ],
+        "bbox_xyxy": [
+          1023,
+          597,
+          1129,
+          683
+        ],
+        "crop_file_mask": "orange_6_mask.png"
+      },
+      "colour_hint": "orange",
+      "bbox_xyxy": [
+        1023,
+        597,
+        1129,
+        683
+      ],
+      "bbox_right_panel_xyxy": [
+        138,
+        137,
+        152,
+        149
+      ],
+      "timing_s": 2.6068,
+      "model_raw": "```json\n{\n  \"label\": \"mitochondria\",\n  \"full_visual_LEFT\": \"A close-up of a mitochondrion, depicted with an orange, elongated, and curved shape, resembling a battery, with a grayscaled background.\",\n  \"LEFT_SURROUNDINGS\": \"A grayscale image of a cell with various organel",
+      "json_objects": [],
+      "parsed": null
+    },
+    "0017_orange_7_mask.png": {
+      "entry": {
+        "color_id": 3,
+        "color_name": "orange",
+        "group_index_in_color": 7,
+        "stroke_indexes": [
+          48,
+          53
+        ],
+        "bbox_xyxy": [
+          1132,
+          567,
+          1245,
+          666
+        ],
+        "crop_file_mask": "orange_7_mask.png"
+      },
+      "colour_hint": "orange",
+      "bbox_xyxy": [
+        1132,
+        567,
+        1245,
+        666
+      ],
+      "bbox_right_panel_xyxy": [
+        153,
+        133,
+        168,
+        147
+      ],
+      "timing_s": 2.7541,
+      "model_raw": "```json\n{\n  \"label\": \"mitochondria\",\n  \"full_visual_LEFT\": \"A close-up of a mitochondrion, highlighted in orange, with a grayscaled background.\",\n  \"LEFT_SURROUNDINGS\": \"A grayscale image of a cell with various organelles, including a nucleus, endoplasmic retic",
+      "json_objects": [],
+      "parsed": null
+    },
+    "0018_orange_8_mask.png": {
+      "entry": {
+        "color_id": 3,
+        "color_name": "orange",
+        "group_index_in_color": 8,
+        "stroke_indexes": [
+          41,
+          42
+        ],
+        "bbox_xyxy": [
+          1173,
+          475,
+          1237,
+          518
+        ],
+        "crop_file_mask": "orange_8_mask.png"
+      },
+      "colour_hint": "orange",
+      "bbox_xyxy": [
+        1173,
+        475,
+        1237,
+        518
+      ],
+      "bbox_right_panel_xyxy": [
+        158,
+        121,
+        167,
+        127
+      ],
+      "timing_s": 2.7541,
+      "model_raw": "```json\n{\n  \"label\": \"cell\",\n  \"full_visual_LEFT\": \"A close-up of a cell with a greenish-yellow nucleus and a brownish cytoplasm, set against a grayscale background.\",\n  \"LEFT_SURROUNDINGS\": \"A grayscale image of a cell with a greenish-yellow nucleus and a brownish cytopl",
+      "json_objects": [],
+      "parsed": null
+    },
+    "0019_orange_9_mask.png": {
+      "entry": {
+        "color_id": 3,
+        "color_name": "orange",
+        "group_index_in_color": 9,
+        "stroke_indexes": [
+          47
+        ],
+        "bbox_xyxy": [
+          1210,
+          544,
+          1246,
+          603
+        ],
+        "crop_file_mask": "orange_9_mask.png"
+      },
+      "colour_hint": "orange",
+      "bbox_xyxy": [
+        1210,
+        544,
+        1246,
+        603
+      ],
+      "bbox_right_panel_xyxy": [
+        163,
+        130,
+        168,
+        138
+      ],
+      "timing_s": 2.7541,
+      "model_raw": "```json\n{\n  \"label\": \"cell\",\n  \"full_visual_LEFT\": \"A greenish-yellow, elongated, and somewhat translucent object with a distinct shape, appearing to be a cell, possibly in a microscopic view.\",\n  \"LEFT_SURROUNDINGS\": \"A grayscale, blurry background with various anatomical structures, including a grayish",
+      "json_objects": [],
+      "parsed": null
+    },
+    "0020_orange_10_mask.png": {
+      "entry": {
+        "color_id": 3,
+        "color_name": "orange",
+        "group_index_in_color": 10,
+        "stroke_indexes": [
+          68
+        ],
+        "bbox_xyxy": [
+          1383,
+          588,
+          1500,
+          697
+        ],
+        "crop_file_mask": "orange_10_mask.png"
+      },
+      "colour_hint": "orange",
+      "bbox_xyxy": [
+        1383,
+        588,
+        1500,
+        697
+      ],
+      "bbox_right_panel_xyxy": [
+        186,
+        136,
+        202,
+        151
+      ],
+      "timing_s": 2.7541,
+      "model_raw": "```json\n{\n  \"label\": \"cell\",\n  \"full_visual_LEFT\": \"A circular, orange-colored object with a purple, rounded nucleus in the center, set against a gray background.\",\n  \"LEFT_SURROUNDINGS\": \"A gray background with a thin black line extending from the top of the object.\"\n}\n```",
+      "json_objects": [
+        {
+          "label": "cell",
+          "full_visual_LEFT": "A circular, orange-colored object with a purple, rounded nucleus in the center, set against a gray background.",
+          "LEFT_SURROUNDINGS": "A gray background with a thin black line extending from the top of the object."
+        }
+      ],
+      "parsed": {
+        "label": "cell",
+        "full_visual_LEFT": "A circular, orange-colored object with a purple, rounded nucleus in the center, set against a gray background.",
+        "LEFT_SURROUNDINGS": "A gray background with a thin black line extending from the top of the object."
+      }
+    },
+    "0021_orange_11_mask.png": {
+      "entry": {
+        "color_id": 3,
+        "color_name": "orange",
+        "group_index_in_color": 11,
+        "stroke_indexes": [
+          45
+        ],
+        "bbox_xyxy": [
+          1702,
+          494,
+          1911,
+          760
+        ],
+        "crop_file_mask": "orange_11_mask.png"
+      },
+      "colour_hint": "orange",
+      "bbox_xyxy": [
+        1702,
+        494,
+        1911,
+        760
+      ],
+      "bbox_right_panel_xyxy": [
+        229,
+        124,
+        258,
+        159
+      ],
+      "timing_s": 2.7541,
+      "model_raw": "```json\n{\n  \"label\": \"egg\",\n  \"full_visual_LEFT\": \"A large, oval-shaped, orange-colored egg with a smooth surface and a light gradient.\",\n  \"LEFT_SURROUNDINGS\": \"A light gray background with a vertical line on the left side.\"\n}\n```",
+      "json_objects": [
+        {
+          "label": "egg",
+          "full_visual_LEFT": "A large, oval-shaped, orange-colored egg with a smooth surface and a light gradient.",
+          "LEFT_SURROUNDINGS": "A light gray background with a vertical line on the left side."
+        }
+      ],
+      "parsed": {
+        "label": "egg",
+        "full_visual_LEFT": "A large, oval-shaped, orange-colored egg with a smooth surface and a light gradient.",
+        "LEFT_SURROUNDINGS": "A light gray background with a vertical line on the left side."
+      }
+    },
+    "0022_orange_12_mask.png": {
+      "entry": {
+        "color_id": 3,
+        "color_name": "orange",
+        "group_index_in_color": 12,
+        "stroke_indexes": [
+          14,
+          15,
+          26,
+          27,
+          28,
+          31,
+          37,
+          38,
+          39,
+          40,
+          43,
+          50,
+          51,
+          56,
+          58,
+          63
+        ],
+        "bbox_xyxy": [
+          1940,
+          10,
+          2185,
+          779
+        ],
+        "crop_file_mask": "orange_12_mask.png"
+      },
+      "colour_hint": "orange",
+      "bbox_xyxy": [
+        1940,
+        10,
+        2185,
+        779
+      ],
+      "bbox_right_panel_xyxy": [
+        261,
+        58,
+        294,
+        162
+      ],
+      "timing_s": 2.7541,
+      "model_raw": "```json\n{\n  \"label\": \"human\",\n  \"full_visual_LEFT\": \"A silhouette of a human figure, standing upright with a light gray background.\",\n  \"LEFT_SURROUNDINGS\": \"A light gray background with a black border on the left side.\"\n}\n```",
+      "json_objects": [
+        {
+          "label": "human",
+          "full_visual_LEFT": "A silhouette of a human figure, standing upright with a light gray background.",
+          "LEFT_SURROUNDINGS": "A light gray background with a black border on the left side."
+        }
+      ],
+      "parsed": {
+        "label": "human",
+        "full_visual_LEFT": "A silhouette of a human figure, standing upright with a light gray background.",
+        "LEFT_SURROUNDINGS": "A light gray background with a black border on the left side."
+      }
+    },
+    "0023_cyan_0_mask.png": {
+      "entry": {
+        "color_id": 4,
+        "color_name": "cyan",
+        "group_index_in_color": 0,
+        "stroke_indexes": [
+          74
+        ],
+        "bbox_xyxy": [
+          43,
+          491,
+          85,
+          525
+        ],
+        "crop_file_mask": "cyan_0_mask.png"
+      },
+      "colour_hint": "cyan",
+      "bbox_xyxy": [
+        43,
+        491,
+        85,
+        525
+      ],
+      "bbox_right_panel_xyxy": [
+        6,
+        123,
+        11,
+        128
+      ],
+      "timing_s": 2.7541,
+      "model_raw": "```json\n{\n  \"label\": \"bacteria\",\n  \"full_visual_LEFT\": \"A blurry image of a black and white object with a cyan-colored main object and grayscaled surroundings.\",\n  \"LEFT_SURROUNDINGS\": \"A gray background with black lines and a cyan-colored object in the center.\"\n}\n```",
+      "json_objects": [
+        {
+          "label": "bacteria",
+          "full_visual_LEFT": "A blurry image of a black and white object with a cyan-colored main object and grayscaled surroundings.",
+          "LEFT_SURROUNDINGS": "A gray background with black lines and a cyan-colored object in the center."
+        }
+      ],
+      "parsed": {
+        "label": "bacteria",
+        "full_visual_LEFT": "A blurry image of a black and white object with a cyan-colored main object and grayscaled surroundings.",
+        "LEFT_SURROUNDINGS": "A gray background with black lines and a cyan-colored object in the center."
+      }
+    },
+    "0024_cyan_1_mask.png": {
+      "entry": {
+        "color_id": 4,
+        "color_name": "cyan",
+        "group_index_in_color": 1,
+        "stroke_indexes": [
+          70,
+          71,
+          72,
+          73
+        ],
+        "bbox_xyxy": [
+          351,
+          318,
+          437,
+          472
+        ],
+        "crop_file_mask": "cyan_1_mask.png"
+      },
+      "colour_hint": "cyan",
+      "bbox_xyxy": [
+        351,
+        318,
+        437,
+        472
+      ],
+      "bbox_right_panel_xyxy": [
+        47,
+        100,
+        59,
+        121
+      ],
+      "timing_s": 2.7541,
+      "model_raw": "```json\n{\n  \"label\": \"cell\",\n  \"full_visual_LEFT\": \"A diagram of a cell with a blue cytoplasm and a gray nucleus, showing a cross-section of a cell with a central nucleus and a surrounding cytoplasm.\",\n  \"LEFT_SURROUNDINGS\": \"A gray, grayscaled background with a vertical",
+      "json_objects": [],
+      "parsed": null
+    },
+    "0025_cyan_2_mask.png": {
+      "entry": {
+        "color_id": 4,
+        "color_name": "cyan",
+        "group_index_in_color": 2,
+        "stroke_indexes": [
+          69
+        ],
+        "bbox_xyxy": [
+          1128,
+          156,
+          1172,
+          215
+        ],
+        "crop_file_mask": "cyan_2_mask.png"
+      },
+      "colour_hint": "cyan",
+      "bbox_xyxy": [
+        1128,
+        156,
+        1172,
+        215
+      ],
+      "bbox_right_panel_xyxy": [
+        152,
+        78,
+        158,
+        86
+      ],
+      "timing_s": 2.689,
+      "model_raw": "```json\n{\n  \"label\": \"cell\",\n  \"full_visual_LEFT\": \"A close-up of a cell with a blue nucleus and cytoplasm, surrounded by a gray background.\",\n  \"LEFT_SURROUNDINGS\": \"A grayscale image of a cell with a blue nucleus and cytoplasm, surrounded by a gray background.\"\n}\n```",
+      "json_objects": [
+        {
+          "label": "cell",
+          "full_visual_LEFT": "A close-up of a cell with a blue nucleus and cytoplasm, surrounded by a gray background.",
+          "LEFT_SURROUNDINGS": "A grayscale image of a cell with a blue nucleus and cytoplasm, surrounded by a gray background."
+        }
+      ],
+      "parsed": {
+        "label": "cell",
+        "full_visual_LEFT": "A close-up of a cell with a blue nucleus and cytoplasm, surrounded by a gray background.",
+        "LEFT_SURROUNDINGS": "A grayscale image of a cell with a blue nucleus and cytoplasm, surrounded by a gray background."
+      }
+    },
+    "0026_green_0_mask.png": {
+      "entry": {
+        "color_id": 5,
+        "color_name": "green",
+        "group_index_in_color": 0,
+        "stroke_indexes": [
+          85,
+          86,
+          87,
+          88,
+          90,
+          94,
+          97,
+          98,
+          101
+        ],
+        "bbox_xyxy": [
+          664,
+          533,
+          1025,
+          815
+        ],
+        "crop_file_mask": "green_0_mask.png"
+      },
+      "colour_hint": "green",
+      "bbox_xyxy": [
+        664,
+        533,
+        1025,
+        815
+      ],
+      "bbox_right_panel_xyxy": [
+        89,
+        129,
+        138,
+        167
+      ],
+      "timing_s": 2.689,
+      "model_raw": "```json\n{\n  \"label\": \"bacteria\",\n  \"full_visual_LEFT\": \"A green, rod-shaped bacterium with a long, whip-like tail and multiple flagella, depicted in a detailed, stylized illustration.\",\n  \"LEFT_SURROUNDINGS\": \"A light gray background with a dashed vertical line, suggesting a diagram or a",
+      "json_objects": [],
+      "parsed": null
+    },
+    "0027_green_1_mask.png": {
+      "entry": {
+        "color_id": 5,
+        "color_name": "green",
+        "group_index_in_color": 1,
+        "stroke_indexes": [
+          92
+        ],
+        "bbox_xyxy": [
+          864,
+          630,
+          905,
+          659
+        ],
+        "crop_file_mask": "green_1_mask.png"
+      },
+      "colour_hint": "green",
+      "bbox_xyxy": [
+        864,
+        630,
+        905,
+        659
+      ],
+      "bbox_right_panel_xyxy": [
+        116,
+        142,
+        122,
+        146
+      ],
+      "timing_s": 2.689,
+      "model_raw": "```json\n{\n  \"label\": \"bacteria\",\n  \"full_visual_LEFT\": \"A blurry, elongated, greenish object with a light green and white appearance, resembling a bacterium.\",\n  \"LEFT_SURROUNDINGS\": \"A gray, grayscaled background with a blurred, out-of-focus appearance.\"\n}\n```",
+      "json_objects": [
+        {
+          "label": "bacteria",
+          "full_visual_LEFT": "A blurry, elongated, greenish object with a light green and white appearance, resembling a bacterium.",
+          "LEFT_SURROUNDINGS": "A gray, grayscaled background with a blurred, out-of-focus appearance."
+        }
+      ],
+      "parsed": {
+        "label": "bacteria",
+        "full_visual_LEFT": "A blurry, elongated, greenish object with a light green and white appearance, resembling a bacterium.",
+        "LEFT_SURROUNDINGS": "A gray, grayscaled background with a blurred, out-of-focus appearance."
+      }
+    },
+    "0028_green_2_mask.png": {
+      "entry": {
+        "color_id": 5,
+        "color_name": "green",
+        "group_index_in_color": 2,
+        "stroke_indexes": [
+          76,
+          77,
+          78,
+          79,
+          80,
+          81,
+          82,
+          83,
+          84,
+          89,
+          91,
+          93,
+          95,
+          96,
+          102
+        ],
+        "bbox_xyxy": [
+          999,
+          447,
+          1268,
+          710
+        ],
+        "crop_file_mask": "green_2_mask.png"
+      },
+      "colour_hint": "green",
+      "bbox_xyxy": [
+        999,
+        447,
+        1268,
+        710
+      ],
+      "bbox_right_panel_xyxy": [
+        135,
+        117,
+        171,
+        153
+      ],
+      "timing_s": 2.689,
+      "model_raw": "```json\n{\n  \"label\": \"cell\",\n  \"full_visual_LEFT\": \"A detailed illustration of a plant cell, showing a large central vacuole, a nucleus with a prominent nucleolus, chloroplasts, mitochondria, and various other organelles.\",\n  \"LEFT_SURROUNDINGS\": \"A gray background with a",
+      "json_objects": [],
+      "parsed": null
+    },
+    "0029_green_3_mask.png": {
+      "entry": {
+        "color_id": 5,
+        "color_name": "green",
+        "group_index_in_color": 3,
+        "stroke_indexes": [
+          75
+        ],
+        "bbox_xyxy": [
+          1122,
+          223,
+          1172,
+          265
+        ],
+        "crop_file_mask": "green_3_mask.png"
+      },
+      "colour_hint": "green",
+      "bbox_xyxy": [
+        1122,
+        223,
+        1172,
+        265
+      ],
+      "bbox_right_panel_xyxy": [
+        151,
+        87,
+        158,
+        93
+      ],
+      "timing_s": 2.689,
+      "model_raw": "```json\n{\n  \"label\": \"cell\",\n  \"full_visual_LEFT\": \"Two green circular objects with a blurry, light-colored background.\",\n  \"LEFT_SURROUNDINGS\": \"A gray, grayscaled background with faint lines and shapes.\"\n}\n```",
+      "json_objects": [
+        {
+          "label": "cell",
+          "full_visual_LEFT": "Two green circular objects with a blurry, light-colored background.",
+          "LEFT_SURROUNDINGS": "A gray, grayscaled background with faint lines and shapes."
+        }
+      ],
+      "parsed": {
+        "label": "cell",
+        "full_visual_LEFT": "Two green circular objects with a blurry, light-colored background.",
+        "LEFT_SURROUNDINGS": "A gray, grayscaled background with faint lines and shapes."
+      }
+    },
+    "0030_green_4_mask.png": {
+      "entry": {
+        "color_id": 5,
+        "color_name": "green",
+        "group_index_in_color": 4,
+        "stroke_indexes": [
+          100
+        ],
+        "bbox_xyxy": [
+          1154,
+          570,
+          1188,
+          604
+        ],
+        "crop_file_mask": "green_4_mask.png"
+      },
+      "colour_hint": "green",
+      "bbox_xyxy": [
+        1154,
+        570,
+        1188,
+        604
+      ],
+      "bbox_right_panel_xyxy": [
+        156,
+        134,
+        160,
+        138
+      ],
+      "timing_s": 2.689,
+      "model_raw": "```json\n{\n  \"label\": \"cell\",\n  \"full_visual_LEFT\": \"A green, circular, and slightly blurred object with a light green center and a darker green outer ring, set against a grayscale background.\",\n  \"LEFT_SURROUNDINGS\": \"A grayscale, blurry background with faint, abstract shapes and textures, possibly representing a biological",
+      "json_objects": [],
+      "parsed": null
+    },
+    "0031_green_5_mask.png": {
+      "entry": {
+        "color_id": 5,
+        "color_name": "green",
+        "group_index_in_color": 5,
+        "stroke_indexes": [
+          99
+        ],
+        "bbox_xyxy": [
+          1195,
+          125,
+          1233,
+          163
+        ],
+        "crop_file_mask": "green_5_mask.png"
+      },
+      "colour_hint": "green",
+      "bbox_xyxy": [
+        1195,
+        125,
+        1233,
+        163
+      ],
+      "bbox_right_panel_xyxy": [
+        161,
+        74,
+        166,
+        79
+      ],
+      "timing_s": 2.689,
+      "model_raw": "```json\n{\n  \"label\": \"cell\",\n  \"full_visual_LEFT\": \"A green circular object with a lighter green center and a white outer ring, set against a gray and white background.\",\n  \"LEFT_SURROUNDINGS\": \"A gray and white background with a faint outline of a person's head and shoulders.\"\n}\n```",
+      "json_objects": [
+        {
+          "label": "cell",
+          "full_visual_LEFT": "A green circular object with a lighter green center and a white outer ring, set against a gray and white background.",
+          "LEFT_SURROUNDINGS": "A gray and white background with a faint outline of a person's head and shoulders."
+        }
+      ],
+      "parsed": {
+        "label": "cell",
+        "full_visual_LEFT": "A green circular object with a lighter green center and a white outer ring, set against a gray and white background.",
+        "LEFT_SURROUNDINGS": "A gray and white background with a faint outline of a person's head and shoulders."
+      }
+    },
+    "0032_magenta_0_mask.png": {
+      "entry": {
+        "color_id": 6,
+        "color_name": "magenta",
+        "group_index_in_color": 0,
+        "stroke_indexes": [
+          111
+        ],
+        "bbox_xyxy": [
+          33,
+          461,
+          77,
+          501
+        ],
+        "crop_file_mask": "magenta_0_mask.png"
+      },
+      "colour_hint": "magenta",
+      "bbox_xyxy": [
+        33,
+        461,
+        77,
+        501
+      ],
+      "bbox_right_panel_xyxy": [
+        4,
+        119,
+        10,
+        125
+      ],
+      "timing_s": 2.689,
+      "model_raw": "```json\n{\n  \"label\": \"cell\",\n  \"full_visual_LEFT\": \"A blurry image of a cell with a central blue nucleus surrounded by pink and purple structures, set against a grayscaled background with a grid pattern.\",\n  \"LEFT_SURROUNDINGS\": \"A grayscaled background with a grid pattern, suggesting a microscope or",
+      "json_objects": [],
+      "parsed": null
+    },
+    "0033_magenta_1_mask.png": {
+      "entry": {
+        "color_id": 6,
+        "color_name": "magenta",
+        "group_index_in_color": 1,
+        "stroke_indexes": [
+          103,
+          104,
+          105,
+          106,
+          107,
+          108,
+          109,
+          110,
+          112,
+          113,
+          114,
+          115
+        ],
+        "bbox_xyxy": [
+          532,
+          38,
+          650,
+          197
+        ],
+        "crop_file_mask": "magenta_1_mask.png"
+      },
+      "colour_hint": "magenta",
+      "bbox_xyxy": [
+        532,
+        38,
+        650,
+        197
+      ],
+      "bbox_right_panel_xyxy": [
+        72,
+        62,
+        88,
+        84
+      ],
+      "timing_s": 2.5147,
+      "model_raw": "```json\n{\n  \"label\": \"bacteria\",\n  \"full_visual_LEFT\": \"A magnified view of a purple, rod-shaped bacterial cell with a thick, gray outer membrane and a dense, textured internal structure.\",\n  \"LEFT_SURROUNDINGS\": \"A grayscale, high-contrast image of a circular, grayish background with a",
+      "json_objects": [],
+      "parsed": null
+    },
+    "0034_red_0_mask.png": {
+      "entry": {
+        "color_id": 7,
+        "color_name": "red",
+        "group_index_in_color": 0,
+        "stroke_indexes": [
+          173
+        ],
+        "bbox_xyxy": [
+          33,
+          945,
+          65,
+          1003
+        ],
+        "crop_file_mask": "red_0_mask.png"
+      },
+      "colour_hint": "red",
+      "bbox_xyxy": [
+        33,
+        945,
+        65,
+        1003
+      ],
+      "bbox_right_panel_xyxy": [
+        4,
+        184,
+        9,
+        192
+      ],
+      "timing_s": 2.5147,
+      "model_raw": "```json\n{\n  \"label\": \"bacteria\",\n  \"full_visual_LEFT\": \"A red, vertical, rectangular object with a blurred appearance, set against a light gray background.\",\n  \"LEFT_SURROUNDINGS\": \"A light gray background with a dark gray horizontal line at the bottom.\"\n}\n```",
+      "json_objects": [
+        {
+          "label": "bacteria",
+          "full_visual_LEFT": "A red, vertical, rectangular object with a blurred appearance, set against a light gray background.",
+          "LEFT_SURROUNDINGS": "A light gray background with a dark gray horizontal line at the bottom."
+        }
+      ],
+      "parsed": {
+        "label": "bacteria",
+        "full_visual_LEFT": "A red, vertical, rectangular object with a blurred appearance, set against a light gray background.",
+        "LEFT_SURROUNDINGS": "A light gray background with a dark gray horizontal line at the bottom."
+      }
+    },
+    "0035_red_1_mask.png": {
+      "entry": {
+        "color_id": 7,
+        "color_name": "red",
+        "group_index_in_color": 1,
+        "stroke_indexes": [
+          169
+        ],
+        "bbox_xyxy": [
+          86,
+          432,
+          116,
+          462
+        ],
+        "crop_file_mask": "red_1_mask.png"
+      },
+      "colour_hint": "red",
+      "bbox_xyxy": [
+        86,
+        432,
+        116,
+        462
+      ],
+      "bbox_right_panel_xyxy": [
+        12,
+        115,
+        16,
+        119
+      ],
+      "timing_s": 2.5147,
+      "model_raw": "```json\n{\n  \"label\": \"bacteria\",\n  \"full_visual_LEFT\": \"A red, spherical object with a black, curved line extending from it, set against a gray background.\",\n  \"LEFT_SURROUNDINGS\": \"A gray background with a black line and a red sphere.\"\n}\n```",
+      "json_objects": [
+        {
+          "label": "bacteria",
+          "full_visual_LEFT": "A red, spherical object with a black, curved line extending from it, set against a gray background.",
+          "LEFT_SURROUNDINGS": "A gray background with a black line and a red sphere."
+        }
+      ],
+      "parsed": {
+        "label": "bacteria",
+        "full_visual_LEFT": "A red, spherical object with a black, curved line extending from it, set against a gray background.",
+        "LEFT_SURROUNDINGS": "A gray background with a black line and a red sphere."
+      }
+    },
+    "0036_red_2_mask.png": {
+      "entry": {
+        "color_id": 7,
+        "color_name": "red",
+        "group_index_in_color": 2,
+        "stroke_indexes": [
+          167
+        ],
+        "bbox_xyxy": [
+          224,
+          945,
+          257,
+          1003
+        ],
+        "crop_file_mask": "red_2_mask.png"
+      },
+      "colour_hint": "red",
+      "bbox_xyxy": [
+        224,
+        945,
+        257,
+        1003
+      ],
+      "bbox_right_panel_xyxy": [
+        30,
+        184,
+        35,
+        192
+      ],
+      "timing_s": 2.5147,
+      "model_raw": "```json\n{\n  \"label\": \"bacteria\",\n  \"full_visual_LEFT\": \"A red, vertical, rectangular object with a blurred background.\",\n  \"LEFT_SURROUNDINGS\": \"A gray, flat surface with a white background.\"\n}\n```",
+      "json_objects": [
+        {
+          "label": "bacteria",
+          "full_visual_LEFT": "A red, vertical, rectangular object with a blurred background.",
+          "LEFT_SURROUNDINGS": "A gray, flat surface with a white background."
+        }
+      ],
+      "parsed": {
+        "label": "bacteria",
+        "full_visual_LEFT": "A red, vertical, rectangular object with a blurred background.",
+        "LEFT_SURROUNDINGS": "A gray, flat surface with a white background."
+      }
+    },
+    "0037_red_3_mask.png": {
+      "entry": {
+        "color_id": 7,
+        "color_name": "red",
+        "group_index_in_color": 3,
+        "stroke_indexes": [
+          163
+        ],
+        "bbox_xyxy": [
+          246,
+          616,
+          365,
+          687
+        ],
+        "crop_file_mask": "red_3_mask.png"
+      },
+      "colour_hint": "red",
+      "bbox_xyxy": [
+        246,
+        616,
+        365,
+        687
+      ],
+      "bbox_right_panel_xyxy": [
+        33,
+        140,
+        49,
+        150
+      ],
+      "timing_s": 2.5147,
+      "model_raw": "```json\n{\n  \"label\": \"bacteria\",\n  \"full_visual_LEFT\": \"Two pink, spherical objects with a black outline and a white background.\",\n  \"LEFT_SURROUNDINGS\": \"A gray background with a black border.\"\n}\n```",
+      "json_objects": [
+        {
+          "label": "bacteria",
+          "full_visual_LEFT": "Two pink, spherical objects with a black outline and a white background.",
+          "LEFT_SURROUNDINGS": "A gray background with a black border."
+        }
+      ],
+      "parsed": {
+        "label": "bacteria",
+        "full_visual_LEFT": "Two pink, spherical objects with a black outline and a white background.",
+        "LEFT_SURROUNDINGS": "A gray background with a black border."
+      }
+    },
+    "0038_red_4_mask.png": {
+      "entry": {
+        "color_id": 7,
+        "color_name": "red",
+        "group_index_in_color": 4,
+        "stroke_indexes": [
+          174
+        ],
+        "bbox_xyxy": [
+          426,
+          945,
+          459,
+          1003
+        ],
+        "crop_file_mask": "red_4_mask.png"
+      },
+      "colour_hint": "red",
+      "bbox_xyxy": [
+        426,
+        945,
+        459,
+        1003
+      ],
+      "bbox_right_panel_xyxy": [
+        57,
+        184,
+        62,
+        192
+      ],
+      "timing_s": 2.5147,
+      "model_raw": "```json\n{\n  \"label\": \"bacteria\",\n  \"full_visual_LEFT\": \"A red, vertical, rectangular object with a blurred appearance, set against a gray background.\",\n  \"LEFT_SURROUNDINGS\": \"A gray, flat surface with a darker gray edge, and a lighter gray background.\"\n}\n```",
+      "json_objects": [
+        {
+          "label": "bacteria",
+          "full_visual_LEFT": "A red, vertical, rectangular object with a blurred appearance, set against a gray background.",
+          "LEFT_SURROUNDINGS": "A gray, flat surface with a darker gray edge, and a lighter gray background."
+        }
+      ],
+      "parsed": {
+        "label": "bacteria",
+        "full_visual_LEFT": "A red, vertical, rectangular object with a blurred appearance, set against a gray background.",
+        "LEFT_SURROUNDINGS": "A gray, flat surface with a darker gray edge, and a lighter gray background."
+      }
+    },
+    "0039_red_5_mask.png": {
+      "entry": {
+        "color_id": 7,
+        "color_name": "red",
+        "group_index_in_color": 5,
+        "stroke_indexes": [
+          116,
+          117,
+          118,
+          119,
+          120,
+          121,
+          122,
+          123,
+          125,
+          126,
+          127,
+          129,
+          130,
+          136,
+          137,
+          138,
+          139
+        ],
+        "bbox_xyxy": [
+          498,
+          16,
+          701,
+          215
+        ],
+        "crop_file_mask": "red_5_mask.png"
+      },
+      "colour_hint": "red",
+      "bbox_xyxy": [
+        498,
+        16,
+        701,
+        215
+      ],
+      "bbox_right_panel_xyxy": [
+        67,
+        59,
+        94,
+        86
+      ],
+      "timing_s": 2.5147,
+      "model_raw": "```json\n{\n  \"label\": \"cell\",\n  \"full_visual_LEFT\": \"A 3D rendered image of a cell with a purple nucleus and a brownish outer layer, surrounded by a gray background.\",\n  \"LEFT_SURROUNDINGS\": \"A gray background with a white border.\"\n}\n```",
+      "json_objects": [
+        {
+          "label": "cell",
+          "full_visual_LEFT": "A 3D rendered image of a cell with a purple nucleus and a brownish outer layer, surrounded by a gray background.",
+          "LEFT_SURROUNDINGS": "A gray background with a white border."
+        }
+      ],
+      "parsed": {
+        "label": "cell",
+        "full_visual_LEFT": "A 3D rendered image of a cell with a purple nucleus and a brownish outer layer, surrounded by a gray background.",
+        "LEFT_SURROUNDINGS": "A gray background with a white border."
+      }
+    },
+    "0040_red_6_mask.png": {
+      "entry": {
+        "color_id": 7,
+        "color_name": "red",
+        "group_index_in_color": 6,
+        "stroke_indexes": [
+          175
+        ],
+        "bbox_xyxy": [
+          625,
+          945,
+          657,
+          1002
+        ],
+        "crop_file_mask": "red_6_mask.png"
+      },
+      "colour_hint": "red",
+      "bbox_xyxy": [
+        625,
+        945,
+        657,
+        1002
+      ],
+      "bbox_right_panel_xyxy": [
+        84,
+        184,
+        89,
+        192
+      ],
+      "timing_s": 2.5147,
+      "model_raw": "```json\n{\n  \"label\": \"bacteria\",\n  \"full_visual_LEFT\": \"A red, cylindrical object with a blurred appearance, standing vertically in a gray and white environment.\",\n  \"LEFT_SURROUNDINGS\": \"A gray and white background with a dark gray base, and a light gray upper section.\"\n}\n```",
+      "json_objects": [
+        {
+          "label": "bacteria",
+          "full_visual_LEFT": "A red, cylindrical object with a blurred appearance, standing vertically in a gray and white environment.",
+          "LEFT_SURROUNDINGS": "A gray and white background with a dark gray base, and a light gray upper section."
+        }
+      ],
+      "parsed": {
+        "label": "bacteria",
+        "full_visual_LEFT": "A red, cylindrical object with a blurred appearance, standing vertically in a gray and white environment.",
+        "LEFT_SURROUNDINGS": "A gray and white background with a dark gray base, and a light gray upper section."
+      }
+    },
+    "0041_red_7_mask.png": {
+      "entry": {
+        "color_id": 7,
+        "color_name": "red",
+        "group_index_in_color": 7,
+        "stroke_indexes": [
+          161,
+          162,
+          164,
+          165,
+          166
+        ],
+        "bbox_xyxy": [
+          702,
+          622,
+          817,
+          726
+        ],
+        "crop_file_mask": "red_7_mask.png"
+      },
+      "colour_hint": "red",
+      "bbox_xyxy": [
+        702,
+        622,
+        817,
+        726
+      ],
+      "bbox_right_panel_xyxy": [
+        95,
+        141,
+        110,
+        155
+      ],
+      "timing_s": 2.7439,
+      "model_raw": "```json\n{\n  \"label\": \"mitochondria\",\n  \"full_visual_LEFT\": \"A close-up, detailed illustration of a mitochondrion, showing its internal structure with a network of folded inner membranes and cristae, highlighted in red.\",\n  \"LEFT_SURROUNDINGS\": \"A grayscale, schematic representation of a cell, with the",
+      "json_objects": [],
+      "parsed": null
+    },
+    "0042_red_8_mask.png": {
+      "entry": {
+        "color_id": 7,
+        "color_name": "red",
+        "group_index_in_color": 8,
+        "stroke_indexes": [
+          150,
+          152,
+          153,
+          154,
+          155
+        ],
+        "bbox_xyxy": [
+          718,
+          275,
+          894,
+          412
+        ],
+        "crop_file_mask": "red_8_mask.png"
+      },
+      "colour_hint": "red",
+      "bbox_xyxy": [
+        718,
+        275,
+        894,
+        412
+      ],
+      "bbox_right_panel_xyxy": [
+        97,
+        94,
+        120,
+        113
+      ],
+      "timing_s": 2.7439,
+      "model_raw": "```json\n{\n  \"label\": \"mitochondria\",\n  \"full_visual_LEFT\": \"A close-up of a mitochondrion, showing its characteristic inner membrane folds (cristae) and outer membrane, with an orange color highlighting the inner membrane structure.\",\n  \"LEFT_SURROUNDINGS\": \"A grayscale background with a simple, schematic",
+      "json_objects": [],
+      "parsed": null
+    },
+    "0043_red_9_mask.png": {
+      "entry": {
+        "color_id": 7,
+        "color_name": "red",
+        "group_index_in_color": 9,
+        "stroke_indexes": [
+          149
+        ],
+        "bbox_xyxy": [
+          748,
+          255,
+          792,
+          317
+        ],
+        "crop_file_mask": "red_9_mask.png"
+      },
+      "colour_hint": "red",
+      "bbox_xyxy": [
+        748,
+        255,
+        792,
+        317
+      ],
+      "bbox_right_panel_xyxy": [
+        101,
+        91,
+        107,
+        100
+      ],
+      "timing_s": 2.7439,
+      "model_raw": "```json\n{\n  \"label\": \"bacteria\",\n  \"full_visual_LEFT\": \"A blurry, orange, elongated object with a rounded top and a tapered bottom, resembling a bacterium.\",\n  \"LEFT_SURROUNDINGS\": \"A gray, circular background with a dark gray ring around the object.\"\n}\n```",
+      "json_objects": [
+        {
+          "label": "bacteria",
+          "full_visual_LEFT": "A blurry, orange, elongated object with a rounded top and a tapered bottom, resembling a bacterium.",
+          "LEFT_SURROUNDINGS": "A gray, circular background with a dark gray ring around the object."
+        }
+      ],
+      "parsed": {
+        "label": "bacteria",
+        "full_visual_LEFT": "A blurry, orange, elongated object with a rounded top and a tapered bottom, resembling a bacterium.",
+        "LEFT_SURROUNDINGS": "A gray, circular background with a dark gray ring around the object."
+      }
+    },
+    "0044_red_10_mask.png": {
+      "entry": {
+        "color_id": 7,
+        "color_name": "red",
+        "group_index_in_color": 10,
+        "stroke_indexes": [
+          176
+        ],
+        "bbox_xyxy": [
+          819,
+          945,
+          852,
+          1002
+        ],
+        "crop_file_mask": "red_10_mask.png"
+      },
+      "colour_hint": "red",
+      "bbox_xyxy": [
+        819,
+        945,
+        852,
+        1002
+      ],
+      "bbox_right_panel_xyxy": [
+        110,
+        184,
+        115,
+        192
+      ],
+      "timing_s": 2.7439,
+      "model_raw": "```json\n{\n  \"label\": \"bacteria\",\n  \"full_visual_LEFT\": \"A red, rectangular object with a blurred, out-of-focus appearance, set against a gray background.\",\n  \"LEFT_SURROUNDINGS\": \"A gray, flat background with a dark gray horizontal line at the bottom.\"\n}\n```",
+      "json_objects": [
+        {
+          "label": "bacteria",
+          "full_visual_LEFT": "A red, rectangular object with a blurred, out-of-focus appearance, set against a gray background.",
+          "LEFT_SURROUNDINGS": "A gray, flat background with a dark gray horizontal line at the bottom."
+        }
+      ],
+      "parsed": {
+        "label": "bacteria",
+        "full_visual_LEFT": "A red, rectangular object with a blurred, out-of-focus appearance, set against a gray background.",
+        "LEFT_SURROUNDINGS": "A gray, flat background with a dark gray horizontal line at the bottom."
+      }
+    },
+    "0045_red_11_mask.png": {
+      "entry": {
+        "color_id": 7,
+        "color_name": "red",
+        "group_index_in_color": 11,
+        "stroke_indexes": [
+          151
+        ],
+        "bbox_xyxy": [
+          829,
+          300,
+          865,
+          346
+        ],
+        "crop_file_mask": "red_11_mask.png"
+      },
+      "colour_hint": "red",
+      "bbox_xyxy": [
+        829,
+        300,
+        865,
+        346
+      ],
+      "bbox_right_panel_xyxy": [
+        112,
+        97,
+        117,
+        104
+      ],
+      "timing_s": 2.7439,
+      "model_raw": "```json\n{\n  \"label\": \"bacteria\",\n  \"full_visual_LEFT\": \"A blurry, elongated, orange-colored object with a curved shape, resembling a bacterium, set against a gray, grayscaled background.\",\n  \"LEFT_SURROUNDINGS\": \"A grayscale, blurred background with a faint, curved, gray shape that",
+      "json_objects": [],
+      "parsed": null
+    },
+    "0046_red_12_mask.png": {
+      "entry": {
+        "color_id": 7,
+        "color_name": "red",
+        "group_index_in_color": 12,
+        "stroke_indexes": [
+          124,
+          128,
+          131,
+          132,
+          133,
+          145,
+          146,
+          147,
+          148
+        ],
+        "bbox_xyxy": [
+          1011,
+          65,
+          1147,
+          272
+        ],
+        "crop_file_mask": "red_12_mask.png"
+      },
+      "colour_hint": "red",
+      "bbox_xyxy": [
+        1011,
+        65,
+        1147,
+        272
+      ],
+      "bbox_right_panel_xyxy": [
+        136,
+        66,
+        155,
+        94
+      ],
+      "timing_s": 2.7439,
+      "model_raw": "```json\n{\n  \"label\": \"cell\",\n  \"full_visual_LEFT\": \"A detailed, grayscale illustration of a cell, showing various organelles such as the nucleus, mitochondria, and endoplasmic reticulum.\",\n  \"LEFT_SURROUNDINGS\": \"A grayscale background with a complex, layered structure that includes the nucleus",
+      "json_objects": [],
+      "parsed": null
+    },
+    "0047_red_13_mask.png": {
+      "entry": {
+        "color_id": 7,
+        "color_name": "red",
+        "group_index_in_color": 13,
+        "stroke_indexes": [
+          171
+        ],
+        "bbox_xyxy": [
+          1101,
+          498,
+          1134,
+          531
+        ],
+        "crop_file_mask": "red_13_mask.png"
+      },
+      "colour_hint": "red",
+      "bbox_xyxy": [
+        1101,
+        498,
+        1134,
+        531
+      ],
+      "bbox_right_panel_xyxy": [
+        148,
+        124,
+        153,
+        129
+      ],
+      "timing_s": 2.7439,
+      "model_raw": "```json\n{\n  \"label\": \"cell\",\n  \"full_visual_LEFT\": \"A close-up of a cell with a pinkish, circular nucleus surrounded by a yellowish halo, set against a gray, blurred background.\",\n  \"LEFT_SURROUNDINGS\": \"A gray, blurred background with faint, circular patterns resembling a cellular environment.\"\n}\n",
+      "json_objects": [
+        {
+          "label": "cell",
+          "full_visual_LEFT": "A close-up of a cell with a pinkish, circular nucleus surrounded by a yellowish halo, set against a gray, blurred background.",
+          "LEFT_SURROUNDINGS": "A gray, blurred background with faint, circular patterns resembling a cellular environment."
+        }
+      ],
+      "parsed": {
+        "label": "cell",
+        "full_visual_LEFT": "A close-up of a cell with a pinkish, circular nucleus surrounded by a yellowish halo, set against a gray, blurred background.",
+        "LEFT_SURROUNDINGS": "A gray, blurred background with faint, circular patterns resembling a cellular environment."
+      }
+    },
+    "0048_red_14_mask.png": {
+      "entry": {
+        "color_id": 7,
+        "color_name": "red",
+        "group_index_in_color": 14,
+        "stroke_indexes": [
+          170
+        ],
+        "bbox_xyxy": [
+          1104,
+          470,
+          1137,
+          504
+        ],
+        "crop_file_mask": "red_14_mask.png"
+      },
+      "colour_hint": "red",
+      "bbox_xyxy": [
+        1104,
+        470,
+        1137,
+        504
+      ],
+      "bbox_right_panel_xyxy": [
+        149,
+        120,
+        153,
+        125
+      ],
+      "timing_s": 2.7439,
+      "model_raw": "```json\n{\n  \"label\": \"cell\",\n  \"full_visual_LEFT\": \"A close-up of a cell with a pinkish, circular nucleus surrounded by a greenish membrane, set against a grayscale background.\",\n  \"LEFT_SURROUNDINGS\": \"A grayscale, blurred background with faint, circular patterns resembling cellular structures or a microscope slide.\"\n",
+      "json_objects": [],
+      "parsed": null
+    },
+    "0049_red_15_mask.png": {
+      "entry": {
+        "color_id": 7,
+        "color_name": "red",
+        "group_index_in_color": 15,
+        "stroke_indexes": [
+          141,
+          143
+        ],
+        "bbox_xyxy": [
+          1105,
+          178,
+          1151,
+          227
+        ],
+        "crop_file_mask": "red_15_mask.png"
+      },
+      "colour_hint": "red",
+      "bbox_xyxy": [
+        1105,
+        178,
+        1151,
+        227
+      ],
+      "bbox_right_panel_xyxy": [
+        149,
+        81,
+        155,
+        88
+      ],
+      "timing_s": 2.6719,
+      "model_raw": "```json\n{\n  \"label\": \"cell\",\n  \"full_visual_LEFT\": \"A blurry, pixelated image of a cell with a blue nucleus and red cytoplasm, surrounded by a gray background.\",\n  \"LEFT_SURROUNDINGS\": \"A grayscale, blurred image of a hand or similar structure, with the cell in the foreground.\"\n",
+      "json_objects": [],
+      "parsed": null
+    },
+    "0050_red_16_mask.png": {
+      "entry": {
+        "color_id": 7,
+        "color_name": "red",
+        "group_index_in_color": 16,
+        "stroke_indexes": [
+          168
+        ],
+        "bbox_xyxy": [
+          1113,
+          245,
+          1148,
+          280
+        ],
+        "crop_file_mask": "red_16_mask.png"
+      },
+      "colour_hint": "red",
+      "bbox_xyxy": [
+        1113,
+        245,
+        1148,
+        280
+      ],
+      "bbox_right_panel_xyxy": [
+        150,
+        90,
+        155,
+        95
+      ],
+      "timing_s": 2.6719,
+      "model_raw": "```json\n{\n  \"label\": \"cell\",\n  \"full_visual_LEFT\": \"A red, circular object with a pink center and a lighter, grayish outer ring, set against a blurred, grayscaled background.\",\n  \"LEFT_SURROUNDINGS\": \"A blurred, grayscaled background with a faint, circular, pinkish object",
+      "json_objects": [],
+      "parsed": null
+    },
+    "0051_red_17_mask.png": {
+      "entry": {
+        "color_id": 7,
+        "color_name": "red",
+        "group_index_in_color": 17,
+        "stroke_indexes": [
+          156,
+          157,
+          158,
+          159,
+          160
+        ],
+        "bbox_xyxy": [
+          1122,
+          487,
+          1241,
+          622
+        ],
+        "crop_file_mask": "red_17_mask.png"
+      },
+      "colour_hint": "red",
+      "bbox_xyxy": [
+        1122,
+        487,
+        1241,
+        622
+      ],
+      "bbox_right_panel_xyxy": [
+        151,
+        123,
+        167,
+        141
+      ],
+      "timing_s": 2.6719,
+      "model_raw": "```json\n{\n  \"label\": \"cell\",\n  \"full_visual_LEFT\": \"A detailed, grayscale image of a cell, showing its internal structures such as the nucleus, mitochondria, and other organelles, with a red highlight on a specific organelle.\",\n  \"LEFT_SURROUNDINGS\": \"A grayscale, detailed image of",
+      "json_objects": [],
+      "parsed": null
+    },
+    "0052_red_18_mask.png": {
+      "entry": {
+        "color_id": 7,
+        "color_name": "red",
+        "group_index_in_color": 18,
+        "stroke_indexes": [
+          172
+        ],
+        "bbox_xyxy": [
+          1132,
+          647,
+          1165,
+          680
+        ],
+        "crop_file_mask": "red_18_mask.png"
+      },
+      "colour_hint": "red",
+      "bbox_xyxy": [
+        1132,
+        647,
+        1165,
+        680
+      ],
+      "bbox_right_panel_xyxy": [
+        153,
+        144,
+        157,
+        149
+      ],
+      "timing_s": 2.6719,
+      "model_raw": "```json\n{\n  \"label\": \"cell\",\n  \"full_visual_LEFT\": \"A red, circular object with a yellowish-green halo, set against a gray, blurred background.\",\n  \"LEFT_SURROUNDINGS\": \"A gray, blurred background with a faint, curved white line above the red object.\"\n}\n```",
+      "json_objects": [
+        {
+          "label": "cell",
+          "full_visual_LEFT": "A red, circular object with a yellowish-green halo, set against a gray, blurred background.",
+          "LEFT_SURROUNDINGS": "A gray, blurred background with a faint, curved white line above the red object."
+        }
+      ],
+      "parsed": {
+        "label": "cell",
+        "full_visual_LEFT": "A red, circular object with a yellowish-green halo, set against a gray, blurred background.",
+        "LEFT_SURROUNDINGS": "A gray, blurred background with a faint, curved white line above the red object."
+      }
+    },
+    "0053_red_19_mask.png": {
+      "entry": {
+        "color_id": 7,
+        "color_name": "red",
+        "group_index_in_color": 19,
+        "stroke_indexes": [
+          134,
+          135,
+          140,
+          142,
+          144
+        ],
+        "bbox_xyxy": [
+          1149,
+          118,
+          1227,
+          235
+        ],
+        "crop_file_mask": "red_19_mask.png"
+      },
+      "colour_hint": "red",
+      "bbox_xyxy": [
+        1149,
+        118,
+        1227,
+        235
+      ],
+      "bbox_right_panel_xyxy": [
+        155,
+        73,
+        165,
+        89
+      ],
+      "timing_s": 2.6719,
+      "model_raw": "```json\n{\n  \"label\": \"mitochondria\",\n  \"full_visual_LEFT\": \"A detailed illustration of a mitochondrion, depicted as a long, oval-shaped organelle with a complex internal structure, including cristae and a matrix, surrounded by other cellular components.\",\n  \"LEFT_SURROUNDINGS\": \"The mitochondrion",
+      "json_objects": [],
+      "parsed": null
+    },
+    "0054_blue_0_mask.png": {
+      "entry": {
+        "color_id": 8,
+        "color_name": "blue",
+        "group_index_in_color": 0,
+        "stroke_indexes": [
+          182
+        ],
+        "bbox_xyxy": [
+          366,
+          325,
+          423,
+          469
+        ],
+        "crop_file_mask": "blue_0_mask.png"
+      },
+      "colour_hint": "blue",
+      "bbox_xyxy": [
+        366,
+        325,
+        423,
+        469
+      ],
+      "bbox_right_panel_xyxy": [
+        49,
+        101,
+        57,
+        120
+      ],
+      "timing_s": 2.6719,
+      "model_raw": "```json\n{\n  \"label\": \"cell\",\n  \"full_visual_LEFT\": \"A diagram of a cell with a blue interior and gray surroundings.\",\n  \"LEFT_SURROUNDINGS\": \"A gray, elongated structure with a blue interior, resembling a cell or a biological organ.\"\n}\n```",
+      "json_objects": [
+        {
+          "label": "cell",
+          "full_visual_LEFT": "A diagram of a cell with a blue interior and gray surroundings.",
+          "LEFT_SURROUNDINGS": "A gray, elongated structure with a blue interior, resembling a cell or a biological organ."
+        }
+      ],
+      "parsed": {
+        "label": "cell",
+        "full_visual_LEFT": "A diagram of a cell with a blue interior and gray surroundings.",
+        "LEFT_SURROUNDINGS": "A gray, elongated structure with a blue interior, resembling a cell or a biological organ."
+      }
+    },
+    "0055_blue_1_mask.png": {
+      "entry": {
+        "color_id": 8,
+        "color_name": "blue",
+        "group_index_in_color": 1,
+        "stroke_indexes": [
+          177,
+          178,
+          179,
+          180,
+          181
+        ],
+        "bbox_xyxy": [
+          1015,
+          104,
+          1156,
+          237
+        ],
+        "crop_file_mask": "blue_1_mask.png"
+      },
+      "colour_hint": "blue",
+      "bbox_xyxy": [
+        1015,
+        104,
+        1156,
+        237
+      ],
+      "bbox_right_panel_xyxy": [
+        137,
+        71,
+        156,
+        89
+      ],
+      "timing_s": 2.6719,
+      "model_raw": "```json\n{\n  \"label\": \"cell\",\n  \"full_visual_LEFT\": \"A detailed, magnified view of a cell, showing a large purple nucleus surrounded by a complex network of membranes and structures, with a prominent outer membrane and internal organelles.\",\n  \"LEFT_SURROUNDINGS\": \"A grayscale, schematic representation of a cell",
+      "json_objects": [],
+      "parsed": null
+    },
+    "0056_blue_2_mask.png": {
+      "entry": {
+        "color_id": 8,
+        "color_name": "blue",
+        "group_index_in_color": 2,
+        "stroke_indexes": [
+          183,
+          184,
+          185,
+          186
+        ],
+        "bbox_xyxy": [
+          1119,
+          475,
+          1228,
+          593
+        ],
+        "crop_file_mask": "blue_2_mask.png"
+      },
+      "colour_hint": "blue",
+      "bbox_xyxy": [
+        1119,
+        475,
+        1228,
+        593
+      ],
+      "bbox_right_panel_xyxy": [
+        151,
+        121,
+        165,
+        137
+      ],
+      "timing_s": 2.6719,
+      "model_raw": "```json\n{\n  \"label\": \"cell\",\n  \"full_visual_LEFT\": \"A detailed, magnified view of a cell, showing a large purple nucleus surrounded by a complex network of organelles, including the endoplasmic reticulum and Golgi apparatus, with a prominent outer membrane and internal structures.\",\n  \"LEFT_SUR",
+      "json_objects": [],
+      "parsed": null
+    },
+    "0057_purple_0_mask.png": {
+      "entry": {
+        "color_id": 9,
+        "color_name": "purple",
+        "group_index_in_color": 0,
+        "stroke_indexes": [
+          187
+        ],
+        "bbox_xyxy": [
+          580,
+          124,
+          613,
+          157
+        ],
+        "crop_file_mask": "purple_0_mask.png"
+      },
+      "colour_hint": "purple",
+      "bbox_xyxy": [
+        580,
+        124,
+        613,
+        157
+      ],
+      "bbox_right_panel_xyxy": [
+        78,
+        74,
+        83,
+        78
+      ],
+      "timing_s": 2.6977,
+      "model_raw": "```json\n{\n  \"label\": \"bacteria\",\n  \"full_visual_LEFT\": \"A purple, fuzzy, and irregularly shaped object, which appears to be a bacterial cell, is prominently displayed in the foreground of the image. It is set against a grayscale, blurred background, which suggests a microscopic view.\",\n  \"LEFT_SURROUNDINGS",
+      "json_objects": [],
+      "parsed": null
+    },
+    "0058_purple_1_mask.png": {
+      "entry": {
+        "color_id": 9,
+        "color_name": "purple",
+        "group_index_in_color": 1,
+        "stroke_indexes": [
+          188
+        ],
+        "bbox_xyxy": [
+          1029,
+          149,
+          1065,
+          180
+        ],
+        "crop_file_mask": "purple_1_mask.png"
+      },
+      "colour_hint": "purple",
+      "bbox_xyxy": [
+        1029,
+        149,
+        1065,
+        180
+      ],
+      "bbox_right_panel_xyxy": [
+        139,
+        77,
+        144,
+        81
+      ],
+      "timing_s": 2.6977,
+      "model_raw": "```json\n{\n  \"label\": \"cell\",\n  \"full_visual_LEFT\": \"A blurry, purple-colored object with a complex, irregular shape, possibly a cell or a cellular structure, set against a grayscale background.\",\n  \"LEFT_SURROUNDINGS\": \"A grayscale, textured background with dark, vertical, and somewhat jagged patterns, possibly",
+      "json_objects": [],
+      "parsed": null
+    },
+    "0059_purple_2_mask.png": {
+      "entry": {
+        "color_id": 9,
+        "color_name": "purple",
+        "group_index_in_color": 2,
+        "stroke_indexes": [
+          189
+        ],
+        "bbox_xyxy": [
+          1101,
+          183,
+          1143,
+          221
+        ],
+        "crop_file_mask": "purple_2_mask.png"
+      },
+      "colour_hint": "purple",
+      "bbox_xyxy": [
+        1101,
+        183,
+        1143,
+        221
+      ],
+      "bbox_right_panel_xyxy": [
+        148,
+        82,
+        154,
+        87
+      ],
+      "timing_s": 2.6977,
+      "model_raw": "```json\n{\n  \"label\": \"cell\",\n  \"full_visual_LEFT\": \"A blurry image of a cell with a purple nucleus and a blue cytoplasm, surrounded by a gray background.\",\n  \"LEFT_SURROUNDINGS\": \"A grayscale background with a patterned texture, possibly a microscope image or a cellular structure.\"\n}\n```",
+      "json_objects": [
+        {
+          "label": "cell",
+          "full_visual_LEFT": "A blurry image of a cell with a purple nucleus and a blue cytoplasm, surrounded by a gray background.",
+          "LEFT_SURROUNDINGS": "A grayscale background with a patterned texture, possibly a microscope image or a cellular structure."
+        }
+      ],
+      "parsed": {
+        "label": "cell",
+        "full_visual_LEFT": "A blurry image of a cell with a purple nucleus and a blue cytoplasm, surrounded by a gray background.",
+        "LEFT_SURROUNDINGS": "A grayscale background with a patterned texture, possibly a microscope image or a cellular structure."
+      }
+    },
+    "0060_purple_3_mask.png": {
+      "entry": {
+        "color_id": 9,
+        "color_name": "purple",
+        "group_index_in_color": 3,
+        "stroke_indexes": [
+          190,
+          191,
+          192,
+          193,
+          194
+        ],
+        "bbox_xyxy": [
+          1122,
+          491,
+          1239,
+          583
+        ],
+        "crop_file_mask": "purple_3_mask.png"
+      },
+      "colour_hint": "purple",
+      "bbox_xyxy": [
+        1122,
+        491,
+        1239,
+        583
+      ],
+      "bbox_right_panel_xyxy": [
+        151,
+        123,
+        167,
+        136
+      ],
+      "timing_s": 2.6977,
+      "model_raw": "```json\n{\n  \"label\": \"cell\",\n  \"full_visual_LEFT\": \"A detailed, magnified view of a cell, showing a large purple nucleus surrounded by a complex network of membranes and structures, with a grayscale background.\",\n  \"LEFT_SURROUNDINGS\": \"A grayscale, detailed image of a cell's internal structure, including a",
+      "json_objects": [],
+      "parsed": null
+    },
+    "0061_purple_4_mask.png": {
+      "entry": {
+        "color_id": 9,
+        "color_name": "purple",
+        "group_index_in_color": 4,
+        "stroke_indexes": [
+          195
+        ],
+        "bbox_xyxy": [
+          1419,
+          610,
+          1484,
+          677
+        ],
+        "crop_file_mask": "purple_4_mask.png"
+      },
+      "colour_hint": "purple",
+      "bbox_xyxy": [
+        1419,
+        610,
+        1484,
+        677
+      ],
+      "bbox_right_panel_xyxy": [
+        191,
+        139,
+        200,
+        148
+      ],
+      "timing_s": 2.6977,
+      "model_raw": "```json\n{\n  \"label\": \"cell\",\n  \"full_visual_LEFT\": \"A purple, spherical object with a smooth surface and a slight reflection, set against a gray, blurred background.\",\n  \"LEFT_SURROUNDINGS\": \"A gray, blurred background with a black circular outline around the object.\"\n}\n```",
+      "json_objects": [
+        {
+          "label": "cell",
+          "full_visual_LEFT": "A purple, spherical object with a smooth surface and a slight reflection, set against a gray, blurred background.",
+          "LEFT_SURROUNDINGS": "A gray, blurred background with a black circular outline around the object."
+        }
+      ],
+      "parsed": {
+        "label": "cell",
+        "full_visual_LEFT": "A purple, spherical object with a smooth surface and a slight reflection, set against a gray, blurred background.",
+        "LEFT_SURROUNDINGS": "A gray, blurred background with a black circular outline around the object."
+      }
+    },
+    "0062_gray_0_mask.png": {
+      "entry": {
+        "color_id": 10,
+        "color_name": "gray",
+        "group_index_in_color": 0,
+        "stroke_indexes": [
+          196,
+          197,
+          198,
+          199,
+          200,
+          201,
+          202,
+          203,
+          220,
+          221
+        ],
+        "bbox_xyxy": [
+          0,
+          0,
+          2226,
+          1023
+        ],
+        "crop_file_mask": "gray_0_mask.png"
+      },
+      "colour_hint": "gray",
+      "bbox_xyxy": [
+        0,
+        0,
+        2226,
+        1023
+      ],
+      "bbox_right_panel_xyxy": [
+        0,
+        57,
+        300,
+        195
+      ],
+      "timing_s": 2.6977,
+      "model_raw": "```json\n{\n  \"label\": \"human\",\n  \"full_visual_LEFT\": \"A human silhouette is depicted in the center of the left image, with various biological structures and an egg nearby.\",\n  \"LEFT_SURROUNDINGS\": \"The left image has a light blue background with various biological structures, including a human silhouette, an egg, and",
+      "json_objects": [],
+      "parsed": null
+    },
+    "0063_gray_1_mask.png": {
+      "entry": {
+        "color_id": 10,
+        "color_name": "gray",
+        "group_index_in_color": 1,
+        "stroke_indexes": [
+          216
+        ],
+        "bbox_xyxy": [
+          290,
+          689,
+          323,
+          741
+        ],
+        "crop_file_mask": "gray_1_mask.png"
+      },
+      "colour_hint": "gray",
+      "bbox_xyxy": [
+        290,
+        689,
+        323,
+        741
+      ],
+      "bbox_right_panel_xyxy": [
+        39,
+        150,
+        44,
+        157
+      ],
+      "timing_s": 2.6977,
+      "model_raw": "```json\n{\n  \"label\": \"bacteria\",\n  \"full_visual_LEFT\": \"A grayscale image of a bacterial cell with a yellowish internal structure, set against a gray background.\",\n  \"LEFT_SURROUNDINGS\": \"A grayscale image of a human body silhouette, with a yellowish internal structure, set against a gray background.\"\n}\n",
+      "json_objects": [
+        {
+          "label": "bacteria",
+          "full_visual_LEFT": "A grayscale image of a bacterial cell with a yellowish internal structure, set against a gray background.",
+          "LEFT_SURROUNDINGS": "A grayscale image of a human body silhouette, with a yellowish internal structure, set against a gray background."
+        }
+      ],
+      "parsed": {
+        "label": "bacteria",
+        "full_visual_LEFT": "A grayscale image of a bacterial cell with a yellowish internal structure, set against a gray background.",
+        "LEFT_SURROUNDINGS": "A grayscale image of a human body silhouette, with a yellowish internal structure, set against a gray background."
+      }
+    },
+    "0064_gray_2_mask.png": {
+      "entry": {
+        "color_id": 10,
+        "color_name": "gray",
+        "group_index_in_color": 2,
+        "stroke_indexes": [
+          211
+        ],
+        "bbox_xyxy": [
+          335,
+          700,
+          364,
+          740
+        ],
+        "crop_file_mask": "gray_2_mask.png"
+      },
+      "colour_hint": "gray",
+      "bbox_xyxy": [
+        335,
+        700,
+        364,
+        740
+      ],
+      "bbox_right_panel_xyxy": [
+        45,
+        151,
+        49,
+        157
+      ],
+      "timing_s": 2.6977,
+      "model_raw": "```json\n{\n  \"label\": \"bacteria\",\n  \"full_visual_LEFT\": \"A close-up of a bacterial cell, showing its elongated shape with a yellowish central region and a dark outline.\",\n  \"LEFT_SURROUNDINGS\": \"A gray background with a faint, blurred image of a similar bacterial cell, creating a sense of",
+      "json_objects": [],
+      "parsed": null
+    },
+    "0065_gray_3_mask.png": {
+      "entry": {
+        "color_id": 10,
+        "color_name": "gray",
+        "group_index_in_color": 3,
+        "stroke_indexes": [
+          208,
+          209,
+          210,
+          217
+        ],
+        "bbox_xyxy": [
+          634,
+          615,
+          747,
+          783
+        ],
+        "crop_file_mask": "gray_3_mask.png"
+      },
+      "colour_hint": "gray",
+      "bbox_xyxy": [
+        634,
+        615,
+        747,
+        783
+      ],
+      "bbox_right_panel_xyxy": [
+        85,
+        140,
+        101,
+        163
+      ],
+      "timing_s": 2.7879,
+      "model_raw": "```json\n{\n  \"label\": \"bacteria\",\n  \"full_visual_LEFT\": \"A microscopic illustration of a bacterium with a rod-shaped body, multiple flagella, and a cell membrane.\",\n  \"LEFT_SURROUNDINGS\": \"A light gray background with a faint outline of a cell structure.\"\n}\n```",
+      "json_objects": [
+        {
+          "label": "bacteria",
+          "full_visual_LEFT": "A microscopic illustration of a bacterium with a rod-shaped body, multiple flagella, and a cell membrane.",
+          "LEFT_SURROUNDINGS": "A light gray background with a faint outline of a cell structure."
+        }
+      ],
+      "parsed": {
+        "label": "bacteria",
+        "full_visual_LEFT": "A microscopic illustration of a bacterium with a rod-shaped body, multiple flagella, and a cell membrane.",
+        "LEFT_SURROUNDINGS": "A light gray background with a faint outline of a cell structure."
+      }
+    },
+    "0066_gray_4_mask.png": {
+      "entry": {
+        "color_id": 10,
+        "color_name": "gray",
+        "group_index_in_color": 4,
+        "stroke_indexes": [
+          212,
+          213,
+          214,
+          215,
+          218,
+          219,
+          226,
+          227,
+          228,
+          229
+        ],
+        "bbox_xyxy": [
+          705,
+          688,
+          871,
+          788
+        ],
+        "crop_file_mask": "gray_4_mask.png"
+      },
+      "colour_hint": "gray",
+      "bbox_xyxy": [
+        705,
+        688,
+        871,
+        788
+      ],
+      "bbox_right_panel_xyxy": [
+        95,
+        150,
+        117,
+        163
+      ],
+      "timing_s": 2.7879,
+      "model_raw": "```json\n{\n  \"label\": \"mitochondria\",\n  \"full_visual_LEFT\": \"A close-up of a mitochondrion, showing its internal structure with cristae and a surrounding cellular membrane.\",\n  \"LEFT_SURROUNDINGS\": \"A grayscale image of a cell with a detailed view of the mitochondrion, which is highlighted by",
+      "json_objects": [],
+      "parsed": null
+    },
+    "0067_gray_5_mask.png": {
+      "entry": {
+        "color_id": 10,
+        "color_name": "gray",
+        "group_index_in_color": 5,
+        "stroke_indexes": [
+          204,
+          206,
+          223
+        ],
+        "bbox_xyxy": [
+          781,
+          557,
+          868,
+          617
+        ],
+        "crop_file_mask": "gray_5_mask.png"
+      },
+      "colour_hint": "gray",
+      "bbox_xyxy": [
+        781,
+        557,
+        868,
+        617
+      ],
+      "bbox_right_panel_xyxy": [
+        105,
+        132,
+        117,
+        140
+      ],
+      "timing_s": 2.7879,
+      "model_raw": "```json\n{\n  \"label\": \"bacteria\",\n  \"full_visual_LEFT\": \"A close-up of a bacterial cell with a gray background.\",\n  \"LEFT_SURROUNDINGS\": \"A gray, textured surface with a light green glow around the bacterial cell.\"\n}\n```",
+      "json_objects": [
+        {
+          "label": "bacteria",
+          "full_visual_LEFT": "A close-up of a bacterial cell with a gray background.",
+          "LEFT_SURROUNDINGS": "A gray, textured surface with a light green glow around the bacterial cell."
+        }
+      ],
+      "parsed": {
+        "label": "bacteria",
+        "full_visual_LEFT": "A close-up of a bacterial cell with a gray background.",
+        "LEFT_SURROUNDINGS": "A gray, textured surface with a light green glow around the bacterial cell."
+      }
+    },
+    "0068_gray_6_mask.png": {
+      "entry": {
+        "color_id": 10,
+        "color_name": "gray",
+        "group_index_in_color": 6,
+        "stroke_indexes": [
+          207
+        ],
+        "bbox_xyxy": [
+          818,
+          613,
+          855,
+          658
+        ],
+        "crop_file_mask": "gray_6_mask.png"
+      },
+      "colour_hint": "gray",
+      "bbox_xyxy": [
+        818,
+        613,
+        855,
+        658
+      ],
+      "bbox_right_panel_xyxy": [
+        110,
+        140,
+        115,
+        146
+      ],
+      "timing_s": 2.7879,
+      "model_raw": "```json\n{\n  \"label\": \"bacteria\",\n  \"full_visual_LEFT\": \"A green, elongated, and slightly curved object with a textured surface, appearing to be a close-up of a bacterial cell.\",\n  \"LEFT_SURROUNDINGS\": \"A gray, blurred background with a faint outline of a white object, possibly a microscope",
+      "json_objects": [],
+      "parsed": null
+    },
+    "0069_gray_7_mask.png": {
+      "entry": {
+        "color_id": 10,
+        "color_name": "gray",
+        "group_index_in_color": 7,
+        "stroke_indexes": [
+          205,
+          222
+        ],
+        "bbox_xyxy": [
+          858,
+          548,
+          927,
+          615
+        ],
+        "crop_file_mask": "gray_7_mask.png"
+      },
+      "colour_hint": "gray",
+      "bbox_xyxy": [
+        858,
+        548,
+        927,
+        615
+      ],
+      "bbox_right_panel_xyxy": [
+        116,
+        131,
+        125,
+        140
+      ],
+      "timing_s": 2.7879,
+      "model_raw": "```json\n{\n  \"label\": \"bacteria\",\n  \"full_visual_LEFT\": \"A gray, rounded object with two long, thin, curved appendages extending upwards, resembling a bacterium with a stalk-like structure.\",\n  \"LEFT_SURROUNDINGS\": \"A light gray background with a faint, translucent green glow around the object, suggesting",
+      "json_objects": [],
+      "parsed": null
+    },
+    "0070_gray_8_mask.png": {
+      "entry": {
+        "color_id": 10,
+        "color_name": "gray",
+        "group_index_in_color": 8,
+        "stroke_indexes": [
+          225
+        ],
+        "bbox_xyxy": [
+          874,
+          663,
+          930,
+          696
+        ],
+        "crop_file_mask": "gray_8_mask.png"
+      },
+      "colour_hint": "gray",
+      "bbox_xyxy": [
+        874,
+        663,
+        930,
+        696
+      ],
+      "bbox_right_panel_xyxy": [
+        118,
+        146,
+        125,
+        151
+      ],
+      "timing_s": 2.7879,
+      "model_raw": "```json\n{\n  \"label\": \"bacteria\",\n  \"full_visual_LEFT\": \"A gray, elongated, worm-like object with a curved shape, appearing to be in motion, with a greenish tint on its surface.\",\n  \"LEFT_SURROUNDINGS\": \"A grayscale background with a faint, blurred outline of a structure, possibly",
+      "json_objects": [],
+      "parsed": null
+    },
+    "0071_gray_9_mask.png": {
+      "entry": {
+        "color_id": 10,
+        "color_name": "gray",
+        "group_index_in_color": 9,
+        "stroke_indexes": [
+          224
+        ],
+        "bbox_xyxy": [
+          898,
+          613,
+          947,
+          652
+        ],
+        "crop_file_mask": "gray_9_mask.png"
+      },
+      "colour_hint": "gray",
+      "bbox_xyxy": [
+        898,
+        613,
+        947,
+        652
+      ],
+      "bbox_right_panel_xyxy": [
+        121,
+        140,
+        128,
+        145
+      ],
+      "timing_s": 2.7879,
+      "model_raw": "```json\n{\n  \"label\": \"bacteria\",\n  \"full_visual_LEFT\": \"A close-up of a green, elongated, worm-like structure with a curved body, appearing to be in motion against a gray background.\",\n  \"LEFT_SURROUNDINGS\": \"A gray, textured background with a faint, blurred outline of a curved,",
+      "json_objects": [],
+      "parsed": null
+    },
+    "0072_black_0_mask.png": {
+      "entry": {
+        "color_id": 11,
+        "color_name": "black",
+        "group_index_in_color": 0,
+        "stroke_indexes": [
+          244
+        ],
+        "bbox_xyxy": [
+          0,
+          1260,
+          1171,
+          1353
+        ],
+        "crop_file_mask": "black_0_mask.png"
+      },
+      "colour_hint": "black",
+      "bbox_xyxy": [
+        0,
+        1260,
+        1171,
+        1353
+      ],
+      "bbox_right_panel_xyxy": [
+        0,
+        227,
+        158,
+        239
+      ],
+      "timing_s": 2.7879,
+      "model_raw": "```json\n{\n  \"label\": \"bacteria\",\n  \"full_visual_LEFT\": \"A black box with a white horizontal line inside, and a red line at the bottom.\",\n  \"LEFT_SURROUNDINGS\": \"A black background with a white horizontal line and a red line at the bottom.\"\n}\n```",
+      "json_objects": [
+        {
+          "label": "bacteria",
+          "full_visual_LEFT": "A black box with a white horizontal line inside, and a red line at the bottom.",
+          "LEFT_SURROUNDINGS": "A black background with a white horizontal line and a red line at the bottom."
+        }
+      ],
+      "parsed": {
+        "label": "bacteria",
+        "full_visual_LEFT": "A black box with a white horizontal line inside, and a red line at the bottom.",
+        "LEFT_SURROUNDINGS": "A black background with a white horizontal line and a red line at the bottom."
+      }
+    },
+    "0073_black_1_mask.png": {
+      "entry": {
+        "color_id": 11,
+        "color_name": "black",
+        "group_index_in_color": 1,
+        "stroke_indexes": [
+          230,
+          231,
+          233,
+          234,
+          235,
+          236,
+          237
+        ],
+        "bbox_xyxy": [
+          0,
+          412,
+          115,
+          551
+        ],
+        "crop_file_mask": "black_1_mask.png"
+      },
+      "colour_hint": "black",
+      "bbox_xyxy": [
+        0,
+        412,
+        115,
+        551
+      ],
+      "bbox_right_panel_xyxy": [
+        0,
+        113,
+        15,
+        131
+      ],
+      "timing_s": 2.694,
+      "model_raw": "```json\n{\n  \"label\": \"atom\",\n  \"full_visual_LEFT\": \"A diagram of an atom with a central nucleus and orbiting electrons, depicted with a black outline and a gray nucleus surrounded by a gray electron cloud.\",\n  \"LEFT_SURROUNDINGS\": \"A gray background with vertical lines, possibly representing a scientific diagram or a",
+      "json_objects": [],
+      "parsed": null
+    },
+    "0074_black_2_mask.png": {
+      "entry": {
+        "color_id": 11,
+        "color_name": "black",
+        "group_index_in_color": 2,
+        "stroke_indexes": [
+          238,
+          239,
+          240
+        ],
+        "bbox_xyxy": [
+          251,
+          658,
+          312,
+          753
+        ],
+        "crop_file_mask": "black_2_mask.png"
+      },
+      "colour_hint": "black",
+      "bbox_xyxy": [
+        251,
+        658,
+        312,
+        753
+      ],
+      "bbox_right_panel_xyxy": [
+        34,
+        146,
+        42,
+        158
+      ],
+      "timing_s": 2.694,
+      "model_raw": "```json\n{\n  \"label\": \"bacteria\",\n  \"full_visual_LEFT\": \"A cartoon-style illustration of a bacterium with a spherical body and two long, whip-like appendages.\",\n  \"LEFT_SURROUNDINGS\": \"A gray background with a black outline of the bacterium's body and appendages.\"\n}\n```",
+      "json_objects": [
+        {
+          "label": "bacteria",
+          "full_visual_LEFT": "A cartoon-style illustration of a bacterium with a spherical body and two long, whip-like appendages.",
+          "LEFT_SURROUNDINGS": "A gray background with a black outline of the bacterium's body and appendages."
+        }
+      ],
+      "parsed": {
+        "label": "bacteria",
+        "full_visual_LEFT": "A cartoon-style illustration of a bacterium with a spherical body and two long, whip-like appendages.",
+        "LEFT_SURROUNDINGS": "A gray background with a black outline of the bacterium's body and appendages."
+      }
+    },
+    "0075_black_3_mask.png": {
+      "entry": {
+        "color_id": 11,
+        "color_name": "black",
+        "group_index_in_color": 3,
+        "stroke_indexes": [
+          232
+        ],
+        "bbox_xyxy": [
+          360,
+          437,
+          396,
+          469
+        ],
+        "crop_file_mask": "black_3_mask.png"
+      },
+      "colour_hint": "black",
+      "bbox_xyxy": [
+        360,
+        437,
+        396,
+        469
+      ],
+      "bbox_right_panel_xyxy": [
+        49,
+        116,
+        53,
+        120
+      ],
+      "timing_s": 2.694,
+      "model_raw": "```json\n{\n  \"label\": \"bacteria\",\n  \"full_visual_LEFT\": \"A blurry image of a bacterial cell with a blue-colored structure, possibly representing the cell's cytoplasm or a flagellum, set against a gray background.\",\n  \"LEFT_SURROUNDINGS\": \"A gray, blurred background with a black outline,",
+      "json_objects": [],
+      "parsed": null
+    },
+    "0076_black_4_mask.png": {
+      "entry": {
+        "color_id": 11,
+        "color_name": "black",
+        "group_index_in_color": 4,
+        "stroke_indexes": [
+          242,
+          243
+        ],
+        "bbox_xyxy": [
+          615,
+          1136,
+          1519,
+          1225
+        ],
+        "crop_file_mask": "black_4_mask.png"
+      },
+      "colour_hint": "black",
+      "bbox_xyxy": [
+        615,
+        1136,
+        1519,
+        1225
+      ],
+      "bbox_right_panel_xyxy": [
+        83,
+        210,
+        205,
+        222
+      ],
+      "timing_s": 2.694,
+      "model_raw": "```json\n{\n  \"label\": \"bacteria\",\n  \"full_visual_LEFT\": \"A black box with a white horizontal line inside, representing a simple line segment.\",\n  \"LEFT_SURROUNDINGS\": \"A black background with a white horizontal line, which is the main object in the left crop.\"\n}\n```",
+      "json_objects": [
+        {
+          "label": "bacteria",
+          "full_visual_LEFT": "A black box with a white horizontal line inside, representing a simple line segment.",
+          "LEFT_SURROUNDINGS": "A black background with a white horizontal line, which is the main object in the left crop."
+        }
+      ],
+      "parsed": {
+        "label": "bacteria",
+        "full_visual_LEFT": "A black box with a white horizontal line inside, representing a simple line segment.",
+        "LEFT_SURROUNDINGS": "A black background with a white horizontal line, which is the main object in the left crop."
+      }
+    },
+    "0077_black_5_mask.png": {
+      "entry": {
+        "color_id": 11,
+        "color_name": "black",
+        "group_index_in_color": 5,
+        "stroke_indexes": [
+          241
+        ],
+        "bbox_xyxy": [
+          1206,
+          1032,
+          2226,
+          1125
+        ],
+        "crop_file_mask": "black_5_mask.png"
+      },
+      "colour_hint": "black",
+      "bbox_xyxy": [
+        1206,
+        1032,
+        2226,
+        1125
+      ],
+      "bbox_right_panel_xyxy": [
+        163,
+        196,
+        300,
+        209
+      ],
+      "timing_s": 2.694,
+      "model_raw": "```json\n{\n  \"label\": \"bacteria\",\n  \"full_visual_LEFT\": \"A black box with a white line and a black line on the left side of the image.\",\n  \"LEFT_SURROUNDINGS\": \"A black background with a white line and a black line on the left side of the image.\"\n}\n```",
+      "json_objects": [
+        {
+          "label": "bacteria",
+          "full_visual_LEFT": "A black box with a white line and a black line on the left side of the image.",
+          "LEFT_SURROUNDINGS": "A black background with a white line and a black line on the left side of the image."
+        }
+      ],
+      "parsed": {
+        "label": "bacteria",
+        "full_visual_LEFT": "A black box with a white line and a black line on the left side of the image.",
+        "LEFT_SURROUNDINGS": "A black background with a white line and a black line on the left side of the image."
+      }
+    },
+    "0078_black_6_mask.png": {
+      "entry": {
+        "color_id": 11,
+        "color_name": "black",
+        "group_index_in_color": 6,
+        "stroke_indexes": [
+          245
+        ],
+        "bbox_xyxy": [
+          1679,
+          234,
+          1814,
+          406
+        ],
+        "crop_file_mask": "black_6_mask.png"
+      },
+      "colour_hint": "black",
+      "bbox_xyxy": [
+        1679,
+        234,
+        1814,
+        406
+      ],
+      "bbox_right_panel_xyxy": [
+        226,
+        89,
+        244,
+        112
+      ],
+      "timing_s": 2.694,
+      "model_raw": "```json\n{\n  \"label\": \"egg\",\n  \"full_visual_LEFT\": \"A white, oval-shaped egg with a black outline.\",\n  \"LEFT_SURROUNDINGS\": \"A light gray background.\"\n}\n```",
+      "json_objects": [
+        {
+          "label": "egg",
+          "full_visual_LEFT": "A white, oval-shaped egg with a black outline.",
+          "LEFT_SURROUNDINGS": "A light gray background."
+        }
+      ],
+      "parsed": {
+        "label": "egg",
+        "full_visual_LEFT": "A white, oval-shaped egg with a black outline.",
+        "LEFT_SURROUNDINGS": "A light gray background."
+      }
+    }
+  },
+  "cluster_order": [
+    "0001_yellow_0_mask.png",
+    "0002_yellow_1_mask.png",
+    "0003_yellow_2_mask.png",
+    "0004_yellow_3_mask.png",
+    "0005_yellow_4_mask.png",
+    "0006_yellow_5_mask.png",
+    "0007_yellow_6_mask.png",
+    "0008_yellow_7_mask.png",
+    "0009_yellow_8_mask.png",
+    "0010_orange_0_mask.png",
+    "0011_orange_1_mask.png",
+    "0012_orange_2_mask.png",
+    "0013_orange_3_mask.png",
+    "0014_orange_4_mask.png",
+    "0015_orange_5_mask.png",
+    "0016_orange_6_mask.png",
+    "0017_orange_7_mask.png",
+    "0018_orange_8_mask.png",
+    "0019_orange_9_mask.png",
+    "0020_orange_10_mask.png",
+    "0021_orange_11_mask.png",
+    "0022_orange_12_mask.png",
+    "0023_cyan_0_mask.png",
+    "0024_cyan_1_mask.png",
+    "0025_cyan_2_mask.png",
+    "0026_green_0_mask.png",
+    "0027_green_1_mask.png",
+    "0028_green_2_mask.png",
+    "0029_green_3_mask.png",
+    "0030_green_4_mask.png",
+    "0031_green_5_mask.png",
+    "0032_magenta_0_mask.png",
+    "0033_magenta_1_mask.png",
+    "0034_red_0_mask.png",
+    "0035_red_1_mask.png",
+    "0036_red_2_mask.png",
+    "0037_red_3_mask.png",
+    "0038_red_4_mask.png",
+    "0039_red_5_mask.png",
+    "0040_red_6_mask.png",
+    "0041_red_7_mask.png",
+    "0042_red_8_mask.png",
+    "0043_red_9_mask.png",
+    "0044_red_10_mask.png",
+    "0045_red_11_mask.png",
+    "0046_red_12_mask.png",
+    "0047_red_13_mask.png",
+    "0048_red_14_mask.png",
+    "0049_red_15_mask.png",
+    "0050_red_16_mask.png",
+    "0051_red_17_mask.png",
+    "0052_red_18_mask.png",
+    "0053_red_19_mask.png",
+    "0054_blue_0_mask.png",
+    "0055_blue_1_mask.png",
+    "0056_blue_2_mask.png",
+    "0057_purple_0_mask.png",
+    "0058_purple_1_mask.png",
+    "0059_purple_2_mask.png",
+    "0060_purple_3_mask.png",
+    "0061_purple_4_mask.png",
+    "0062_gray_0_mask.png",
+    "0063_gray_1_mask.png",
+    "0064_gray_2_mask.png",
+    "0065_gray_3_mask.png",
+    "0066_gray_4_mask.png",
+    "0067_gray_5_mask.png",
+    "0068_gray_6_mask.png",
+    "0069_gray_7_mask.png",
+    "0070_gray_8_mask.png",
+    "0071_gray_9_mask.png",
+    "0072_black_0_mask.png",
+    "0073_black_1_mask.png",
+    "0074_black_2_mask.png",
+    "0075_black_3_mask.png",
+    "0076_black_4_mask.png",
+    "0077_black_5_mask.png",
+    "0078_black_6_mask.png"
+  ]
+}

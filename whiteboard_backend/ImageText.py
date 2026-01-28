@@ -4,11 +4,9 @@ from __future__ import annotations
 import os
 os.environ["DISABLE_MODEL_SOURCE_CHECK"] = "True"
 
-
 import json
 import math
 import re
-import warnings
 import inspect
 from dataclasses import dataclass
 from pathlib import Path
@@ -18,7 +16,6 @@ from difflib import SequenceMatcher
 import cv2
 import numpy as np
 from PIL import Image
-
 
 import nltk
 from nltk.corpus import words as nltk_words
@@ -36,22 +33,20 @@ WORD_SET = set(w.lower() for w in nltk_words.words())
 # -----------------------------
 
 OCR_LANG = "en"
-OCR_VERSION = "PP-OCRv5"
-DEVICE = "gpu:0"
+OCR_VERSION = "PP-OCRv5"   
+DEVICE = "gpu:0"           
 DET_LIMIT_SIDE_LEN = 2560
 DET_LIMIT_TYPE = "max"
-TEXT_DET_THRESH = 0.5
-TEXT_DET_BOX_THRESH = 0.15
+TEXT_DET_THRESH = 0.50
+TEXT_DET_BOX_THRESH = 0.10
 TEXT_DET_UNCLIP_RATIO = 2.2
 USE_DILATION = True
 use_textline_orientation = False
 
-OCR_BORDER_PAD = 30
-OCR_SCALE = 1.5
+OCR_BORDER_PAD = 60  
+OCR_SCALE = 1
 
-# -----------------------------
-# NEW LAYER-2 (TESSERACT) SETTINGS
-# -----------------------------
+
 USE_TESSERACT_LAYER2 = True
 
 # If Tesseract is not on PATH (Windows), set this, e.g.:
@@ -59,7 +54,7 @@ USE_TESSERACT_LAYER2 = True
 TESSERACT_CMD: str | None = None
 
 # How far around Paddle anchor we search (processed-image coords)
-TESS_SEARCH_PAD_PX = 60
+TESS_SEARCH_PAD_PX = 70
 TESS_MIN_TILE_PAD_PX = 18
 
 # Text matching tolerance (>=0.85 ~ "15% give")
@@ -199,8 +194,10 @@ def load_image_cv_unchanged(path: str | Path) -> np.ndarray:
 
     return img_fallback.astype(np.uint8)
 
+
 def _norm_path(p: str | Path) -> str:
     return os.path.normcase(os.path.normpath(str(p)))
+
 
 def load_base_context_map() -> dict[str, str]:
     if not METADATA_CORE_PATH.exists():
@@ -232,6 +229,7 @@ def load_base_context_map() -> dict[str, str]:
     print(f"[META] loaded base_context entries: {len(out)}")
     return out
 
+
 # -----------------------------
 # DATA STRUCTURES
 # -----------------------------
@@ -241,10 +239,6 @@ class WordDet:
     quad: np.ndarray  # (4,2) float32 in processed-image coords
     score: float | None = None
 
-
-# -----------------------------
-# PATHS
-# ----------------------------
 
 # -----------------------------
 # IMAGE PREP
@@ -292,11 +286,11 @@ def proc_to_orig_bbox_xyxy(x1: float, y1: float, x2: float, y2: float, meta: dic
 
 
 # -----------------------------
-# PADDLE OCR INIT
+# RAPIDOCR INIT (DROP-IN REPLACEMENT)
 # -----------------------------
-def _safe_ctor_kwargs(PaddleOCR_cls, preferred: dict[str, Any]) -> dict[str, Any]:
+def _safe_ctor_kwargs(cls, preferred: dict[str, Any]) -> dict[str, Any]:
     try:
-        sig = inspect.signature(PaddleOCR_cls.__init__)
+        sig = inspect.signature(cls.__init__)
         if any(p.kind == inspect.Parameter.VAR_KEYWORD for p in sig.parameters.values()):
             return preferred
         return {k: v for k, v in preferred.items() if k in sig.parameters}
@@ -304,47 +298,77 @@ def _safe_ctor_kwargs(PaddleOCR_cls, preferred: dict[str, Any]) -> dict[str, Any
         return preferred
 
 
+def _import_rapidocr():
+    """
+    RapidOCR has multiple package names depending on what you installed.
+    We try common ones.
+    """
+    # 1) rapidocr-onnxruntime package
+    try:
+        from rapidocr_onnxruntime import RapidOCR  # type: ignore
+        return RapidOCR
+    except Exception:
+        pass
+
+    # 2) rapidocr package
+    try:
+        from rapidocr import RapidOCR  # type: ignore
+        return RapidOCR
+    except Exception as e:
+        raise RuntimeError(
+            "RapidOCR not installed. Install one of:\n"
+            "  pip install rapidocr-onnxruntime\n"
+            "or\n"
+            "  pip install rapidocr\n"
+            "If you want GPU (CUDA), also install:\n"
+            "  pip install onnxruntime-gpu\n"
+        ) from e
+
+
 def create_paddle_ocr():
     """
-    Minimal + stable ctor args only.
-    Your build rejects unknown args (like use_dilation) inside parse_common_args.
+    DROP-IN NAME kept so the rest of your script stays untouched.
+    This now creates a RapidOCR (ONNXRuntime) engine instead of PaddleOCR.
+
+    Notes:
+    - DEVICE / OCR_VERSION are not used directly here.
+    - GPU is selected by installing onnxruntime-gpu; some RapidOCR builds also accept providers.
     """
-    from paddleocr import PaddleOCR  # type: ignore
-    common = dict(
-        lang=OCR_LANG,
-        ocr_version=OCR_VERSION,
-        device=DEVICE,
-        use_textline_orientation=use_textline_orientation,
-        text_rec_score_thresh=0.0,
-    )
+    RapidOCR = _import_rapidocr()
 
-    # Try "text_det_*" style first (newer API)
+    preferred: dict[str, Any] = {}
+
+    # Some RapidOCR builds accept language-ish args; many don't. Keep it safe.
+    # If your RapidOCR constructor supports these, they'll pass; otherwise ignored by _safe_ctor_kwargs.
+    preferred.update({
+        "lang": OCR_LANG,
+    })
+
+    # Some onnxruntime-based builds accept providers / use_cuda switches.
+    # We'll try both styles safely; if ctor doesn't accept, they get dropped.
+    preferred.update({
+        "use_cuda": True,
+        "providers": ["CUDAExecutionProvider", "CPUExecutionProvider"],
+        "onnxruntime_providers": ["CUDAExecutionProvider", "CPUExecutionProvider"],
+    })
+
+    kwargs = _safe_ctor_kwargs(RapidOCR, preferred)
+
     try:
-        return PaddleOCR(
-            **common,
-            text_det_limit_side_len=DET_LIMIT_SIDE_LEN,
-            text_det_limit_type=DET_LIMIT_TYPE,
-            text_det_thresh=TEXT_DET_THRESH,
-            text_det_box_thresh=TEXT_DET_BOX_THRESH,
-            text_det_unclip_ratio=TEXT_DET_UNCLIP_RATIO,
-        )
+        return RapidOCR(**kwargs)
     except Exception:
-        # Fallback to older names
-        return PaddleOCR(
-            **common,
-            det_limit_side_len=DET_LIMIT_SIDE_LEN,
-            det_limit_type=DET_LIMIT_TYPE,
-            text_det_thresh=TEXT_DET_THRESH,
-            text_det_box_thresh=TEXT_DET_BOX_THRESH,
-            text_det_unclip_ratio=TEXT_DET_UNCLIP_RATIO,
-        )
-
+        # absolute minimal fallback
+        return RapidOCR()
 
 
 def _predict_kwargs(ocr) -> dict[str, Any]:
+    """
+    RapidOCR call kwargs differ by package version.
+    We’ll only pass what exists.
+    """
     kw: dict[str, Any] = {}
     try:
-        sig = inspect.signature(ocr.predict)
+        sig = inspect.signature(ocr.__call__)
     except Exception:
         sig = None
 
@@ -352,31 +376,49 @@ def _predict_kwargs(ocr) -> dict[str, Any]:
         if sig is None or name in sig.parameters:
             kw[name] = val
 
-    put("use_doc_orientation_classify", False)
-    put("use_doc_unwarping", False)
-    put("use_textline_orientation", use_textline_orientation)
+    # Many RapidOCR builds support one or more of these.
     put("return_word_box", True)
-    put("text_rec_score_thresh", 0.0)
-    put("use_dilation", USE_DILATION)
+    put("return_word_boxes", True)
+    put("use_word_box", True)
+    put("return_boxes", True)
 
-    if sig is not None and "text_det_limit_side_len" in sig.parameters:
-        put("text_det_limit_side_len", DET_LIMIT_SIDE_LEN)
-        put("text_det_limit_type", DET_LIMIT_TYPE)
-        put("text_det_thresh", TEXT_DET_THRESH)
-        put("text_det_box_thresh", TEXT_DET_BOX_THRESH)
-        put("text_det_unclip_ratio", TEXT_DET_UNCLIP_RATIO)
-    else:
-        put("det_limit_side_len", DET_LIMIT_SIDE_LEN)
-        put("det_limit_type", DET_LIMIT_TYPE)
-        put("det_db_thresh", TEXT_DET_THRESH)
-        put("det_db_box_thresh", TEXT_DET_BOX_THRESH)
-        put("det_db_unclip_ratio", TEXT_DET_UNCLIP_RATIO)
+    # Some builds support thresholds; try to map your intent (no strict filtering)
+    put("text_score", 0.0)
+    put("drop_score", 0.0)
 
     return kw
 
 
 def ocr_predict(ocr, image_bgr: np.ndarray):
-    return ocr.predict(input=image_bgr, **_predict_kwargs(ocr))
+    """
+    DROP-IN NAME kept.
+    Normalizes the different RapidOCR return formats.
+    RapidOCR (rapidocr_onnxruntime) often returns: (dets, [t_det, t_cls, t_rec])
+    Some other wrappers return: (dets, elapsed_float)
+    """
+    kwargs = _predict_kwargs(ocr)
+    out = ocr(image_bgr, **kwargs)
+    # Normalize common formats:
+    # 1) (result, elapsed_float)
+    # 2) (result, [timings...])  <-- YOUR CASE
+    if isinstance(out, (tuple, list)) and len(out) == 2:
+        dets = out[0]
+        meta = out[1]
+
+        # elapsed as scalar
+        if isinstance(meta, (int, float)):
+            return dets
+
+        # timings list/tuple (e.g. [t_det, t_cls, t_rec])
+        if isinstance(meta, (list, tuple)) and all(isinstance(x, (int, float)) for x in meta):
+            return dets
+
+        # sometimes second element is None
+        if meta is None:
+            return dets
+
+    return out
+
 
 
 # -----------------------------
@@ -402,44 +444,80 @@ def _split_words_keep_basic(text: str) -> list[str]:
 
 
 def parse_paddle_result_to_words(result: Any) -> list[WordDet]:
+    """
+    DROP-IN NAME kept.
+    Now parses RapidOCR-style results into your WordDet list.
+    """
     words_out: list[WordDet] = []
     if result is None:
         return words_out
 
+    # Some wrappers return dicts with keys
+    # Example-ish structures seen in the wild:
+    # - [{"box": [...], "text": "...", "score": 0.98}, ...]
     if isinstance(result, list) and result and isinstance(result[0], dict):
-        for page in result:
-            payload = page.get("res", page)
-            if not isinstance(payload, dict):
+        for it in result:
+            try:
+                box = it.get("box") or it.get("bbox") or it.get("points") or it.get("poly") or it.get("dt_polys")
+                text = it.get("text") or it.get("rec_text") or it.get("rec_texts")
+                score = it.get("score")
+                if isinstance(text, list):
+                    # if somehow list of texts, join
+                    text = " ".join(str(x) for x in text if x)
+                t = str(text or "").strip()
+                if not t or box is None:
+                    continue
+                quad = _as_quad(box)
+                words_out.append(WordDet(text=t, quad=quad, score=(float(score) if score is not None else None)))
+            except Exception:
                 continue
-            rec_texts = payload.get("rec_texts") or payload.get("texts") or payload.get("rec_text") or []
-            polys = payload.get("dt_polys") or payload.get("dt_boxes") or payload.get("det_polys") or payload.get("polys") or []
-
-            n = min(len(rec_texts), len(polys))
-            for i in range(n):
-                line_text = str(rec_texts[i] or "")
-                quad = _as_quad(polys[i])
-                toks = _split_words_keep_basic(line_text)
-                if len(toks) <= 1:
-                    if line_text.strip():
-                        words_out.append(WordDet(text=line_text.strip(), quad=quad))
-                else:
-                    # keep it simple: add each word anchored to same quad; layer2 will localize with tesseract anyway
-                    for t in toks:
-                        words_out.append(WordDet(text=t.strip(), quad=quad))
         return words_out
 
-    # v2-ish fallback (rare in your setup)
+    # The most common RapidOCR output is a list of detections.
+    # Typical formats:
+    #   [ [box, text, score], ... ]
+    #   [ [box, (text, score)], ... ]
+    # where box is 4 points (quad) or xyxy.
     if isinstance(result, list):
         for item in result:
             try:
-                quad = _as_quad(item[0])
-                text = item[1][0] if isinstance(item[1], (list, tuple)) else ""
-                if isinstance(text, str) and text.strip():
-                    toks = _split_words_keep_basic(text)
-                    for t in toks:
-                        words_out.append(WordDet(text=t.strip(), quad=quad))
+                if not isinstance(item, (list, tuple)) or len(item) < 2:
+                    continue
+                box = item[0]
+                text_part = item[1]
+                score: float | None = None
+
+                if isinstance(text_part, (list, tuple)) and text_part:
+                    # (text, score) style
+                    t = str(text_part[0] or "").strip()
+                    if len(text_part) >= 2:
+                        try:
+                            score = float(text_part[1])
+                        except Exception:
+                            score = None
+                else:
+                    t = str(text_part or "").strip()
+                    if len(item) >= 3:
+                        try:
+                            score = float(item[2])
+                        except Exception:
+                            score = None
+
+                if not t:
+                    continue
+
+                quad = _as_quad(box)
+
+                # Keep your original behavior: if it's a line, split into tokens anchored to same quad.
+                toks = _split_words_keep_basic(t)
+                if len(toks) <= 1:
+                    words_out.append(WordDet(text=t, quad=quad, score=score))
+                else:
+                    for tok in toks:
+                        words_out.append(WordDet(text=tok.strip(), quad=quad, score=score))
             except Exception:
                 continue
+
     return words_out
 
 
@@ -788,7 +866,11 @@ def nms_rectangles(
     keep_idx: list[int] = []
     used = [False] * len(boxes)
 
-    order = sorted(range(len(boxes)), key=lambda i: (boxes[i][2]-boxes[i][0])*(boxes[i][3]-boxes[i][1]), reverse=True)
+    order = sorted(
+        range(len(boxes)),
+        key=lambda i: (boxes[i][2]-boxes[i][0])*(boxes[i][3]-boxes[i][1]),
+        reverse=True
+    )
     for i in order:
         if used[i]:
             continue
@@ -804,28 +886,44 @@ def nms_rectangles(
     return kept_boxes, kept_words
 
 
-# -----------------------------
-# MAIN PROCESS
-# -----------------------------
-def process_all_images():
+#main
+
+def process_images_in_memory(
+    image_items: list[dict],
+    *,
+    start_index: int = 0,
+    save_outputs: bool = False,
+) -> list[dict]:
+    """
+    image_items: [{"source_path": str, "img_bgr": np.ndarray, "base_context": str}]
+    returns: [{"idx": int, "source_path": str, "base_context": str, "masked_bgr": np.ndarray, "payload_json": dict}]
+    """
     ocr = create_paddle_ocr()
 
-    base_context_map = load_base_context_map()
-
-
     if USE_TESSERACT_LAYER2:
-        # Force import early so you fail fast if it's missing
         _tess_import()
 
-    paths = [p for p in INPUT_DIR.rglob("*") if p.is_file() and p.suffix.lower() in VALID_EXTS]
-    paths.sort()
-    if not paths:
-        raise RuntimeError(f"No images found in: {INPUT_DIR}")
+    out: list[dict] = []
+    index = int(start_index)
 
-    index = 0
-    for p in paths:
+    for it in image_items:
         try:
-            img_bgr = load_image_cv_unchanged(p)
+            src_path = str(it.get("source_path", ""))
+            img_bgr = it.get("img_bgr", None)
+            if img_bgr is None:
+                continue
+
+            # normalize BGR 3ch
+            if img_bgr.ndim == 3 and img_bgr.shape[2] == 4:
+                b, g, r, a = cv2.split(img_bgr)
+                rgb = cv2.merge([b, g, r])
+                mask = (a == 0)
+                if np.any(mask):
+                    rgb[mask] = [255, 255, 255]
+                img_bgr = rgb
+            elif img_bgr.ndim == 2:
+                img_bgr = cv2.cvtColor(img_bgr, cv2.COLOR_GRAY2BGR)
+
             ocr_img_bgr, meta = pad_and_scale_for_ocr(img_bgr, OCR_BORDER_PAD, OCR_SCALE)
 
             raw = ocr_predict(ocr, ocr_img_bgr)
@@ -839,22 +937,17 @@ def process_all_images():
                 if not t:
                     continue
 
-                # anchor bbox (processed coords)
                 ax1p, ay1p, ax2p, ay2p = _bbox_from_quad_xyxy(wd.quad)
                 anchor_proc = (ax1p, ay1p, ax2p, ay2p)
 
-                # Try Tesseract layer-2 bbox
                 mask_proc: tuple[float, float, float, float] | None = None
                 if USE_TESSERACT_LAYER2:
                     mask_proc = tesseract_refine_bbox(ocr_img_bgr, t, anchor_proc)
-
-                # Fallback to ink-tight pixels if Tesseract doesn't match
                 if mask_proc is None:
                     mask_proc = ink_tight_bbox(ocr_img_bgr, anchor_proc)
 
                 mx1p, my1p, mx2p, my2p = mask_proc
 
-                # convert both to original coords
                 ax1o, ay1o, ax2o, ay2o = proc_to_orig_bbox_xyxy(ax1p, ay1p, ax2p, ay2p, meta)
                 mx1o, my1o, mx2o, my2o = proc_to_orig_bbox_xyxy(mx1p, my1p, mx2p, my2p, meta)
 
@@ -871,42 +964,35 @@ def process_all_images():
             refined_boxes_orig, refined_words = nms_rectangles(refined_boxes_orig, refined_words, iou_thresh=0.80)
 
             masked_bgr = mask_with_white_fill(img_bgr, refined_boxes_orig)
-
-            out_img = OUTPUT_DIR / f"processed_{index}.png"
-            out_json = OUTPUT_DIR / f"processed_{index}.json"
-            cv2.imwrite(str(out_img), masked_bgr)
-
-            base_context = base_context_map.get(_norm_path(p), "")
-
+            base_context = str(it.get("base_context", "") or "")
 
             payload = {
-                "source_path": str(p),
-                "base_context": base_context,   # <<< ADD THIS
+                "source_path": src_path,
+                "base_context": base_context,
                 "image_size": [int(img_bgr.shape[1]), int(img_bgr.shape[0])],
                 "ocr_preprocess": {"border_pad": OCR_BORDER_PAD, "scale": OCR_SCALE},
-                "layer2": {
-                    "mode": "tesseract_local" if USE_TESSERACT_LAYER2 else "ink_tight_only",
-                    "tess_search_pad_px": int(TESS_SEARCH_PAD_PX),
-                    "tess_min_sim": float(TESS_MIN_SIM),
-                    "tess_psm": int(TESS_PSM),
-                },
                 "words": refined_words,
             }
 
-            out_json.write_text(json.dumps(payload, indent=2, ensure_ascii=False), encoding="utf-8")
+            if save_outputs:
+                OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
+                out_img = OUTPUT_DIR / f"processed_{index}.png"
+                out_json = OUTPUT_DIR / f"processed_{index}.json"
+                cv2.imwrite(str(out_img), masked_bgr)
+                out_json.write_text(json.dumps(payload, indent=2, ensure_ascii=False), encoding="utf-8")
 
-            if SAVE_DEBUG:
-                dbg = img_bgr.copy()
-                for (x1, y1, x2, y2) in refined_boxes_orig:
-                    cv2.rectangle(dbg, (x1, y1), (x2, y2), (0, 0, 255), 1)
-                cv2.imwrite(str(OUTPUT_DIR / f"debug_boxes_{index}.png"), dbg)
+            out.append({
+                "idx": int(index),
+                "source_path": src_path,
+                "base_context": base_context,
+                "masked_bgr": masked_bgr,
+                "payload_json": payload,
+            })
 
-            print(f"[OK] {p.name} -> processed_{index}.png | words={len(refined_words)} masks={len(refined_boxes_orig)}")
             index += 1
 
         except Exception as e:
-            print(f"[SKIP] {p} -> {e}")
+            print(f"[SKIP][mem] {it.get('source_path')} -> {e}")
 
+    return out
 
-if __name__ == "__main__":
-    process_all_images()

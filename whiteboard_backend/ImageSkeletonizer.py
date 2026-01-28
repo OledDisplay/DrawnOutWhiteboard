@@ -5,6 +5,7 @@ from pathlib import Path
 
 import cv2
 import numpy as np
+import os
 
 #Currently pushing pen width above 3 breaks stuff, but im happy to work with it as "pen width" only really matters for customization of the output, not the core functionality.
 
@@ -185,78 +186,64 @@ def pen_width_skeleton(fg01: np.ndarray, pen_width: float) -> np.ndarray:
 
 # ===================== MAIN PIPELINE =====================
 
-def process_one(path: Path, out_path: Path):
-    out_path.parent.mkdir(parents=True, exist_ok=True)
+def skeletonize_in_memory(
+    preproc_by_idx: dict[int, dict],
+    *,
+    save_outputs: bool = False,
+    parallel: bool = False,
+) -> dict[int, dict]:
+    """
+    Input: preproc_by_idx[idx]["passes"][gname]["edges"] (uint8 0/255)
+    Output: { idx: { "idx": idx, "skeletons": {gname: skel_u8_255}, "size": (H,W) } }
+    """
+    out: dict[int, dict] = {}
 
-    print(f"[START] {path}")
-    fg = load_foreground(path)
-    skel = pen_width_skeleton(fg, PEN_WIDTH)
+    def _load_foreground_from_edges(edges_u8: np.ndarray) -> np.ndarray:
+        fg = (edges_u8 > 0).astype(np.uint8)
+        k = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (3, 3))
+        fg = cv2.morphologyEx(fg, cv2.MORPH_CLOSE, k, iterations=1)
 
-    # 0/1 → 0/255 for saving
-    img_out = (skel * 255).astype(np.uint8)
-    cv2.imwrite(str(out_path), img_out)
-    print(f"[OK]  wrote {out_path}")
+        num, lab, stats, _ = cv2.connectedComponentsWithStats(fg, connectivity=8)
+        outm = np.zeros_like(fg, dtype=np.uint8)
+        for i in range(1, num):
+            if stats[i, cv2.CC_STAT_AREA] >= MIN_COMPONENT_AREA:
+                outm[lab == i] = 1
+        return outm
 
+    def _one(idx: int, item: dict) -> tuple[int, dict]:
+        passes = item["passes"]
+        skeletons: dict[str, np.ndarray] = {}
+        H = W = None
 
-def _worker_process_one(args):
-    in_path_str, out_path_str = args
-    process_one(Path(in_path_str), Path(out_path_str))
+        for gname, pd in passes.items():
+            edges = pd["edges"]
+            if H is None:
+                H, W = edges.shape[:2]
 
+            fg = _load_foreground_from_edges(edges)
+            sk01 = pen_width_skeleton(fg, PEN_WIDTH)
+            sk255 = (sk01 * 255).astype(np.uint8)
+            skeletons[str(gname)] = sk255
 
-def skeletonize_images():
-    import shutil
-    import os
+            if save_outputs:
+                out_path = OUT_DIR / f"processed_{idx}" / f"edges_{idx}_{gname}.png"
+                out_path.parent.mkdir(parents=True, exist_ok=True)
+                cv2.imwrite(str(out_path), sk255)
 
-    # Avoid CPU oversubscription when using multi-processing:
-    # OpenCV can spawn internal threads; turning them off per process is typically faster overall.
-    try:
-        cv2.setNumThreads(0)
-    except Exception:
-        pass
+        return idx, {"idx": idx, "skeletons": skeletons, "size": (int(H), int(W))}
 
-    if OUT_DIR.exists():
-        shutil.rmtree(OUT_DIR)
-    OUT_DIR.mkdir(parents=True, exist_ok=True)
+    if parallel:
+        from concurrent.futures import ThreadPoolExecutor, as_completed
+        with ThreadPoolExecutor(max_workers=max(1, (os.cpu_count() or 2) - 1)) as ex:
+            futs = [ex.submit(_one, idx, item) for idx, item in preproc_by_idx.items()]
+            for f in as_completed(futs):
+                idx, payload = f.result()
+                out[idx] = payload
+    else:
+        for idx, item in preproc_by_idx.items():
+            idx, payload = _one(idx, item)
+            out[idx] = payload
 
-    # NEW: recursive search through bundles + top-level.
-    # Pick edge images only; ignore json, processed_xxx images, etc.
-    exts = {".png", ".jpg", ".jpeg", ".bmp", ".tif", ".tiff", ".webp"}
-    imgs = sorted(
-        [
-            p for p in IN_DIR.rglob("*")
-            if p.is_file()
-            and p.suffix.lower() in exts
-            and "edges" in p.stem.lower()
-        ],
-        key=lambda p: str(p).lower(),
-    )
-
-    print(f"[INFO] IN={IN_DIR}  OUT={OUT_DIR}  found={len(imgs)} image(s)")
-    if not imgs:
-        print("[!] No images.")
-        return
-
-    jobs = []
-    for p in imgs:
-        rel = p.relative_to(IN_DIR)              # e.g. processed_12/edges_12_red.png
-        out_path = OUT_DIR / rel                # mirror structure under Skeletonized
-        jobs.append((str(p), str(out_path)))
-
-    if not PARALLEL:
-        for in_path_str, out_path_str in jobs:
-            process_one(Path(in_path_str), Path(out_path_str))
-        return
-
-    from concurrent.futures import ProcessPoolExecutor
-
-    cpu = os.cpu_count() or 2
-    max_workers = MAX_WORKERS
-    if max_workers is None:
-        max_workers = max(1, cpu - 1)
-
-    with ProcessPoolExecutor(max_workers=max_workers) as ex:
-        list(ex.map(_worker_process_one, jobs))
+    return out
 
 
-if __name__ == "__main__":
-    skeletonize_images()

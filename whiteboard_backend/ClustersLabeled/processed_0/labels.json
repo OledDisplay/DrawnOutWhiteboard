@@ -1,0 +1,1247 @@
+{
+  "image_index": 0,
+  "candidate_labels_raw": [
+    "150μm",
+    "Nucleosome",
+    "Histone",
+    "DNA",
+    "(b)",
+    "(a)"
+  ],
+  "candidate_labels_refined": [
+    "150μm",
+    "Nucleosome",
+    "Histone",
+    "DNA"
+  ],
+  "base_context": "",
+  "model_id": "Qwen/Qwen3-VL-2B-Instruct",
+  "proc_longest_edge": 600,
+  "panel_edge": 300,
+  "batch_size": 8,
+  "clusters": {
+    "0001_cyan_0_mask.png": {
+      "entry": {
+        "color_id": 4,
+        "color_name": "cyan",
+        "group_index_in_color": 0,
+        "stroke_indexes": [
+          0,
+          1,
+          2,
+          3,
+          4,
+          5,
+          7,
+          8,
+          9,
+          12,
+          14,
+          15,
+          16,
+          17,
+          18,
+          19,
+          20,
+          21,
+          22,
+          23,
+          24,
+          25,
+          26,
+          27,
+          28,
+          30,
+          31,
+          32,
+          33,
+          34,
+          35,
+          36,
+          37,
+          38,
+          39,
+          40,
+          41,
+          42,
+          43,
+          44,
+          45,
+          46,
+          47,
+          48,
+          49,
+          50,
+          51,
+          52,
+          53,
+          54,
+          55,
+          56,
+          57,
+          58,
+          59,
+          60,
+          61,
+          62,
+          63,
+          64,
+          65,
+          66,
+          67,
+          68,
+          69,
+          70,
+          71,
+          72,
+          73,
+          74,
+          75,
+          76,
+          77,
+          78,
+          79,
+          80,
+          81,
+          82,
+          83,
+          84,
+          85,
+          86,
+          87,
+          88,
+          89,
+          90,
+          91,
+          92,
+          93,
+          94,
+          95,
+          96,
+          97,
+          98,
+          99,
+          100,
+          101,
+          102,
+          103,
+          104,
+          105,
+          106,
+          107,
+          108,
+          109,
+          110,
+          111,
+          112,
+          113,
+          114,
+          115,
+          116,
+          117,
+          118,
+          119,
+          120,
+          121,
+          122,
+          123,
+          124,
+          125
+        ],
+        "bbox_xyxy": [
+          0,
+          0,
+          499,
+          346
+        ],
+        "crop_file_mask": "cyan_0_mask.png"
+      },
+      "colour_hint": "cyan",
+      "bbox_xyxy": [
+        0,
+        0,
+        499,
+        346
+      ],
+      "bbox_right_panel_xyxy": [
+        0,
+        84,
+        140,
+        181
+      ],
+      "timing_s": 3.1864,
+      "model_raw": "```json\n{\"label\": \"150μm,Nucleosome,Histone,DNA\", \"full_visual_LEFT\": \"A 3D model of a nucleosome, with a complex structure composed of a DNA double helix wrapped around a histone core. The DNA is depicted in purple, while the histone proteins are shown in",
+      "json_objects": [],
+      "parsed": null
+    },
+    "0002_cyan_1_mask.png": {
+      "entry": {
+        "color_id": 4,
+        "color_name": "cyan",
+        "group_index_in_color": 1,
+        "stroke_indexes": [
+          29
+        ],
+        "bbox_xyxy": [
+          37,
+          97,
+          75,
+          135
+        ],
+        "crop_file_mask": "cyan_1_mask.png"
+      },
+      "colour_hint": "cyan",
+      "bbox_xyxy": [
+        37,
+        97,
+        75,
+        135
+      ],
+      "bbox_right_panel_xyxy": [
+        10,
+        111,
+        21,
+        122
+      ],
+      "timing_s": 3.1864,
+      "model_raw": "```json\n{\"label\": \"150μm,Nucleosome,Histone,DNA\", \"full_visual_LEFT\": \"A blue, spherical object with a smooth surface, appearing to be a nucleosome, is positioned in the foreground of a blurred, grayscale background. The object is the main focus of the left image, with a soft",
+      "json_objects": [],
+      "parsed": null
+    },
+    "0003_cyan_2_mask.png": {
+      "entry": {
+        "color_id": 4,
+        "color_name": "cyan",
+        "group_index_in_color": 2,
+        "stroke_indexes": [
+          6,
+          10,
+          11,
+          13
+        ],
+        "bbox_xyxy": [
+          51,
+          31,
+          122,
+          135
+        ],
+        "crop_file_mask": "cyan_2_mask.png"
+      },
+      "colour_hint": "cyan",
+      "bbox_xyxy": [
+        51,
+        31,
+        122,
+        135
+      ],
+      "bbox_right_panel_xyxy": [
+        14,
+        93,
+        34,
+        122
+      ],
+      "timing_s": 3.1864,
+      "model_raw": "```json\n{\"label\": \"150μm,Nucleosome,Histone,DNA\", \"full_visual_LEFT\": \"A blue, three-dimensional, complex structure with a large, rounded, cyan-colored main body and a gray, spherical base. The structure appears to be composed of multiple interconnected parts, with a detailed, textured surface.\",",
+      "json_objects": [],
+      "parsed": null
+    },
+    "0004_blue_0_mask.png": {
+      "entry": {
+        "color_id": 8,
+        "color_name": "blue",
+        "group_index_in_color": 0,
+        "stroke_indexes": [
+          128,
+          129,
+          130,
+          131,
+          132,
+          134,
+          135,
+          136,
+          138,
+          139,
+          140,
+          141,
+          142,
+          143,
+          144,
+          145,
+          146,
+          147,
+          148,
+          149,
+          150,
+          151,
+          152,
+          153,
+          154,
+          155,
+          156,
+          157,
+          158,
+          159,
+          160,
+          161,
+          162,
+          163,
+          164,
+          165,
+          166,
+          167,
+          168,
+          169,
+          170,
+          171,
+          173,
+          174,
+          175,
+          176,
+          177,
+          178,
+          179,
+          180,
+          181,
+          182,
+          183,
+          184,
+          185,
+          186,
+          187,
+          188,
+          189,
+          190,
+          191,
+          192,
+          193,
+          194,
+          195,
+          196,
+          197,
+          198,
+          199,
+          200,
+          201,
+          202,
+          203,
+          204,
+          205
+        ],
+        "bbox_xyxy": [
+          0,
+          87,
+          461,
+          325
+        ],
+        "crop_file_mask": "blue_0_mask.png"
+      },
+      "colour_hint": "blue",
+      "bbox_xyxy": [
+        0,
+        87,
+        461,
+        325
+      ],
+      "bbox_right_panel_xyxy": [
+        0,
+        108,
+        129,
+        175
+      ],
+      "timing_s": 3.1864,
+      "model_raw": "```json\n{\"label\": \"150μm,Nucleosome,Histone,DNA\", \"full_visual_LEFT\": \"A 3D model of a nucleosome, with a blue DNA double helix wrapped around a histone core, surrounded by a gray, textured background.\", \"LEFT_SURROUNDINGS\": \"A gray, textured",
+      "json_objects": [],
+      "parsed": null
+    },
+    "0005_blue_1_mask.png": {
+      "entry": {
+        "color_id": 8,
+        "color_name": "blue",
+        "group_index_in_color": 1,
+        "stroke_indexes": [
+          172
+        ],
+        "bbox_xyxy": [
+          38,
+          212,
+          70,
+          262
+        ],
+        "crop_file_mask": "blue_1_mask.png"
+      },
+      "colour_hint": "blue",
+      "bbox_xyxy": [
+        38,
+        212,
+        70,
+        262
+      ],
+      "bbox_right_panel_xyxy": [
+        11,
+        143,
+        20,
+        157
+      ],
+      "timing_s": 3.1864,
+      "model_raw": "```json\n{\"label\": \"150μm,Nucleosome,Histone,DNA\", \"full_visual_LEFT\": \"A purple-colored structure, likely a nucleosome, is highlighted in the left image, with a grayscale background. The structure appears to be a complex of histone proteins and DNA, forming a compact, rod-like shape",
+      "json_objects": [],
+      "parsed": null
+    },
+    "0006_blue_2_mask.png": {
+      "entry": {
+        "color_id": 8,
+        "color_name": "blue",
+        "group_index_in_color": 2,
+        "stroke_indexes": [
+          127,
+          133,
+          137
+        ],
+        "bbox_xyxy": [
+          270,
+          76,
+          321,
+          132
+        ],
+        "crop_file_mask": "blue_2_mask.png"
+      },
+      "colour_hint": "blue",
+      "bbox_xyxy": [
+        270,
+        76,
+        321,
+        132
+      ],
+      "bbox_right_panel_xyxy": [
+        76,
+        105,
+        90,
+        121
+      ],
+      "timing_s": 3.1864,
+      "model_raw": "```json\n{\"label\": \"150μm,Nucleosome,Histone,DNA\", \"full_visual_LEFT\": \"A blue, roughly circular object with a slightly irregular shape, located in the center of the image, surrounded by a grayscale, textured background.\", \"LEFT_SURROUNDINGS\": \"A grayscale, textured background with a gran",
+      "json_objects": [],
+      "parsed": null
+    },
+    "0007_blue_3_mask.png": {
+      "entry": {
+        "color_id": 8,
+        "color_name": "blue",
+        "group_index_in_color": 3,
+        "stroke_indexes": [
+          126
+        ],
+        "bbox_xyxy": [
+          387,
+          31,
+          416,
+          61
+        ],
+        "crop_file_mask": "blue_3_mask.png"
+      },
+      "colour_hint": "blue",
+      "bbox_xyxy": [
+        387,
+        31,
+        416,
+        61
+      ],
+      "bbox_right_panel_xyxy": [
+        108,
+        93,
+        116,
+        101
+      ],
+      "timing_s": 3.1864,
+      "model_raw": "```json\n{\"label\": \"150μm,Nucleosome,Histone,DNA\", \"full_visual_LEFT\": \"A blue-colored, three-dimensional structure with a complex, folded shape, resembling a nucleosome, is highlighted in the foreground. The structure is set against a grayscale background, which appears to be a blurred image of a",
+      "json_objects": [],
+      "parsed": null
+    },
+    "0008_purple_0_mask.png": {
+      "entry": {
+        "color_id": 9,
+        "color_name": "purple",
+        "group_index_in_color": 0,
+        "stroke_indexes": [
+          206,
+          213,
+          214
+        ],
+        "bbox_xyxy": [
+          16,
+          95,
+          90,
+          180
+        ],
+        "crop_file_mask": "purple_0_mask.png"
+      },
+      "colour_hint": "purple",
+      "bbox_xyxy": [
+        16,
+        95,
+        90,
+        180
+      ],
+      "bbox_right_panel_xyxy": [
+        4,
+        111,
+        25,
+        134
+      ],
+      "timing_s": 3.1864,
+      "model_raw": "```json\n{\"label\": \"150μm,Nucleosome,Histone,DNA\", \"full_visual_LEFT\": \"A 3D model of a nucleosome, with a purple core and a gray background, showing the histone proteins and DNA wrapped around the core.\", \"LEFT_SURROUNDINGS\": \"A grayscale image of a",
+      "json_objects": [],
+      "parsed": null
+    },
+    "0009_purple_1_mask.png": {
+      "entry": {
+        "color_id": 9,
+        "color_name": "purple",
+        "group_index_in_color": 1,
+        "stroke_indexes": [
+          223,
+          224,
+          229
+        ],
+        "bbox_xyxy": [
+          41,
+          187,
+          105,
+          277
+        ],
+        "crop_file_mask": "purple_1_mask.png"
+      },
+      "colour_hint": "purple",
+      "bbox_xyxy": [
+        41,
+        187,
+        105,
+        277
+      ],
+      "bbox_right_panel_xyxy": [
+        11,
+        136,
+        29,
+        162
+      ],
+      "timing_s": 2.9057,
+      "model_raw": "```json\n{\"label\":null,\"full_visual_LEFT\": \"A 3D model of a complex, folded structure with a prominent purple color, resembling a protein or nucleic acid complex, set against a grayscale background.\", \"LEFT_SURROUNDINGS\": \"A grayscale, 3D-rendered structure with a complex, folded shape, possibly a",
+      "json_objects": [],
+      "parsed": null
+    },
+    "0010_purple_2_mask.png": {
+      "entry": {
+        "color_id": 9,
+        "color_name": "purple",
+        "group_index_in_color": 2,
+        "stroke_indexes": [
+          208,
+          209
+        ],
+        "bbox_xyxy": [
+          66,
+          102,
+          143,
+          152
+        ],
+        "crop_file_mask": "purple_2_mask.png"
+      },
+      "colour_hint": "purple",
+      "bbox_xyxy": [
+        66,
+        102,
+        143,
+        152
+      ],
+      "bbox_right_panel_xyxy": [
+        18,
+        113,
+        40,
+        127
+      ],
+      "timing_s": 2.9057,
+      "model_raw": "```json\n{\"label\": \"150μm,Nucleosome,Histone,DNA\", \"full_visual_LEFT\": \"A close-up of a biological structure, likely a nucleosome, with a purple-colored core and a grayscale background. The purple object appears to be a histone protein complex, surrounded by a grayscale background that may represent",
+      "json_objects": [],
+      "parsed": null
+    },
+    "0011_purple_3_mask.png": {
+      "entry": {
+        "color_id": 9,
+        "color_name": "purple",
+        "group_index_in_color": 3,
+        "stroke_indexes": [
+          226,
+          227,
+          231,
+          232,
+          233,
+          237,
+          238
+        ],
+        "bbox_xyxy": [
+          103,
+          216,
+          268,
+          289
+        ],
+        "crop_file_mask": "purple_3_mask.png"
+      },
+      "colour_hint": "purple",
+      "bbox_xyxy": [
+        103,
+        216,
+        268,
+        289
+      ],
+      "bbox_right_panel_xyxy": [
+        29,
+        144,
+        75,
+        165
+      ],
+      "timing_s": 2.9057,
+      "model_raw": "```json\n{\"label\": \"150μm,Nucleosome,Histone,DNA\", \"full_visual_LEFT\": \"A close-up of a nucleosome structure, with the histone proteins and DNA wrapped around each other. The structure is highlighted in purple, while the surrounding area is grayscale.\", \"LEFT_SURROUNDINGS\": \"A",
+      "json_objects": [],
+      "parsed": null
+    },
+    "0012_purple_4_mask.png": {
+      "entry": {
+        "color_id": 9,
+        "color_name": "purple",
+        "group_index_in_color": 4,
+        "stroke_indexes": [
+          211,
+          215,
+          217,
+          218
+        ],
+        "bbox_xyxy": [
+          177,
+          121,
+          244,
+          183
+        ],
+        "crop_file_mask": "purple_4_mask.png"
+      },
+      "colour_hint": "purple",
+      "bbox_xyxy": [
+        177,
+        121,
+        244,
+        183
+      ],
+      "bbox_right_panel_xyxy": [
+        50,
+        118,
+        68,
+        135
+      ],
+      "timing_s": 2.9057,
+      "model_raw": "```json\n{\"label\": \"150μm,Nucleosome,Histone,DNA\", \"full_visual_LEFT\": \"A close-up of a nucleosome structure, with a purple-colored histone core and DNA wrapped around it, set against a grayscale background.\", \"LEFT_SURROUNDINGS\": \"A grayscale image showing a complex, dense",
+      "json_objects": [],
+      "parsed": null
+    },
+    "0013_purple_5_mask.png": {
+      "entry": {
+        "color_id": 9,
+        "color_name": "purple",
+        "group_index_in_color": 5,
+        "stroke_indexes": [
+          236
+        ],
+        "bbox_xyxy": [
+          250,
+          245,
+          296,
+          280
+        ],
+        "crop_file_mask": "purple_5_mask.png"
+      },
+      "colour_hint": "purple",
+      "bbox_xyxy": [
+        250,
+        245,
+        296,
+        280
+      ],
+      "bbox_right_panel_xyxy": [
+        70,
+        153,
+        83,
+        162
+      ],
+      "timing_s": 2.9057,
+      "model_raw": "```json\n{\"label\": \"150μm,Nucleosome,Histone,DNA\", \"full_visual_LEFT\": \"A purple-colored, elongated structure with a fuzzy appearance, set against a grayscale background.\", \"LEFT_SURROUNDINGS\": \"A grayscale image with a blurred, textured background, showing a faint, out-of-focus structure",
+      "json_objects": [],
+      "parsed": null
+    },
+    "0014_purple_6_mask.png": {
+      "entry": {
+        "color_id": 9,
+        "color_name": "purple",
+        "group_index_in_color": 6,
+        "stroke_indexes": [
+          239
+        ],
+        "bbox_xyxy": [
+          283,
+          267,
+          316,
+          302
+        ],
+        "crop_file_mask": "purple_6_mask.png"
+      },
+      "colour_hint": "purple",
+      "bbox_xyxy": [
+        283,
+        267,
+        316,
+        302
+      ],
+      "bbox_right_panel_xyxy": [
+        79,
+        159,
+        88,
+        169
+      ],
+      "timing_s": 2.9057,
+      "model_raw": "```json\n{\"label\": \"150μm,Nucleosome,Histone,DNA\", \"full_visual_LEFT\": \"A purple, roughly spherical object with a distinct shape, possibly a nucleosome, is highlighted in the left image. It is set against a grayscale background, which appears to be a microscopic image of a cellular structure.",
+      "json_objects": [],
+      "parsed": null
+    },
+    "0015_purple_7_mask.png": {
+      "entry": {
+        "color_id": 9,
+        "color_name": "purple",
+        "group_index_in_color": 7,
+        "stroke_indexes": [
+          216,
+          221,
+          222
+        ],
+        "bbox_xyxy": [
+          296,
+          141,
+          338,
+          210
+        ],
+        "crop_file_mask": "purple_7_mask.png"
+      },
+      "colour_hint": "purple",
+      "bbox_xyxy": [
+        296,
+        141,
+        338,
+        210
+      ],
+      "bbox_right_panel_xyxy": [
+        83,
+        123,
+        95,
+        143
+      ],
+      "timing_s": 2.9057,
+      "model_raw": "```json\n{\"label\": \"150μm,Nucleosome,Histone,DNA\", \"full_visual_LEFT\": \"A purple, elongated structure with a complex, folded shape, resembling a nucleosome, set against a grayscale background.\", \"LEFT_SURROUNDINGS\": \"A grayscale image with a blurred, textured background, showing a",
+      "json_objects": [],
+      "parsed": null
+    },
+    "0016_purple_8_mask.png": {
+      "entry": {
+        "color_id": 9,
+        "color_name": "purple",
+        "group_index_in_color": 8,
+        "stroke_indexes": [
+          234
+        ],
+        "bbox_xyxy": [
+          301,
+          231,
+          347,
+          273
+        ],
+        "crop_file_mask": "purple_8_mask.png"
+      },
+      "colour_hint": "purple",
+      "bbox_xyxy": [
+        301,
+        231,
+        347,
+        273
+      ],
+      "bbox_right_panel_xyxy": [
+        84,
+        149,
+        97,
+        160
+      ],
+      "timing_s": 2.9057,
+      "model_raw": "```json\n{\"label\": \"150μm,Nucleosome,Histone,DNA\", \"full_visual_LEFT\": \"A purple, elongated object with a smooth, cylindrical shape, positioned diagonally in the center of the image. It is surrounded by a grayscale, blurred background, which appears to be a microscopic view of a cellular",
+      "json_objects": [],
+      "parsed": null
+    },
+    "0017_purple_9_mask.png": {
+      "entry": {
+        "color_id": 9,
+        "color_name": "purple",
+        "group_index_in_color": 9,
+        "stroke_indexes": [
+          212
+        ],
+        "bbox_xyxy": [
+          333,
+          128,
+          375,
+          169
+        ],
+        "crop_file_mask": "purple_9_mask.png"
+      },
+      "colour_hint": "purple",
+      "bbox_xyxy": [
+        333,
+        128,
+        375,
+        169
+      ],
+      "bbox_right_panel_xyxy": [
+        93,
+        120,
+        105,
+        131
+      ],
+      "timing_s": 2.8364,
+      "model_raw": "```json\n{\"label\": \"150μm,Nucleosome,Histone,DNA\", \"full_visual_LEFT\": \"A purple, irregularly shaped object, likely representing a nucleosome, is prominently displayed in the foreground of a grayscale, blurred background. The object appears to be a dense, compact structure, possibly a histone protein",
+      "json_objects": [],
+      "parsed": null
+    },
+    "0018_purple_10_mask.png": {
+      "entry": {
+        "color_id": 9,
+        "color_name": "purple",
+        "group_index_in_color": 10,
+        "stroke_indexes": [
+          225,
+          228,
+          230,
+          235
+        ],
+        "bbox_xyxy": [
+          357,
+          211,
+          450,
+          268
+        ],
+        "crop_file_mask": "purple_10_mask.png"
+      },
+      "colour_hint": "purple",
+      "bbox_xyxy": [
+        357,
+        211,
+        450,
+        268
+      ],
+      "bbox_right_panel_xyxy": [
+        100,
+        143,
+        126,
+        159
+      ],
+      "timing_s": 2.8364,
+      "model_raw": "```json\n{\"label\": \"150μm,Nucleosome,Histone,DNA\", \"full_visual_LEFT\": \"A purple, three-dimensional structure resembling a nucleosome, with a complex, intertwined shape, set against a grayscale background of a molecular or cellular structure.\", \"LEFT_SURROUNDINGS\": \"A grayscale, high-contrast",
+      "json_objects": [],
+      "parsed": null
+    },
+    "0019_purple_11_mask.png": {
+      "entry": {
+        "color_id": 9,
+        "color_name": "purple",
+        "group_index_in_color": 11,
+        "stroke_indexes": [
+          207,
+          210
+        ],
+        "bbox_xyxy": [
+          377,
+          97,
+          412,
+          145
+        ],
+        "crop_file_mask": "purple_11_mask.png"
+      },
+      "colour_hint": "purple",
+      "bbox_xyxy": [
+        377,
+        97,
+        412,
+        145
+      ],
+      "bbox_right_panel_xyxy": [
+        106,
+        111,
+        115,
+        125
+      ],
+      "timing_s": 2.8364,
+      "model_raw": "```json\n{\"label\": \"150μm,Nucleosome,Histone,DNA\", \"full_visual_LEFT\": \"A purple, three-dimensional structure with a complex, folded shape, resembling a nucleosome, set against a grayscale background with faint, blurred structures.\", \"LEFT_SURROUNDINGS\": \"A grayscale, blurred image with faint",
+      "json_objects": [],
+      "parsed": null
+    },
+    "0020_purple_12_mask.png": {
+      "entry": {
+        "color_id": 9,
+        "color_name": "purple",
+        "group_index_in_color": 12,
+        "stroke_indexes": [
+          219,
+          220
+        ],
+        "bbox_xyxy": [
+          385,
+          144,
+          425,
+          189
+        ],
+        "crop_file_mask": "purple_12_mask.png"
+      },
+      "colour_hint": "purple",
+      "bbox_xyxy": [
+        385,
+        144,
+        425,
+        189
+      ],
+      "bbox_right_panel_xyxy": [
+        108,
+        124,
+        119,
+        137
+      ],
+      "timing_s": 2.8364,
+      "model_raw": "```json\n{\"label\": \"150μm,Nucleosome,Histone,DNA\", \"full_visual_LEFT\": \"A purple, T-shaped structure with a blue center, set against a grayscale background.\", \"LEFT_SURROUNDINGS\": \"A grayscale image with a blurred, dark background and a faint, out-of-focus object in the",
+      "json_objects": [],
+      "parsed": null
+    },
+    "0021_gray_0_mask.png": {
+      "entry": {
+        "color_id": 10,
+        "color_name": "gray",
+        "group_index_in_color": 0,
+        "stroke_indexes": [
+          245
+        ],
+        "bbox_xyxy": [
+          0,
+          327,
+          514,
+          416
+        ],
+        "crop_file_mask": "gray_0_mask.png"
+      },
+      "colour_hint": "gray",
+      "bbox_xyxy": [
+        0,
+        327,
+        514,
+        416
+      ],
+      "bbox_right_panel_xyxy": [
+        0,
+        176,
+        144,
+        200
+      ],
+      "timing_s": 2.8364,
+      "model_raw": "```json\n{\"label\": \"150μm,Nucleosome,Histone,DNA\", \"full_visual_LEFT\": \"A cropped image showing a detailed view of a nucleosome structure, with a blue and purple colored protein complex, likely histones, wrapped around DNA. The structure is highlighted with a red box around the nucleosome,",
+      "json_objects": [],
+      "parsed": null
+    },
+    "0022_gray_1_mask.png": {
+      "entry": {
+        "color_id": 10,
+        "color_name": "gray",
+        "group_index_in_color": 1,
+        "stroke_indexes": [
+          243
+        ],
+        "bbox_xyxy": [
+          65,
+          258,
+          145,
+          294
+        ],
+        "crop_file_mask": "gray_1_mask.png"
+      },
+      "colour_hint": "gray",
+      "bbox_xyxy": [
+        65,
+        258,
+        145,
+        294
+      ],
+      "bbox_right_panel_xyxy": [
+        18,
+        156,
+        41,
+        166
+      ],
+      "timing_s": 2.8364,
+      "model_raw": "```json\n{\"label\": \"DNA\", \"full_visual_LEFT\": \"A close-up of a DNA double helix, with a purple strand and a gray background.\", \"LEFT_SURROUNDINGS\": \"A grayscale image of a DNA double helix, with a purple strand and a gray background.\"}\n```",
+      "json_objects": [
+        {
+          "label": "DNA",
+          "full_visual_LEFT": "A close-up of a DNA double helix, with a purple strand and a gray background.",
+          "LEFT_SURROUNDINGS": "A grayscale image of a DNA double helix, with a purple strand and a gray background."
+        }
+      ],
+      "parsed": {
+        "label": "DNA",
+        "full_visual_LEFT": "A close-up of a DNA double helix, with a purple strand and a gray background.",
+        "LEFT_SURROUNDINGS": "A grayscale image of a DNA double helix, with a purple strand and a gray background."
+      }
+    },
+    "0023_gray_2_mask.png": {
+      "entry": {
+        "color_id": 10,
+        "color_name": "gray",
+        "group_index_in_color": 2,
+        "stroke_indexes": [
+          240
+        ],
+        "bbox_xyxy": [
+          391,
+          33,
+          458,
+          149
+        ],
+        "crop_file_mask": "gray_2_mask.png"
+      },
+      "colour_hint": "gray",
+      "bbox_xyxy": [
+        391,
+        33,
+        458,
+        149
+      ],
+      "bbox_right_panel_xyxy": [
+        109,
+        93,
+        128,
+        126
+      ],
+      "timing_s": 2.8364,
+      "model_raw": "```json\n{\"label\": \"150μm,Nucleosome,Histone,DNA\", \"full_visual_LEFT\": \"A grayscale image showing a detailed view of a nucleosome structure, with a prominent DNA strand wrapped around a histone core. The structure is highlighted by a black line, possibly indicating a specific feature or orientation. The",
+      "json_objects": [],
+      "parsed": null
+    },
+    "0024_gray_3_mask.png": {
+      "entry": {
+        "color_id": 10,
+        "color_name": "gray",
+        "group_index_in_color": 3,
+        "stroke_indexes": [
+          242
+        ],
+        "bbox_xyxy": [
+          426,
+          236,
+          455,
+          266
+        ],
+        "crop_file_mask": "gray_3_mask.png"
+      },
+      "colour_hint": "gray",
+      "bbox_xyxy": [
+        426,
+        236,
+        455,
+        266
+      ],
+      "bbox_right_panel_xyxy": [
+        119,
+        150,
+        127,
+        158
+      ],
+      "timing_s": 2.8364,
+      "model_raw": "```json\n{\"label\": \"150μm,Nucleosome,Histone,DNA\", \"full_visual_LEFT\": \"A blurry, grayscale image of a biological structure with a prominent purple and blue colored region, likely representing a nucleosome or histone complex, set against a grayscale background.\", \"LEFT_SURROUNDINGS\": \"A grayscale",
+      "json_objects": [],
+      "parsed": null
+    },
+    "0025_gray_4_mask.png": {
+      "entry": {
+        "color_id": 10,
+        "color_name": "gray",
+        "group_index_in_color": 4,
+        "stroke_indexes": [
+          241
+        ],
+        "bbox_xyxy": [
+          910,
+          39,
+          939,
+          74
+        ],
+        "crop_file_mask": "gray_4_mask.png"
+      },
+      "colour_hint": "gray",
+      "bbox_xyxy": [
+        910,
+        39,
+        939,
+        74
+      ],
+      "bbox_right_panel_xyxy": [
+        255,
+        95,
+        263,
+        105
+      ],
+      "timing_s": 2.7045,
+      "model_raw": "```json\n{\"label\": \"150μm,Nucleosome,Histone,DNA\", \"full_visual_LEFT\": \"A dark, roughly circular object with a high contrast against a lighter, grainy background, appearing as a dense, dark spot in a grayscale image.\", \"LEFT_SURROUNDINGS\": \"A light gray, textured background",
+      "json_objects": [],
+      "parsed": null
+    },
+    "0026_gray_5_mask.png": {
+      "entry": {
+        "color_id": 10,
+        "color_name": "gray",
+        "group_index_in_color": 5,
+        "stroke_indexes": [
+          244
+        ],
+        "bbox_xyxy": [
+          931,
+          348,
+          961,
+          375
+        ],
+        "crop_file_mask": "gray_5_mask.png"
+      },
+      "colour_hint": "gray",
+      "bbox_xyxy": [
+        931,
+        348,
+        961,
+        375
+      ],
+      "bbox_right_panel_xyxy": [
+        261,
+        181,
+        269,
+        189
+      ],
+      "timing_s": 2.7045,
+      "model_raw": "```json\n{\"label\": \"150μm,Nucleosome,Histone,DNA\", \"full_visual_LEFT\": \"A dark, circular object is centered in a grayscale image with a blurred background.\", \"LEFT_SURROUNDINGS\": \"A grayscale image with a blurred background and a dark, circular object in the center.\"}\n```",
+      "json_objects": [
+        {
+          "label": "150μm,Nucleosome,Histone,DNA",
+          "full_visual_LEFT": "A dark, circular object is centered in a grayscale image with a blurred background.",
+          "LEFT_SURROUNDINGS": "A grayscale image with a blurred background and a dark, circular object in the center."
+        }
+      ],
+      "parsed": {
+        "label": "150μm,Nucleosome,Histone,DNA",
+        "full_visual_LEFT": "A dark, circular object is centered in a grayscale image with a blurred background.",
+        "LEFT_SURROUNDINGS": "A grayscale image with a blurred background and a dark, circular object in the center."
+      }
+    },
+    "0027_gray_6_mask.png": {
+      "entry": {
+        "color_id": 10,
+        "color_name": "gray",
+        "group_index_in_color": 6,
+        "stroke_indexes": [
+          246,
+          247
+        ],
+        "bbox_xyxy": [
+          958,
+          353,
+          1072,
+          420
+        ],
+        "crop_file_mask": "gray_6_mask.png"
+      },
+      "colour_hint": "gray",
+      "bbox_xyxy": [
+        958,
+        353,
+        1072,
+        420
+      ],
+      "bbox_right_panel_xyxy": [
+        268,
+        183,
+        300,
+        202
+      ],
+      "timing_s": 2.7045,
+      "model_raw": "```json\n{\"label\": \"150μm,Nucleosome,Histone,DNA\", \"full_visual_LEFT\": \"A grayscale image showing a dense cluster of small, dark, granular structures against a lighter background, with a white rectangular area in the center.\", \"LEFT_SURROUNDINGS\": \"A grayscale image with a dense,",
+      "json_objects": [],
+      "parsed": null
+    },
+    "0028_black_0_mask.png": {
+      "entry": {
+        "color_id": 11,
+        "color_name": "black",
+        "group_index_in_color": 0,
+        "stroke_indexes": [
+          248
+        ],
+        "bbox_xyxy": [
+          183,
+          37,
+          240,
+          118
+        ],
+        "crop_file_mask": "black_0_mask.png"
+      },
+      "colour_hint": "black",
+      "bbox_xyxy": [
+        183,
+        37,
+        240,
+        118
+      ],
+      "bbox_right_panel_xyxy": [
+        51,
+        94,
+        67,
+        117
+      ],
+      "timing_s": 2.7045,
+      "model_raw": "```json\n{\"label\": \"150μm,Nucleosome,Histone,DNA\", \"full_visual_LEFT\": \"A black, elongated object with a blue tip, positioned diagonally in a grayscale image with a textured, irregular background.\", \"LEFT_SURROUNDINGS\": \"A grayscale image with a textured, irregular background, possibly",
+      "json_objects": [],
+      "parsed": null
+    }
+  },
+  "cluster_order": [
+    "0001_cyan_0_mask.png",
+    "0002_cyan_1_mask.png",
+    "0003_cyan_2_mask.png",
+    "0004_blue_0_mask.png",
+    "0005_blue_1_mask.png",
+    "0006_blue_2_mask.png",
+    "0007_blue_3_mask.png",
+    "0008_purple_0_mask.png",
+    "0009_purple_1_mask.png",
+    "0010_purple_2_mask.png",
+    "0011_purple_3_mask.png",
+    "0012_purple_4_mask.png",
+    "0013_purple_5_mask.png",
+    "0014_purple_6_mask.png",
+    "0015_purple_7_mask.png",
+    "0016_purple_8_mask.png",
+    "0017_purple_9_mask.png",
+    "0018_purple_10_mask.png",
+    "0019_purple_11_mask.png",
+    "0020_purple_12_mask.png",
+    "0021_gray_0_mask.png",
+    "0022_gray_1_mask.png",
+    "0023_gray_2_mask.png",
+    "0024_gray_3_mask.png",
+    "0025_gray_4_mask.png",
+    "0026_gray_5_mask.png",
+    "0027_gray_6_mask.png",
+    "0028_black_0_mask.png"
+  ]
+}

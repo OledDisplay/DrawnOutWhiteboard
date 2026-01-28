@@ -904,250 +904,212 @@ def _merge_overlapping_clusters_across_colors_fast(
         c.pop("_mask_area", None)
     return out
 
+def cluster_in_memory(
+    preproc_by_idx: dict[int, dict],
+    vectors_by_idx: dict[int, dict],
+    *,
+    save_outputs: bool = False,
+) -> dict[int, dict]:
+    """
+    Returns:
+      clusters_by_idx[idx] = {
+        "clusters": cluster_entries (same structure as clusters.json),
+        "renders_mask_rgb": {mask_filename: np.ndarray RGB uint8}
+      }
+    """
+    out: dict[int, dict] = {}
 
-# ============================
-# Main per-image pipeline
-# ============================
-def process_one(processed_img_path: Path) -> None:
-    idx = _extract_index_from_processed_name(processed_img_path.name)
-    if idx is None:
-        print(f"[skip] can't parse index from {processed_img_path.name}")
-        return
+    for idx, prep in preproc_by_idx.items():
+        vec = vectors_by_idx.get(idx)
+        if vec is None:
+            continue
 
-    vectors_path = _vector_json_path_for_index(idx)
-    if not vectors_path.exists():
-        print(f"[skip] missing vectors json: {vectors_path.name}")
-        return
+        cleaned_bgr = prep["cleaned_bgr"]
+        img_rgb = cv2.cvtColor(cleaned_bgr, cv2.COLOR_BGR2RGB)
 
-    # OUTPUT: one folder per JSON/index
-    out_render_dir = CLUSTER_RENDER_DIR / f"processed_{idx}"
-    out_map_dir = CLUSTER_MAP_DIR / f"processed_{idx}"
-    out_render_dir.mkdir(parents=True, exist_ok=True)
-    out_map_dir.mkdir(parents=True, exist_ok=True)
+        h_img, w_img, _ = img_rgb.shape
+        data = vec
+        strokes = data.get("strokes") or []
+        if not isinstance(strokes, list) or not strokes:
+            continue
 
-    img_rgb = _load_rgb_image(processed_img_path)
-    h_img, w_img, _ = img_rgb.shape
+        fmt = (data.get("vector_format") or "bezier_cubic").lower()
+        src_w = float(data.get("width") or w_img)
+        src_h = float(data.get("height") or h_img)
 
-    data = json.loads(vectors_path.read_text(encoding="utf-8"))
-    strokes = data.get("strokes") or []
-    if not isinstance(strokes, list) or not strokes:
-        print(f"[skip] no strokes in {vectors_path.name}")
-        return
+        scale_x = (w_img / src_w) if src_w > 0 else 1.0
+        scale_y = (h_img / src_h) if src_h > 0 else 1.0
 
-    fmt = (data.get("vector_format") or "bezier_cubic").lower()
-    src_w = float(data.get("width") or w_img)
-    src_h = float(data.get("height") or h_img)
+        color_ids_raw: List[Optional[int]] = []
+        stroke_samples_px_cache: List[Optional[np.ndarray]] = []
+        bboxes_img_raw: List[Tuple[float, float, float, float]] = []
+        bboxes_img_pad: List[Tuple[float, float, float, float]] = []
 
-    scale_x = (w_img / src_w) if src_w > 0 else 1.0
-    scale_y = (h_img / src_h) if src_h > 0 else 1.0
-
-    # Precompute bbox + color_id per stroke
-    color_ids_raw: List[Optional[int]] = []
-    stroke_samples_px_cache: List[Optional[np.ndarray]] = []
-
-    bboxes_img_raw: List[Tuple[float, float, float, float]] = []
-    bboxes_img_pad: List[Tuple[float, float, float, float]] = []
-
-    for s in strokes:
-        if fmt == "bezier_cubic":
-            bb = _stroke_bbox_from_beziers(s)
-            samples_json = _stroke_samples_json_from_beziers(s)
-        else:
-            bb = _stroke_bbox_from_polyline(s)
-            samples_json = _stroke_samples_json_from_polyline(s)
-
-        pts: Optional[np.ndarray] = None
-
-        # Precompute stroke samples in IMAGE PIXELS (int) once for fast mask rendering
-        if samples_json and len(samples_json) >= 2:
-            pts = np.array(
-                [(int(round(x * scale_x)), int(round(y * scale_y))) for (x, y) in samples_json],
-                dtype=np.int32
-            )
-            # remove consecutive duplicates cheaply
-            if pts.shape[0] >= 2:
-                d = np.abs(np.diff(pts, axis=0)).sum(axis=1)
-                keep = np.concatenate(([True], d > 0))
-                pts = pts[keep]
-            stroke_samples_px_cache.append(pts if pts.shape[0] >= 2 else None)
-        else:
-            stroke_samples_px_cache.append(None)
-
-        cid = _stroke_color_id_raw(s)
-        color_ids_raw.append(cid)
-
-        if pts is not None and pts.shape[0] >= 2:
-            x0i = float(np.min(pts[:, 0]))
-            y0i = float(np.min(pts[:, 1]))
-            x1i = float(np.max(pts[:, 0]))
-            y1i = float(np.max(pts[:, 1]))
-            raw = (x0i, y0i, x1i, y1i)
-        else:
-            # fallback: if no samples
-            if bb is None:
-                raw = (0.0, 0.0, 0.0, 0.0)
+        for s in strokes:
+            if fmt == "bezier_cubic":
+                bb = _stroke_bbox_from_beziers(s)
+                samples_json = _stroke_samples_json_from_beziers(s)
             else:
-                x0, y0, x1, y1 = bb
-                raw = (float(x0 * scale_x), float(y0 * scale_y), float(x1 * scale_x), float(y1 * scale_y))
+                bb = _stroke_bbox_from_polyline(s)
+                samples_json = _stroke_samples_json_from_polyline(s)
 
-        bboxes_img_raw.append(raw)
+            pts: Optional[np.ndarray] = None
+            if samples_json and len(samples_json) >= 2:
+                pts = np.array(
+                    [(int(round(x * scale_x)), int(round(y * scale_y))) for (x, y) in samples_json],
+                    dtype=np.int32
+                )
+                if pts.shape[0] >= 2:
+                    d = np.abs(np.diff(pts, axis=0)).sum(axis=1)
+                    keep = np.concatenate(([True], d > 0))
+                    pts = pts[keep]
+                stroke_samples_px_cache.append(pts if pts.shape[0] >= 2 else None)
+            else:
+                stroke_samples_px_cache.append(None)
 
-        # --- thickened bbox (per-stroke) ---
-        x0i, y0i, x1i, y1i = raw
-        w = max(1.0, x1i - x0i)
-        h = max(1.0, y1i - y0i)
-        pad = max(BBOX_PAD_MIN_PX, min(BBOX_PAD_MAX_PX, BBOX_PAD_FRAC * max(w, h)))
-        padbb = (x0i - pad, y0i - pad, x1i + pad, y1i + pad)
-        bboxes_img_pad.append(padbb)
+            cid = _stroke_color_id_raw(s)
+            color_ids_raw.append(cid)
 
-    # normalize ids (0-based -> 1-based if needed)
-    color_ids = _normalize_color_ids(color_ids_raw)
+            if pts is not None and pts.shape[0] >= 2:
+                x0i = float(np.min(pts[:, 0]))
+                y0i = float(np.min(pts[:, 1]))
+                x1i = float(np.max(pts[:, 0]))
+                y1i = float(np.max(pts[:, 1]))
+                raw = (x0i, y0i, x1i, y1i)
+            else:
+                if bb is None:
+                    raw = (0.0, 0.0, 0.0, 0.0)
+                else:
+                    x0, y0, x1, y1 = bb
+                    raw = (float(x0 * scale_x), float(y0 * scale_y), float(x1 * scale_x), float(y1 * scale_y))
 
-    # also ensure color_name exists (derived from id only, no reassigning)
-    for s, cid in zip(strokes, color_ids):
-        if isinstance(cid, int):
-            s["color_id"] = int(cid)
-            if not isinstance(s.get("color_name"), str) or not s.get("color_name").strip():
-                s["color_name"] = _color_name_from_id(int(cid))
+            bboxes_img_raw.append(raw)
 
-    # --------- grouping strictly by color_id (no reassigning) ---------
-    cluster_entries: List[Dict[str, Any]] = []
+            x0i, y0i, x1i, y1i = raw
+            w = max(1.0, x1i - x0i)
+            h = max(1.0, y1i - y0i)
+            pad = max(BBOX_PAD_MIN_PX, min(BBOX_PAD_MAX_PX, BBOX_PAD_FRAC * max(w, h)))
+            padbb = (x0i - pad, y0i - pad, x1i + pad, y1i + pad)
+            bboxes_img_pad.append(padbb)
 
-    # Build idx lists once (avoid scanning color_ids 11 times)
-    by_cid: Dict[int, List[int]] = {}
-    for i, v in enumerate(color_ids):
-        if isinstance(v, int):
-            by_cid.setdefault(int(v), []).append(i)
+        color_ids = _normalize_color_ids(color_ids_raw)
 
-    # 1) Build raw clusters first (no rendering yet)
-    clusters_raw: List[Dict[str, Any]] = []
+        for s, cid in zip(strokes, color_ids):
+            if isinstance(cid, int):
+                s["color_id"] = int(cid)
+                if not isinstance(s.get("color_name"), str) or not s.get("color_name").strip():
+                    s["color_name"] = _color_name_from_id(int(cid))
 
-    for cid in range(1, 12):
-        cname = _color_name_from_id(cid)
-        idxs = by_cid.get(cid)
-        if not idxs:
-            continue
+        cluster_entries: List[Dict[str, Any]] = []
+        renders_mask_rgb: Dict[str, np.ndarray] = {}
 
-        groups = _cluster_indices_by_polyline_proximity(
-            idxs=idxs,
-            bboxes=bboxes_img_raw,
-            stroke_pts=stroke_samples_px_cache,
-            radius_px=float(GROUP_RADIUS_PX),
-            grid_cell_px=float(GRID_CELL_PX),
-        )
+        by_cid: Dict[int, List[int]] = {}
+        for i, v in enumerate(color_ids):
+            if isinstance(v, int):
+                by_cid.setdefault(int(v), []).append(i)
 
-        for g in groups:
-            bb = _cluster_bbox(bboxes_img_raw, g)
-            clusters_raw.append({
-                "color_id": int(cid),
-                "color_name": cname,
-                "stroke_indexes": [int(i) for i in g],
-                "bbox_raw": bb,
-            })
-
-    # 2) Cross-colour merge pass
-    if "ENABLE_CROSS_COLOR_CLUSTER_MERGE" in globals() and ENABLE_CROSS_COLOR_CLUSTER_MERGE:
-        overlap_thr = float(globals().get("CROSS_COLOR_OVERLAP_RATIO", 0.75))
-
-        # FAST merge that uses exact pixel overlap of stroke masks (NOT square bboxes)
-        clusters_raw = _merge_overlapping_clusters_across_colors_fast(
-            clusters=clusters_raw,
-            stroke_pts=stroke_samples_px_cache,
-            overlap_ratio_thr=overlap_thr,
-        )
-
-    # 3) Re-index clusters per colour AFTER merges
-    clusters_by_color: Dict[int, List[Dict[str, Any]]] = {}
-    for c in clusters_raw:
-        clusters_by_color.setdefault(int(c["color_id"]), []).append(c)
-
-    # 4) Render + output json entries
-    for cid in range(1, 12):
-        cname = _color_name_from_id(cid)
-        col_clusters = clusters_by_color.get(cid)
-        if not col_clusters:
-            continue
-
-        # stable ordering top-left
-        col_clusters.sort(key=lambda c: (c["bbox_raw"][0], c["bbox_raw"][1]))
-
-        # group index WITHIN THIS COLOUR
-        for gi, c in enumerate(col_clusters):
-            g = [int(i) for i in (c.get("stroke_indexes") or [])]
-            if not g:
+        clusters_raw: List[Dict[str, Any]] = []
+        for cid in range(1, 12):
+            cname = _color_name_from_id(cid)
+            idxs = by_cid.get(cid)
+            if not idxs:
                 continue
 
-            # use PADDED bbox for output crops (thickened bbox logic)
-            bb_pad = _cluster_bbox(bboxes_img_pad, g)
-            x0, y0, x1, y1 = bb_pad
-
-            x0p = max(0, int(math.floor(x0 - CLUSTER_CROP_PAD)))
-            y0p = max(0, int(math.floor(y0 - CLUSTER_CROP_PAD)))
-            x1p = min(w_img, int(math.ceil(x1 + CLUSTER_CROP_PAD)))
-            y1p = min(h_img, int(math.ceil(y1 + CLUSTER_CROP_PAD)))
-            if x1p <= x0p or y1p <= y0p:
-                continue
-
-            # DEAD SIMPLE names: {colour}_{k}_{bbox/mask}.png
-            bbox_name = f"{cname}_{gi}_bbox.png"
-            mask_name = f"{cname}_{gi}_mask.png"
-
-            bbox_path = out_render_dir / bbox_name
-            mask_path = out_render_dir / mask_name
-
-            # bbox output is now FULL IMAGE with red rectangle around bbox
-            full_with_box = _render_full_with_red_bbox(img_rgb, [x0p, y0p, x1p, y1p], thickness=RECT_THICKNESS_PX)
-            Image.fromarray(full_with_box).save(bbox_path, compress_level=int(PNG_COMPRESS_LEVEL))
-
-            # masked crop (new behavior)
-            crop_arr = _render_cluster_crop_keep_strokes_color_filled(
-                img_rgb=img_rgb,
-                x0p=int(x0p), y0p=int(y0p), x1p=int(x1p), y1p=int(y1p),
-                stroke_indices=[int(i) for i in g],
-                stroke_samples_px_cache=stroke_samples_px_cache,
-                pad_px=int(STROKE_SKELETON_PAD_PX),
+            groups = _cluster_indices_by_polyline_proximity(
+                idxs=idxs,
+                bboxes=bboxes_img_raw,
+                stroke_pts=stroke_samples_px_cache,
+                radius_px=float(GROUP_RADIUS_PX),
+                grid_cell_px=float(GRID_CELL_PX),
             )
-            Image.fromarray(crop_arr).save(mask_path, compress_level=int(PNG_COMPRESS_LEVEL))
 
-            cluster_entries.append({
-                "color_id": int(cid),
-                "color_name": cname,
-                "group_index_in_color": int(gi),
-                "stroke_indexes": [int(i) for i in g],
-                "bbox_xyxy": [int(x0p), int(y0p), int(x1p), int(y1p)],
-                "crop_file_bbox": bbox_name,
-                "crop_file_mask": mask_name,
-            })
+            for g in groups:
+                bb = _cluster_bbox(bboxes_img_raw, g)
+                clusters_raw.append({
+                    "color_id": int(cid),
+                    "color_name": cname,
+                    "stroke_indexes": [int(i) for i in g],
+                    "bbox_raw": bb,
+                })
 
-    cluster_map = {
-        "processed_image": processed_img_path.name,
-        "vectors_json": vectors_path.name,
-        "image_index": int(idx),
-        "image_size": [int(w_img), int(h_img)],
-        "group_radius_px": float(GROUP_RADIUS_PX),
-        "colors_order": COLOR_ORDER_LIGHT_TO_DARK,
-        "clusters": cluster_entries,
-    }
+        if "ENABLE_CROSS_COLOR_CLUSTER_MERGE" in globals() and ENABLE_CROSS_COLOR_CLUSTER_MERGE:
+            overlap_thr = float(globals().get("CROSS_COLOR_OVERLAP_RATIO", 0.75))
+            clusters_raw = _merge_overlapping_clusters_across_colors_fast(
+                clusters=clusters_raw,
+                stroke_pts=stroke_samples_px_cache,
+                overlap_ratio_thr=overlap_thr,
+            )
 
-    map_path = out_map_dir / "clusters.json"
-    map_path.write_text(json.dumps(cluster_map, ensure_ascii=False, indent=2), encoding="utf-8")
+        clusters_by_color: Dict[int, List[Dict[str, Any]]] = {}
+        for c in clusters_raw:
+            clusters_by_color.setdefault(int(c["color_id"]), []).append(c)
 
-    print(f"[ok] {processed_img_path.name}: strokes={len(strokes)} clusters={len(cluster_entries)} -> {map_path}")
+        for cid in range(1, 12):
+            cname = _color_name_from_id(cid)
+            col_clusters = clusters_by_color.get(cid)
+            if not col_clusters:
+                continue
+
+            col_clusters.sort(key=lambda c: (c["bbox_raw"][0], c["bbox_raw"][1]))
+
+            for gi, c in enumerate(col_clusters):
+                g = [int(i) for i in (c.get("stroke_indexes") or [])]
+                if not g:
+                    continue
+
+                bb_pad = _cluster_bbox(bboxes_img_pad, g)
+                x0, y0, x1, y1 = bb_pad
+
+                x0p = max(0, int(math.floor(x0 - CLUSTER_CROP_PAD)))
+                y0p = max(0, int(math.floor(y0 - CLUSTER_CROP_PAD)))
+                x1p = min(w_img, int(math.ceil(x1 + CLUSTER_CROP_PAD)))
+                y1p = min(h_img, int(math.ceil(y1 + CLUSTER_CROP_PAD)))
+                if x1p <= x0p or y1p <= y0p:
+                    continue
+
+                mask_name = f"{cname}_{gi}_mask.png"
+
+                crop_arr = _render_cluster_crop_keep_strokes_color_filled(
+                    img_rgb=img_rgb,
+                    x0p=int(x0p), y0p=int(y0p), x1p=int(x1p), y1p=int(y1p),
+                    stroke_indices=[int(i) for i in g],
+                    stroke_samples_px_cache=stroke_samples_px_cache,
+                    pad_px=int(STROKE_SKELETON_PAD_PX),
+                )
+                renders_mask_rgb[mask_name] = crop_arr
+
+                if save_outputs:
+                    out_render_dir = CLUSTER_RENDER_DIR / f"processed_{idx}"
+                    out_map_dir = CLUSTER_MAP_DIR / f"processed_{idx}"
+                    out_render_dir.mkdir(parents=True, exist_ok=True)
+                    out_map_dir.mkdir(parents=True, exist_ok=True)
+                    Image.fromarray(crop_arr).save(out_render_dir / mask_name, compress_level=int(PNG_COMPRESS_LEVEL))
+
+                cluster_entries.append({
+                    "color_id": int(cid),
+                    "color_name": cname,
+                    "group_index_in_color": int(gi),
+                    "stroke_indexes": [int(i) for i in g],
+                    "bbox_xyxy": [int(x0p), int(y0p), int(x1p), int(y1p)],
+                    "crop_file_mask": mask_name,
+                })
+
+        if save_outputs:
+            out_map_dir = CLUSTER_MAP_DIR / f"processed_{idx}"
+            out_map_dir.mkdir(parents=True, exist_ok=True)
+            cluster_map = {
+                "image_index": int(idx),
+                "image_size": [int(w_img), int(h_img)],
+                "clusters": cluster_entries,
+            }
+            (out_map_dir / "clusters.json").write_text(
+                json.dumps(cluster_map, ensure_ascii=False, indent=2),
+                encoding="utf-8",
+            )
+
+        out[idx] = {"clusters": cluster_entries, "renders_mask_rgb": renders_mask_rgb}
+
+    return out
 
 
-def main() -> None:
-    _ensure_dirs()
-    imgs = _glob_processed_images()
-    if not imgs:
-        print(f"[error] no processed_<n>.png images found in {PROCESSED_DIR}")
-        return
 
-    for p in imgs:
-        try:
-            process_one(p)
-        except Exception as e:
-            print(f"[fail] {p.name}: {e}")
-
-
-if __name__ == "__main__":
-    main()

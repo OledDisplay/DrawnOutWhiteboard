@@ -1,0 +1,2697 @@
+{
+  "image_index": 1,
+  "candidate_labels_raw": [
+    "Deoxyribose(inDNA)",
+    "(in",
+    "Thymine",
+    "Deoxyribose",
+    "Pyrimidines",
+    "Phosphate",
+    "Cytosine",
+    "Base",
+    "5'carbon",
+    "3'carbon",
+    "2'carbon",
+    "orribose",
+    "Guanine",
+    "Adenine",
+    "CH",
+    "Ribose",
+    "OH",
+    "RNA)",
+    "NH2",
+    "sugar",
+    "HOCH2",
+    "Purines",
+    "DNA)",
+    "Uracil",
+    "NH",
+    "CH2",
+    "O'H",
+    "O",
+    "H",
+    "0",
+    "C",
+    "G",
+    "T",
+    "U",
+    "N",
+    "A"
+  ],
+  "candidate_labels_refined": [
+    "DNA",
+    "RNA",
+    "base",
+    "sugar",
+    "phosphate",
+    "nitrogenous",
+    "purine",
+    "pyrimidine",
+    "ribose",
+    "deoxyribose",
+    "thymine",
+    "cytosine",
+    "adenine",
+    "guanine",
+    "uracil",
+    "nitrogen",
+    "carbon",
+    "hydrogen",
+    "oxygen",
+    "hydroxyl",
+    "amino",
+    "nucleotide",
+    "nucleoside"
+  ],
+  "base_context": "",
+  "model_id": "Qwen/Qwen3-VL-2B-Instruct",
+  "proc_longest_edge": 600,
+  "panel_edge": 300,
+  "batch_size": 8,
+  "clusters": {
+    "0001_orange_0_mask.png": {
+      "entry": {
+        "color_id": 3,
+        "color_name": "orange",
+        "group_index_in_color": 0,
+        "stroke_indexes": [
+          4
+        ],
+        "bbox_xyxy": [
+          190,
+          963,
+          229,
+          1011
+        ],
+        "crop_file_mask": "orange_0_mask.png"
+      },
+      "colour_hint": "orange",
+      "bbox_xyxy": [
+        190,
+        963,
+        229,
+        1011
+      ],
+      "bbox_right_panel_xyxy": [
+        51,
+        259,
+        61,
+        272
+      ],
+      "timing_s": 2.6907,
+      "model_raw": "```json\n{\n  \"label\": \"nucleotide\",\n  \"full_visual_LEFT\": \"A cropped box with a colored orange main object and grayscaled surroundings.\",\n  \"LEFT_SURROUNDINGS\": \"A grayscaled background with a black vertical line and a partially visible letter 'H'.\"\n}\n```",
+      "json_objects": [
+        {
+          "label": "nucleotide",
+          "full_visual_LEFT": "A cropped box with a colored orange main object and grayscaled surroundings.",
+          "LEFT_SURROUNDINGS": "A grayscaled background with a black vertical line and a partially visible letter 'H'."
+        }
+      ],
+      "parsed": {
+        "label": "nucleotide",
+        "full_visual_LEFT": "A cropped box with a colored orange main object and grayscaled surroundings.",
+        "LEFT_SURROUNDINGS": "A grayscaled background with a black vertical line and a partially visible letter 'H'."
+      }
+    },
+    "0002_orange_1_mask.png": {
+      "entry": {
+        "color_id": 3,
+        "color_name": "orange",
+        "group_index_in_color": 1,
+        "stroke_indexes": [
+          0
+        ],
+        "bbox_xyxy": [
+          380,
+          73,
+          433,
+          105
+        ],
+        "crop_file_mask": "orange_1_mask.png"
+      },
+      "colour_hint": "orange",
+      "bbox_xyxy": [
+        380,
+        73,
+        433,
+        105
+      ],
+      "bbox_right_panel_xyxy": [
+        102,
+        21,
+        116,
+        29
+      ],
+      "timing_s": 2.6907,
+      "model_raw": "```json\n{\n  \"label\": \"base\",\n  \"full_visual_LEFT\": \"A chemical structure of a base, with a central carbon atom and two hydrogen atoms attached to it, forming a double bond.\",\n  \"LEFT_SURROUNDINGS\": \"A grayscale background with a red box highlighting the central carbon atom and the two hydrogen atoms attached to",
+      "json_objects": [],
+      "parsed": null
+    },
+    "0003_orange_2_mask.png": {
+      "entry": {
+        "color_id": 3,
+        "color_name": "orange",
+        "group_index_in_color": 2,
+        "stroke_indexes": [
+          3
+        ],
+        "bbox_xyxy": [
+          729,
+          707,
+          832,
+          819
+        ],
+        "crop_file_mask": "orange_2_mask.png"
+      },
+      "colour_hint": "orange",
+      "bbox_xyxy": [
+        729,
+        707,
+        832,
+        819
+      ],
+      "bbox_right_panel_xyxy": [
+        196,
+        191,
+        223,
+        221
+      ],
+      "timing_s": 2.6907,
+      "model_raw": "```json\n{\n  \"label\": \"nucleotide\",\n  \"full_visual_LEFT\": \"A molecular structure with a CH2 group, an oxygen atom, and a carbon atom, with a red box highlighting a phosphate group and a red line indicating a hydrogen bond.\",\n  \"LEFT_SURROUNDINGS\": \"A gray background with a black line",
+      "json_objects": [],
+      "parsed": null
+    },
+    "0004_orange_3_mask.png": {
+      "entry": {
+        "color_id": 3,
+        "color_name": "orange",
+        "group_index_in_color": 3,
+        "stroke_indexes": [
+          1
+        ],
+        "bbox_xyxy": [
+          873,
+          564,
+          926,
+          637
+        ],
+        "crop_file_mask": "orange_3_mask.png"
+      },
+      "colour_hint": "orange",
+      "bbox_xyxy": [
+        873,
+        564,
+        926,
+        637
+      ],
+      "bbox_right_panel_xyxy": [
+        234,
+        152,
+        248,
+        172
+      ],
+      "timing_s": 2.6907,
+      "model_raw": "```json\n{\n  \"label\": \"nitrogenous\",\n  \"full_visual_LEFT\": \"A chemical structure with a nitrogen atom (N) at the top, connected to a double bond and a single bond, with a yellow-orange color highlighting the nitrogen atom and the adjacent carbon atoms.\",\n  \"LEFT_SURROUNDINGS\": \"A grayscale background",
+      "json_objects": [],
+      "parsed": null
+    },
+    "0005_orange_4_mask.png": {
+      "entry": {
+        "color_id": 3,
+        "color_name": "orange",
+        "group_index_in_color": 4,
+        "stroke_indexes": [
+          2
+        ],
+        "bbox_xyxy": [
+          982,
+          608,
+          1038,
+          651
+        ],
+        "crop_file_mask": "orange_4_mask.png"
+      },
+      "colour_hint": "orange",
+      "bbox_xyxy": [
+        982,
+        608,
+        1038,
+        651
+      ],
+      "bbox_right_panel_xyxy": [
+        264,
+        164,
+        279,
+        176
+      ],
+      "timing_s": 2.6907,
+      "model_raw": "```json\n{\n  \"label\": \"base\",\n  \"full_visual_LEFT\": \"A close-up of a nitrogenous base with a yellow-orange color, featuring a nitrogen atom (N) and a double bond, set against a gray background.\",\n  \"LEFT_SURROUNDINGS\": \"A grayscale background with a black border on the left side.\"\n",
+      "json_objects": [],
+      "parsed": null
+    },
+    "0006_cyan_0_mask.png": {
+      "entry": {
+        "color_id": 4,
+        "color_name": "cyan",
+        "group_index_in_color": 0,
+        "stroke_indexes": [
+          5
+        ],
+        "bbox_xyxy": [
+          453,
+          354,
+          492,
+          385
+        ],
+        "crop_file_mask": "cyan_0_mask.png"
+      },
+      "colour_hint": "cyan",
+      "bbox_xyxy": [
+        453,
+        354,
+        492,
+        385
+      ],
+      "bbox_right_panel_xyxy": [
+        122,
+        96,
+        132,
+        104
+      ],
+      "timing_s": 2.6907,
+      "model_raw": "```json\n{\n  \"label\": \"nitrogenous\",\n  \"full_visual_LEFT\": \"N-\",\n  \"LEFT_SURROUNDINGS\": \"a\"\n}\n```",
+      "json_objects": [
+        {
+          "label": "nitrogenous",
+          "full_visual_LEFT": "N-",
+          "LEFT_SURROUNDINGS": "a"
+        }
+      ],
+      "parsed": {
+        "label": "nitrogenous",
+        "full_visual_LEFT": "N-",
+        "LEFT_SURROUNDINGS": "a"
+      }
+    },
+    "0007_green_0_mask.png": {
+      "entry": {
+        "color_id": 5,
+        "color_name": "green",
+        "group_index_in_color": 0,
+        "stroke_indexes": [
+          6
+        ],
+        "bbox_xyxy": [
+          263,
+          490,
+          571,
+          538
+        ],
+        "crop_file_mask": "green_0_mask.png"
+      },
+      "colour_hint": "green",
+      "bbox_xyxy": [
+        263,
+        490,
+        571,
+        538
+      ],
+      "bbox_right_panel_xyxy": [
+        71,
+        132,
+        153,
+        145
+      ],
+      "timing_s": 2.6907,
+      "model_raw": "```json\n{\n  \"label\": \"nucleotide\",\n  \"full_visual_LEFT\": \"A cropped box with a colored green main object and grayscaled surroundings.\",\n  \"LEFT_SURROUNDINGS\": \"A grayed-out background with a green border and a small white circle in the center.\"\n}\n```",
+      "json_objects": [
+        {
+          "label": "nucleotide",
+          "full_visual_LEFT": "A cropped box with a colored green main object and grayscaled surroundings.",
+          "LEFT_SURROUNDINGS": "A grayed-out background with a green border and a small white circle in the center."
+        }
+      ],
+      "parsed": {
+        "label": "nucleotide",
+        "full_visual_LEFT": "A cropped box with a colored green main object and grayscaled surroundings.",
+        "LEFT_SURROUNDINGS": "A grayed-out background with a green border and a small white circle in the center."
+      }
+    },
+    "0008_green_1_mask.png": {
+      "entry": {
+        "color_id": 5,
+        "color_name": "green",
+        "group_index_in_color": 1,
+        "stroke_indexes": [
+          7
+        ],
+        "bbox_xyxy": [
+          416,
+          625,
+          443,
+          663
+        ],
+        "crop_file_mask": "green_1_mask.png"
+      },
+      "colour_hint": "green",
+      "bbox_xyxy": [
+        416,
+        625,
+        443,
+        663
+      ],
+      "bbox_right_panel_xyxy": [
+        112,
+        169,
+        119,
+        179
+      ],
+      "timing_s": 2.6907,
+      "model_raw": "```json\n{\n  \"label\": \"nitrogenous\",\n  \"full_visual_LEFT\": \"^N\",\n  \"LEFT_SURROUNDINGS\": \"a grayscaled surroundings\"\n}\n```",
+      "json_objects": [
+        {
+          "label": "nitrogenous",
+          "full_visual_LEFT": "^N",
+          "LEFT_SURROUNDINGS": "a grayscaled surroundings"
+        }
+      ],
+      "parsed": {
+        "label": "nitrogenous",
+        "full_visual_LEFT": "^N",
+        "LEFT_SURROUNDINGS": "a grayscaled surroundings"
+      }
+    },
+    "0009_red_0_mask.png": {
+      "entry": {
+        "color_id": 7,
+        "color_name": "red",
+        "group_index_in_color": 0,
+        "stroke_indexes": [
+          12
+        ],
+        "bbox_xyxy": [
+          70,
+          676,
+          101,
+          715
+        ],
+        "crop_file_mask": "red_0_mask.png"
+      },
+      "colour_hint": "red",
+      "bbox_xyxy": [
+        70,
+        676,
+        101,
+        715
+      ],
+      "bbox_right_panel_xyxy": [
+        19,
+        182,
+        27,
+        193
+      ],
+      "timing_s": 2.7267,
+      "model_raw": "```json\n{\n  \"label\": \"nucleotide\",\n  \"full_visual_LEFT\": \"A red box with a black symbol resembling a double bond, positioned in the foreground of a grayscale image.\",\n  \"LEFT_SURROUNDINGS\": \"A grayscale background with a blurred, out-of-focus image of a double bond symbol.\"\n}\n```",
+      "json_objects": [
+        {
+          "label": "nucleotide",
+          "full_visual_LEFT": "A red box with a black symbol resembling a double bond, positioned in the foreground of a grayscale image.",
+          "LEFT_SURROUNDINGS": "A grayscale background with a blurred, out-of-focus image of a double bond symbol."
+        }
+      ],
+      "parsed": {
+        "label": "nucleotide",
+        "full_visual_LEFT": "A red box with a black symbol resembling a double bond, positioned in the foreground of a grayscale image.",
+        "LEFT_SURROUNDINGS": "A grayscale background with a blurred, out-of-focus image of a double bond symbol."
+      }
+    },
+    "0010_red_1_mask.png": {
+      "entry": {
+        "color_id": 7,
+        "color_name": "red",
+        "group_index_in_color": 1,
+        "stroke_indexes": [
+          9
+        ],
+        "bbox_xyxy": [
+          234,
+          348,
+          270,
+          382
+        ],
+        "crop_file_mask": "red_1_mask.png"
+      },
+      "colour_hint": "red",
+      "bbox_xyxy": [
+        234,
+        348,
+        270,
+        382
+      ],
+      "bbox_right_panel_xyxy": [
+        63,
+        94,
+        72,
+        104
+      ],
+      "timing_s": 2.7267,
+      "model_raw": "```json\n{\n  \"label\": \"base\",\n  \"full_visual_LEFT\": \"A red-colored box highlighting a nitrogenous base in a chemical structure.\",\n  \"LEFT_SURROUNDINGS\": \"A grayscale background with a large black 'N' and a faint orange shape.\"\n}\n```",
+      "json_objects": [
+        {
+          "label": "base",
+          "full_visual_LEFT": "A red-colored box highlighting a nitrogenous base in a chemical structure.",
+          "LEFT_SURROUNDINGS": "A grayscale background with a large black 'N' and a faint orange shape."
+        }
+      ],
+      "parsed": {
+        "label": "base",
+        "full_visual_LEFT": "A red-colored box highlighting a nitrogenous base in a chemical structure.",
+        "LEFT_SURROUNDINGS": "A grayscale background with a large black 'N' and a faint orange shape."
+      }
+    },
+    "0011_red_2_mask.png": {
+      "entry": {
+        "color_id": 7,
+        "color_name": "red",
+        "group_index_in_color": 2,
+        "stroke_indexes": [
+          8,
+          10
+        ],
+        "bbox_xyxy": [
+          269,
+          300,
+          350,
+          383
+        ],
+        "crop_file_mask": "red_2_mask.png"
+      },
+      "colour_hint": "red",
+      "bbox_xyxy": [
+        269,
+        300,
+        350,
+        383
+      ],
+      "bbox_right_panel_xyxy": [
+        72,
+        82,
+        94,
+        104
+      ],
+      "timing_s": 2.7267,
+      "model_raw": "```json\n{\n  \"label\": \"base\",\n  \"full_visual_LEFT\": \"A red-colored, highlighted base in a molecular structure, with a greyed-out background.\",\n  \"LEFT_SURROUNDINGS\": \"A grayscale, faded image of a molecular structure with a red highlight on a base.\"\n}\n```",
+      "json_objects": [
+        {
+          "label": "base",
+          "full_visual_LEFT": "A red-colored, highlighted base in a molecular structure, with a greyed-out background.",
+          "LEFT_SURROUNDINGS": "A grayscale, faded image of a molecular structure with a red highlight on a base."
+        }
+      ],
+      "parsed": {
+        "label": "base",
+        "full_visual_LEFT": "A red-colored, highlighted base in a molecular structure, with a greyed-out background.",
+        "LEFT_SURROUNDINGS": "A grayscale, faded image of a molecular structure with a red highlight on a base."
+      }
+    },
+    "0012_red_3_mask.png": {
+      "entry": {
+        "color_id": 7,
+        "color_name": "red",
+        "group_index_in_color": 3,
+        "stroke_indexes": [
+          14,
+          15,
+          16
+        ],
+        "bbox_xyxy": [
+          684,
+          776,
+          815,
+          841
+        ],
+        "crop_file_mask": "red_3_mask.png"
+      },
+      "colour_hint": "red",
+      "bbox_xyxy": [
+        684,
+        776,
+        815,
+        841
+      ],
+      "bbox_right_panel_xyxy": [
+        184,
+        209,
+        219,
+        227
+      ],
+      "timing_s": 2.7267,
+      "model_raw": "```json\n{\n  \"label\": \"nucleotide\",\n  \"full_visual_LEFT\": \"A red line is intersecting a black and white diagram, with a red box highlighting a section of the diagram.\",\n  \"LEFT_SURROUNDINGS\": \"A black and white diagram with a red line intersecting it, and a red box highlighting a",
+      "json_objects": [],
+      "parsed": null
+    },
+    "0013_red_4_mask.png": {
+      "entry": {
+        "color_id": 7,
+        "color_name": "red",
+        "group_index_in_color": 4,
+        "stroke_indexes": [
+          11,
+          13
+        ],
+        "bbox_xyxy": [
+          707,
+          597,
+          768,
+          743
+        ],
+        "crop_file_mask": "red_4_mask.png"
+      },
+      "colour_hint": "red",
+      "bbox_xyxy": [
+        707,
+        597,
+        768,
+        743
+      ],
+      "bbox_right_panel_xyxy": [
+        190,
+        161,
+        206,
+        200
+      ],
+      "timing_s": 2.7267,
+      "model_raw": "```json\n{\n  \"label\": \"nucleotide\",\n  \"full_visual_LEFT\": \"A red box containing a chemical structure with a carbon atom bonded to a hydrogen atom, represented as -CH2-.\",\n  \"LEFT_SURROUNDINGS\": \"A grayscale background with a red line extending upwards from the carbon atom.\"\n}\n```",
+      "json_objects": [
+        {
+          "label": "nucleotide",
+          "full_visual_LEFT": "A red box containing a chemical structure with a carbon atom bonded to a hydrogen atom, represented as -CH2-.",
+          "LEFT_SURROUNDINGS": "A grayscale background with a red line extending upwards from the carbon atom."
+        }
+      ],
+      "parsed": {
+        "label": "nucleotide",
+        "full_visual_LEFT": "A red box containing a chemical structure with a carbon atom bonded to a hydrogen atom, represented as -CH2-.",
+        "LEFT_SURROUNDINGS": "A grayscale background with a red line extending upwards from the carbon atom."
+      }
+    },
+    "0014_red_5_mask.png": {
+      "entry": {
+        "color_id": 7,
+        "color_name": "red",
+        "group_index_in_color": 5,
+        "stroke_indexes": [
+          17,
+          18,
+          19
+        ],
+        "bbox_xyxy": [
+          834,
+          776,
+          966,
+          841
+        ],
+        "crop_file_mask": "red_5_mask.png"
+      },
+      "colour_hint": "red",
+      "bbox_xyxy": [
+        834,
+        776,
+        966,
+        841
+      ],
+      "bbox_right_panel_xyxy": [
+        224,
+        209,
+        259,
+        227
+      ],
+      "timing_s": 2.7267,
+      "model_raw": "```json\n{\n  \"label\": \"base\",\n  \"full_visual_LEFT\": \"A red box around a yellow-colored object, which appears to be a base in a molecular structure, with a black line and a red line intersecting it.\",\n  \"LEFT_SURROUNDINGS\": \"A black and white image with a red line intersecting a",
+      "json_objects": [],
+      "parsed": null
+    },
+    "0015_blue_0_mask.png": {
+      "entry": {
+        "color_id": 8,
+        "color_name": "blue",
+        "group_index_in_color": 0,
+        "stroke_indexes": [
+          21
+        ],
+        "bbox_xyxy": [
+          158,
+          850,
+          227,
+          877
+        ],
+        "crop_file_mask": "blue_0_mask.png"
+      },
+      "colour_hint": "blue",
+      "bbox_xyxy": [
+        158,
+        850,
+        227,
+        877
+      ],
+      "bbox_right_panel_xyxy": [
+        42,
+        229,
+        61,
+        236
+      ],
+      "timing_s": 2.7267,
+      "model_raw": "```json\n{\n  \"label\": \"nucleoside\",\n  \"full_visual_LEFT\": \"A blue box with a red outline, containing a pentagon with a red line and a red square, and a red square with a red line.\",\n  \"LEFT_SURROUNDINGS\": \"A grayed-out background with a black border.\"\n}\n",
+      "json_objects": [
+        {
+          "label": "nucleoside",
+          "full_visual_LEFT": "A blue box with a red outline, containing a pentagon with a red line and a red square, and a red square with a red line.",
+          "LEFT_SURROUNDINGS": "A grayed-out background with a black border."
+        }
+      ],
+      "parsed": {
+        "label": "nucleoside",
+        "full_visual_LEFT": "A blue box with a red outline, containing a pentagon with a red line and a red square, and a red square with a red line.",
+        "LEFT_SURROUNDINGS": "A grayed-out background with a black border."
+      }
+    },
+    "0016_blue_1_mask.png": {
+      "entry": {
+        "color_id": 8,
+        "color_name": "blue",
+        "group_index_in_color": 1,
+        "stroke_indexes": [
+          20
+        ],
+        "bbox_xyxy": [
+          246,
+          844,
+          383,
+          879
+        ],
+        "crop_file_mask": "blue_1_mask.png"
+      },
+      "colour_hint": "blue",
+      "bbox_xyxy": [
+        246,
+        844,
+        383,
+        879
+      ],
+      "bbox_right_panel_xyxy": [
+        66,
+        227,
+        103,
+        237
+      ],
+      "timing_s": 2.7267,
+      "model_raw": "```json\n{\n  \"label\": \"nucleotide\",\n  \"full_visual_LEFT\": \"A red box with a blue outline, containing a pentagon with a red circle and a blue circle, and a red circle with a blue circle, and a red circle with a blue circle, and a red circle with a blue circle, and a",
+      "json_objects": [],
+      "parsed": null
+    },
+    "0017_gray_0_mask.png": {
+      "entry": {
+        "color_id": 10,
+        "color_name": "gray",
+        "group_index_in_color": 0,
+        "stroke_indexes": [
+          41,
+          50
+        ],
+        "bbox_xyxy": [
+          5,
+          640,
+          159,
+          827
+        ],
+        "crop_file_mask": "gray_0_mask.png"
+      },
+      "colour_hint": "gray",
+      "bbox_xyxy": [
+        5,
+        640,
+        159,
+        827
+      ],
+      "bbox_right_panel_xyxy": [
+        1,
+        173,
+        43,
+        223
+      ],
+      "timing_s": 2.6398,
+      "model_raw": "```json\n{\n  \"label\": \"phosphate\",\n  \"full_visual_LEFT\": \"A chemical structure showing a phosphate group with an oxygen atom bonded to a phosphorus atom, which is bonded to two oxygen atoms. The structure is depicted with a central phosphorus atom, surrounded by three oxygen atoms, and a negative charge on the oxygen atoms",
+      "json_objects": [],
+      "parsed": null
+    },
+    "0018_gray_1_mask.png": {
+      "entry": {
+        "color_id": 10,
+        "color_name": "gray",
+        "group_index_in_color": 1,
+        "stroke_indexes": [
+          51
+        ],
+        "bbox_xyxy": [
+          12,
+          903,
+          523,
+          1105
+        ],
+        "crop_file_mask": "gray_1_mask.png"
+      },
+      "colour_hint": "gray",
+      "bbox_xyxy": [
+        12,
+        903,
+        523,
+        1105
+      ],
+      "bbox_right_panel_xyxy": [
+        3,
+        243,
+        140,
+        298
+      ],
+      "timing_s": 2.6398,
+      "model_raw": "```json\n{\n  \"label\": \"ribose\",\n  \"full_visual_LEFT\": \"Two structures of a five-membered ring with a hydroxyl group on carbon 2, and a hydrogen atom on carbon 1.\",\n  \"LEFT_SURROUNDINGS\": \"A gray box with a white background, containing two chemical structures of a sugar",
+      "json_objects": [],
+      "parsed": null
+    },
+    "0019_gray_2_mask.png": {
+      "entry": {
+        "color_id": 10,
+        "color_name": "gray",
+        "group_index_in_color": 2,
+        "stroke_indexes": [
+          47,
+          48,
+          49
+        ],
+        "bbox_xyxy": [
+          88,
+          674,
+          411,
+          911
+        ],
+        "crop_file_mask": "gray_2_mask.png"
+      },
+      "colour_hint": "gray",
+      "bbox_xyxy": [
+        88,
+        674,
+        411,
+        911
+      ],
+      "bbox_right_panel_xyxy": [
+        24,
+        182,
+        110,
+        245
+      ],
+      "timing_s": 2.6398,
+      "model_raw": "```json\n{\n  \"label\": \"sugar\",\n  \"full_visual_LEFT\": \"A gray box containing a pentagon with a black line connecting the top and bottom vertices, and a white square on the left side.\",\n  \"LEFT_SURROUNDINGS\": \"A gray background with a black line extending from the top of the box to the",
+      "json_objects": [],
+      "parsed": null
+    },
+    "0020_gray_3_mask.png": {
+      "entry": {
+        "color_id": 10,
+        "color_name": "gray",
+        "group_index_in_color": 3,
+        "stroke_indexes": [
+          22,
+          23,
+          24,
+          29,
+          32,
+          33,
+          57
+        ],
+        "bbox_xyxy": [
+          162,
+          0,
+          675,
+          477
+        ],
+        "crop_file_mask": "gray_3_mask.png"
+      },
+      "colour_hint": "gray",
+      "bbox_xyxy": [
+        162,
+        0,
+        675,
+        477
+      ],
+      "bbox_right_panel_xyxy": [
+        43,
+        1,
+        181,
+        129
+      ],
+      "timing_s": 2.6398,
+      "model_raw": "```json\n{\n  \"label\": \"base\",\n  \"full_visual_LEFT\": \"A diagram showing three different structures of nitrogenous bases, each with a central ring and attached groups. The structures are labeled with numbers and have different colors and shapes.\",\n  \"LEFT_SURROUNDINGS\": \"The surrounding area is a gray background with a white border",
+      "json_objects": [],
+      "parsed": null
+    },
+    "0021_gray_4_mask.png": {
+      "entry": {
+        "color_id": 10,
+        "color_name": "gray",
+        "group_index_in_color": 4,
+        "stroke_indexes": [
+          30
+        ],
+        "bbox_xyxy": [
+          245,
+          136,
+          283,
+          174
+        ],
+        "crop_file_mask": "gray_4_mask.png"
+      },
+      "colour_hint": "gray",
+      "bbox_xyxy": [
+        245,
+        136,
+        283,
+        174
+      ],
+      "bbox_right_panel_xyxy": [
+        66,
+        37,
+        76,
+        48
+      ],
+      "timing_s": 2.6398,
+      "model_raw": "```json\n{\n  \"label\": \"nitrogenous\",\n  \"full_visual_LEFT\": \"N\",\n  \"LEFT_SURROUNDINGS\": \"gray\"\n}\n```",
+      "json_objects": [
+        {
+          "label": "nitrogenous",
+          "full_visual_LEFT": "N",
+          "LEFT_SURROUNDINGS": "gray"
+        }
+      ],
+      "parsed": {
+        "label": "nitrogenous",
+        "full_visual_LEFT": "N",
+        "LEFT_SURROUNDINGS": "gray"
+      }
+    },
+    "0022_gray_5_mask.png": {
+      "entry": {
+        "color_id": 10,
+        "color_name": "gray",
+        "group_index_in_color": 5,
+        "stroke_indexes": [
+          54
+        ],
+        "bbox_xyxy": [
+          250,
+          58,
+          283,
+          92
+        ],
+        "crop_file_mask": "gray_5_mask.png"
+      },
+      "colour_hint": "gray",
+      "bbox_xyxy": [
+        250,
+        58,
+        283,
+        92
+      ],
+      "bbox_right_panel_xyxy": [
+        67,
+        17,
+        76,
+        26
+      ],
+      "timing_s": 2.6398,
+      "model_raw": "```json\n{\n  \"label\": \"base\",\n  \"full_visual_LEFT\": \"A black letter 'C' with a gray background.\",\n  \"LEFT_SURROUNDINGS\": \"A gray background with a black letter 'C' in the center.\"\n}\n```",
+      "json_objects": [
+        {
+          "label": "base",
+          "full_visual_LEFT": "A black letter 'C' with a gray background.",
+          "LEFT_SURROUNDINGS": "A gray background with a black letter 'C' in the center."
+        }
+      ],
+      "parsed": {
+        "label": "base",
+        "full_visual_LEFT": "A black letter 'C' with a gray background.",
+        "LEFT_SURROUNDINGS": "A gray background with a black letter 'C' in the center."
+      }
+    },
+    "0023_gray_6_mask.png": {
+      "entry": {
+        "color_id": 10,
+        "color_name": "gray",
+        "group_index_in_color": 6,
+        "stroke_indexes": [
+          52
+        ],
+        "bbox_xyxy": [
+          272,
+          31,
+          304,
+          68
+        ],
+        "crop_file_mask": "gray_6_mask.png"
+      },
+      "colour_hint": "gray",
+      "bbox_xyxy": [
+        272,
+        31,
+        304,
+        68
+      ],
+      "bbox_right_panel_xyxy": [
+        73,
+        9,
+        82,
+        19
+      ],
+      "timing_s": 2.6398,
+      "model_raw": "```json\n{\n  \"label\": \"nucleotide\",\n  \"full_visual_LEFT\": \"2\",\n  \"LEFT_SURROUNDINGS\": \"a gray box with a black border and a gray background\"\n}\n```",
+      "json_objects": [
+        {
+          "label": "nucleotide",
+          "full_visual_LEFT": "2",
+          "LEFT_SURROUNDINGS": "a gray box with a black border and a gray background"
+        }
+      ],
+      "parsed": {
+        "label": "nucleotide",
+        "full_visual_LEFT": "2",
+        "LEFT_SURROUNDINGS": "a gray box with a black border and a gray background"
+      }
+    },
+    "0024_gray_7_mask.png": {
+      "entry": {
+        "color_id": 10,
+        "color_name": "gray",
+        "group_index_in_color": 7,
+        "stroke_indexes": [
+          39
+        ],
+        "bbox_xyxy": [
+          275,
+          500,
+          304,
+          591
+        ],
+        "crop_file_mask": "gray_7_mask.png"
+      },
+      "colour_hint": "gray",
+      "bbox_xyxy": [
+        275,
+        500,
+        304,
+        591
+      ],
+      "bbox_right_panel_xyxy": [
+        74,
+        135,
+        82,
+        160
+      ],
+      "timing_s": 2.6398,
+      "model_raw": "```json\n{\n  \"label\": \"nucleotide\",\n  \"full_visual_LEFT\": \"A box containing a diagram of a nucleotide with a phosphate group, a sugar, and a nitrogenous base, with a red box highlighting the phosphate group.\",\n  \"LEFT_SURROUNDINGS\": \"A gray box with a white background, containing a",
+      "json_objects": [],
+      "parsed": null
+    },
+    "0025_gray_8_mask.png": {
+      "entry": {
+        "color_id": 10,
+        "color_name": "gray",
+        "group_index_in_color": 8,
+        "stroke_indexes": [
+          26,
+          58
+        ],
+        "bbox_xyxy": [
+          277,
+          89,
+          329,
+          156
+        ],
+        "crop_file_mask": "gray_8_mask.png"
+      },
+      "colour_hint": "gray",
+      "bbox_xyxy": [
+        277,
+        89,
+        329,
+        156
+      ],
+      "bbox_right_panel_xyxy": [
+        74,
+        25,
+        88,
+        43
+      ],
+      "timing_s": 2.6378,
+      "model_raw": "```json\n{\n  \"label\": \"nucleotide\",\n  \"full_visual_LEFT\": \"A chemical structure showing a carbon-carbon double bond with a CH group on the left and a CH group on the right, with a gray background.\",\n  \"LEFT_SURROUNDINGS\": \"A gray background with a black border.\"\n}\n```",
+      "json_objects": [
+        {
+          "label": "nucleotide",
+          "full_visual_LEFT": "A chemical structure showing a carbon-carbon double bond with a CH group on the left and a CH group on the right, with a gray background.",
+          "LEFT_SURROUNDINGS": "A gray background with a black border."
+        }
+      ],
+      "parsed": {
+        "label": "nucleotide",
+        "full_visual_LEFT": "A chemical structure showing a carbon-carbon double bond with a CH group on the left and a CH group on the right, with a gray background.",
+        "LEFT_SURROUNDINGS": "A gray background with a black border."
+      }
+    },
+    "0026_gray_9_mask.png": {
+      "entry": {
+        "color_id": 10,
+        "color_name": "gray",
+        "group_index_in_color": 9,
+        "stroke_indexes": [
+          38
+        ],
+        "bbox_xyxy": [
+          267,
+          488,
+          574,
+          692
+        ],
+        "crop_file_mask": "gray_9_mask.png"
+      },
+      "colour_hint": "gray",
+      "bbox_xyxy": [
+        267,
+        488,
+        574,
+        692
+      ],
+      "bbox_right_panel_xyxy": [
+        72,
+        132,
+        154,
+        187
+      ],
+      "timing_s": 2.6378,
+      "model_raw": "```json\n{\n  \"label\": \"purine\",\n  \"full_visual_LEFT\": \"A chemical structure of a purine base, showing a six-membered ring fused to a five-membered ring, with a carbonyl group on the six-membered ring and a nitrogen atom in the five-membered ring.\",\n  \"LEFT_SURROUND",
+      "json_objects": [],
+      "parsed": null
+    },
+    "0027_gray_10_mask.png": {
+      "entry": {
+        "color_id": 10,
+        "color_name": "gray",
+        "group_index_in_color": 10,
+        "stroke_indexes": [
+          31
+        ],
+        "bbox_xyxy": [
+          323,
+          136,
+          377,
+          180
+        ],
+        "crop_file_mask": "gray_10_mask.png"
+      },
+      "colour_hint": "gray",
+      "bbox_xyxy": [
+        323,
+        136,
+        377,
+        180
+      ],
+      "bbox_right_panel_xyxy": [
+        87,
+        37,
+        101,
+        49
+      ],
+      "timing_s": 2.6378,
+      "model_raw": "```json\n{\n  \"label\": \"base\",\n  \"full_visual_LEFT\": \"A gray, circular object with a double bond and a single bond to a circle, resembling a chemical structure.\",\n  \"LEFT_SURROUNDINGS\": \"A gray, circular object with a double bond and a single bond to a circle, resembling a chemical structure.\"\n",
+      "json_objects": [],
+      "parsed": null
+    },
+    "0028_gray_11_mask.png": {
+      "entry": {
+        "color_id": 10,
+        "color_name": "gray",
+        "group_index_in_color": 11,
+        "stroke_indexes": [
+          37
+        ],
+        "bbox_xyxy": [
+          339,
+          326,
+          367,
+          370
+        ],
+        "crop_file_mask": "gray_11_mask.png"
+      },
+      "colour_hint": "gray",
+      "bbox_xyxy": [
+        339,
+        326,
+        367,
+        370
+      ],
+      "bbox_right_panel_xyxy": [
+        91,
+        88,
+        98,
+        100
+      ],
+      "timing_s": 2.6378,
+      "model_raw": "```json\n{\n  \"label\": \"base\",\n  \"full_visual_LEFT\": \"A red box containing a nitrogenous base, with a chemical structure showing a nitrogen atom and a ring structure.\",\n  \"LEFT_SURROUNDINGS\": \"A gray background with a black vertical line on the left side.\"\n}\n```",
+      "json_objects": [
+        {
+          "label": "base",
+          "full_visual_LEFT": "A red box containing a nitrogenous base, with a chemical structure showing a nitrogen atom and a ring structure.",
+          "LEFT_SURROUNDINGS": "A gray background with a black vertical line on the left side."
+        }
+      ],
+      "parsed": {
+        "label": "base",
+        "full_visual_LEFT": "A red box containing a nitrogenous base, with a chemical structure showing a nitrogen atom and a ring structure.",
+        "LEFT_SURROUNDINGS": "A gray background with a black vertical line on the left side."
+      }
+    },
+    "0029_gray_12_mask.png": {
+      "entry": {
+        "color_id": 10,
+        "color_name": "gray",
+        "group_index_in_color": 12,
+        "stroke_indexes": [
+          25
+        ],
+        "bbox_xyxy": [
+          344,
+          79,
+          394,
+          119
+        ],
+        "crop_file_mask": "gray_12_mask.png"
+      },
+      "colour_hint": "gray",
+      "bbox_xyxy": [
+        344,
+        79,
+        394,
+        119
+      ],
+      "bbox_right_panel_xyxy": [
+        92,
+        22,
+        106,
+        33
+      ],
+      "timing_s": 2.6378,
+      "model_raw": "```json\n{\n  \"label\": \"nitrogenous\",\n  \"full_visual_LEFT\": \"HN⁻\",\n  \"LEFT_SURROUNDINGS\": \"gray\"\n}\n```",
+      "json_objects": [
+        {
+          "label": "nitrogenous",
+          "full_visual_LEFT": "HN⁻",
+          "LEFT_SURROUNDINGS": "gray"
+        }
+      ],
+      "parsed": {
+        "label": "nitrogenous",
+        "full_visual_LEFT": "HN⁻",
+        "LEFT_SURROUNDINGS": "gray"
+      }
+    },
+    "0030_gray_13_mask.png": {
+      "entry": {
+        "color_id": 10,
+        "color_name": "gray",
+        "group_index_in_color": 13,
+        "stroke_indexes": [
+          53
+        ],
+        "bbox_xyxy": [
+          390,
+          41,
+          427,
+          92
+        ],
+        "crop_file_mask": "gray_13_mask.png"
+      },
+      "colour_hint": "gray",
+      "bbox_xyxy": [
+        390,
+        41,
+        427,
+        92
+      ],
+      "bbox_right_panel_xyxy": [
+        105,
+        12,
+        115,
+        26
+      ],
+      "timing_s": 2.6378,
+      "model_raw": "```json\n{\n  \"label\": \"nucleotide\",\n  \"full_visual_LEFT\": \"A chemical structure showing a carbon atom with two double bonds and a single bond to a hydrogen atom, with a carbon atom below it.\",\n  \"LEFT_SURROUNDINGS\": \"A gray box with a chemical structure of a nucleotide, including a sugar",
+      "json_objects": [],
+      "parsed": null
+    },
+    "0031_gray_14_mask.png": {
+      "entry": {
+        "color_id": 10,
+        "color_name": "gray",
+        "group_index_in_color": 14,
+        "stroke_indexes": [
+          56
+        ],
+        "bbox_xyxy": [
+          422,
+          79,
+          459,
+          112
+        ],
+        "crop_file_mask": "gray_14_mask.png"
+      },
+      "colour_hint": "gray",
+      "bbox_xyxy": [
+        422,
+        79,
+        459,
+        112
+      ],
+      "bbox_right_panel_xyxy": [
+        113,
+        22,
+        123,
+        31
+      ],
+      "timing_s": 2.6378,
+      "model_raw": "```json\n{\n  \"label\": \"nucleotide\",\n  \"full_visual_LEFT\": \"A blurred image of a chemical structure with a carbon atom and a double bond, possibly representing a nucleotide.\",\n  \"LEFT_SURROUNDINGS\": \"A gray background with a faint outline of a chemical structure, possibly a nucleotide, with a red",
+      "json_objects": [],
+      "parsed": null
+    },
+    "0032_gray_15_mask.png": {
+      "entry": {
+        "color_id": 10,
+        "color_name": "gray",
+        "group_index_in_color": 15,
+        "stroke_indexes": [
+          55
+        ],
+        "bbox_xyxy": [
+          462,
+          62,
+          520,
+          106
+        ],
+        "crop_file_mask": "gray_15_mask.png"
+      },
+      "colour_hint": "gray",
+      "bbox_xyxy": [
+        462,
+        62,
+        520,
+        106
+      ],
+      "bbox_right_panel_xyxy": [
+        124,
+        18,
+        140,
+        29
+      ],
+      "timing_s": 2.6378,
+      "model_raw": "```json\n{\n  \"label\": \"nucleotide\",\n  \"full_visual_LEFT\": \"CH3\",\n  \"LEFT_SURROUNDINGS\": \"a\"\n}\n```",
+      "json_objects": [
+        {
+          "label": "nucleotide",
+          "full_visual_LEFT": "CH3",
+          "LEFT_SURROUNDINGS": "a"
+        }
+      ],
+      "parsed": {
+        "label": "nucleotide",
+        "full_visual_LEFT": "CH3",
+        "LEFT_SURROUNDINGS": "a"
+      }
+    },
+    "0033_gray_16_mask.png": {
+      "entry": {
+        "color_id": 10,
+        "color_name": "gray",
+        "group_index_in_color": 16,
+        "stroke_indexes": [
+          34,
+          36
+        ],
+        "bbox_xyxy": [
+          488,
+          254,
+          547,
+          338
+        ],
+        "crop_file_mask": "gray_16_mask.png"
+      },
+      "colour_hint": "gray",
+      "bbox_xyxy": [
+        488,
+        254,
+        547,
+        338
+      ],
+      "bbox_right_panel_xyxy": [
+        131,
+        69,
+        147,
+        92
+      ],
+      "timing_s": 3.3643,
+      "model_raw": "```json\n{\n  \"label\": \"nucleotide\",\n  \"full_visual_LEFT\": \"A chemical structure showing a carbon atom double bonded to an oxygen atom, which is double bonded to another carbon atom, with a hydroxyl group attached to the first carbon.\",\n  \"LEFT_SURROUNDINGS\": \"A grayed-out background with a",
+      "json_objects": [],
+      "parsed": null
+    },
+    "0034_gray_17_mask.png": {
+      "entry": {
+        "color_id": 10,
+        "color_name": "gray",
+        "group_index_in_color": 17,
+        "stroke_indexes": [
+          27,
+          28
+        ],
+        "bbox_xyxy": [
+          523,
+          79,
+          610,
+          175
+        ],
+        "crop_file_mask": "gray_17_mask.png"
+      },
+      "colour_hint": "gray",
+      "bbox_xyxy": [
+        523,
+        79,
+        610,
+        175
+      ],
+      "bbox_right_panel_xyxy": [
+        140,
+        22,
+        164,
+        48
+      ],
+      "timing_s": 3.3643,
+      "model_raw": "```json\n{\n  \"label\": \"base\",\n  \"full_visual_LEFT\": \"A chemical structure of a nitrogenous base, showing an amino group (NH2) attached to a carbon atom, which is part of a ring structure with a double bond to another carbon atom.\",\n  \"LEFT_SURROUNDINGS\": \"A grayed-out background",
+      "json_objects": [],
+      "parsed": null
+    },
+    "0035_gray_18_mask.png": {
+      "entry": {
+        "color_id": 10,
+        "color_name": "gray",
+        "group_index_in_color": 18,
+        "stroke_indexes": [
+          35
+        ],
+        "bbox_xyxy": [
+          542,
+          307,
+          578,
+          384
+        ],
+        "crop_file_mask": "gray_18_mask.png"
+      },
+      "colour_hint": "gray",
+      "bbox_xyxy": [
+        542,
+        307,
+        578,
+        384
+      ],
+      "bbox_right_panel_xyxy": [
+        145,
+        83,
+        155,
+        104
+      ],
+      "timing_s": 3.3643,
+      "model_raw": "```json\n{\n  \"label\": \"base\",\n  \"full_visual_LEFT\": \"A chemical structure showing a nitrogen-containing ring with a carbon-carbon double bond and a nitrogen atom attached to a carbon atom.\",\n  \"LEFT_SURROUNDINGS\": \"A gray background with a faint outline of a chemical structure.\"\n}\n```",
+      "json_objects": [
+        {
+          "label": "base",
+          "full_visual_LEFT": "A chemical structure showing a nitrogen-containing ring with a carbon-carbon double bond and a nitrogen atom attached to a carbon atom.",
+          "LEFT_SURROUNDINGS": "A gray background with a faint outline of a chemical structure."
+        }
+      ],
+      "parsed": {
+        "label": "base",
+        "full_visual_LEFT": "A chemical structure showing a nitrogen-containing ring with a carbon-carbon double bond and a nitrogen atom attached to a carbon atom.",
+        "LEFT_SURROUNDINGS": "A gray background with a faint outline of a chemical structure."
+      }
+    },
+    "0036_gray_19_mask.png": {
+      "entry": {
+        "color_id": 10,
+        "color_name": "gray",
+        "group_index_in_color": 19,
+        "stroke_indexes": [
+          44
+        ],
+        "bbox_xyxy": [
+          578,
+          694,
+          626,
+          731
+        ],
+        "crop_file_mask": "gray_19_mask.png"
+      },
+      "colour_hint": "gray",
+      "bbox_xyxy": [
+        578,
+        694,
+        626,
+        731
+      ],
+      "bbox_right_panel_xyxy": [
+        155,
+        187,
+        168,
+        197
+      ],
+      "timing_s": 3.3643,
+      "model_raw": "```json\n{\n  \"label\": \"phosphate\",\n  \"full_visual_LEFT\": \"O⁻⁻\",\n  \"LEFT_SURROUNDINGS\": \"a gray box with a black border\"\n}\n```",
+      "json_objects": [
+        {
+          "label": "phosphate",
+          "full_visual_LEFT": "O⁻⁻",
+          "LEFT_SURROUNDINGS": "a gray box with a black border"
+        }
+      ],
+      "parsed": {
+        "label": "phosphate",
+        "full_visual_LEFT": "O⁻⁻",
+        "LEFT_SURROUNDINGS": "a gray box with a black border"
+      }
+    },
+    "0037_gray_20_mask.png": {
+      "entry": {
+        "color_id": 10,
+        "color_name": "gray",
+        "group_index_in_color": 20,
+        "stroke_indexes": [
+          42,
+          43
+        ],
+        "bbox_xyxy": [
+          623,
+          655,
+          658,
+          712
+        ],
+        "crop_file_mask": "gray_20_mask.png"
+      },
+      "colour_hint": "gray",
+      "bbox_xyxy": [
+        623,
+        655,
+        658,
+        712
+      ],
+      "bbox_right_panel_xyxy": [
+        167,
+        177,
+        177,
+        192
+      ],
+      "timing_s": 3.3643,
+      "model_raw": "```json\n{\n  \"label\": \"nucleoside\",\n  \"full_visual_LEFT\": \"O = P = O\",\n  \"LEFT_SURROUNDINGS\": \"gray\"\n}\n```",
+      "json_objects": [
+        {
+          "label": "nucleoside",
+          "full_visual_LEFT": "O = P = O",
+          "LEFT_SURROUNDINGS": "gray"
+        }
+      ],
+      "parsed": {
+        "label": "nucleoside",
+        "full_visual_LEFT": "O = P = O",
+        "LEFT_SURROUNDINGS": "gray"
+      }
+    },
+    "0038_gray_21_mask.png": {
+      "entry": {
+        "color_id": 10,
+        "color_name": "gray",
+        "group_index_in_color": 21,
+        "stroke_indexes": [
+          45
+        ],
+        "bbox_xyxy": [
+          659,
+          694,
+          697,
+          731
+        ],
+        "crop_file_mask": "gray_21_mask.png"
+      },
+      "colour_hint": "gray",
+      "bbox_xyxy": [
+        659,
+        694,
+        697,
+        731
+      ],
+      "bbox_right_panel_xyxy": [
+        177,
+        187,
+        187,
+        197
+      ],
+      "timing_s": 3.3643,
+      "model_raw": "```json\n{\n  \"label\": \"phosphate\",\n  \"full_visual_LEFT\": \"-O-\",\n  \"LEFT_SURROUNDINGS\": \"a gray box with a black circle and two black lines on either side\"\n}\n```",
+      "json_objects": [
+        {
+          "label": "phosphate",
+          "full_visual_LEFT": "-O-",
+          "LEFT_SURROUNDINGS": "a gray box with a black circle and two black lines on either side"
+        }
+      ],
+      "parsed": {
+        "label": "phosphate",
+        "full_visual_LEFT": "-O-",
+        "LEFT_SURROUNDINGS": "a gray box with a black circle and two black lines on either side"
+      }
+    },
+    "0039_gray_22_mask.png": {
+      "entry": {
+        "color_id": 10,
+        "color_name": "gray",
+        "group_index_in_color": 22,
+        "stroke_indexes": [
+          46
+        ],
+        "bbox_xyxy": [
+          750,
+          702,
+          778,
+          736
+        ],
+        "crop_file_mask": "gray_22_mask.png"
+      },
+      "colour_hint": "gray",
+      "bbox_xyxy": [
+        750,
+        702,
+        778,
+        736
+      ],
+      "bbox_right_panel_xyxy": [
+        201,
+        189,
+        209,
+        198
+      ],
+      "timing_s": 3.3643,
+      "model_raw": "```json\n{\n  \"label\": \"nucleotide\",\n  \"full_visual_LEFT\": \"H2\",\n  \"LEFT_SURROUNDINGS\": \"a\"\n}\n```",
+      "json_objects": [
+        {
+          "label": "nucleotide",
+          "full_visual_LEFT": "H2",
+          "LEFT_SURROUNDINGS": "a"
+        }
+      ],
+      "parsed": {
+        "label": "nucleotide",
+        "full_visual_LEFT": "H2",
+        "LEFT_SURROUNDINGS": "a"
+      }
+    },
+    "0040_gray_23_mask.png": {
+      "entry": {
+        "color_id": 10,
+        "color_name": "gray",
+        "group_index_in_color": 23,
+        "stroke_indexes": [
+          40
+        ],
+        "bbox_xyxy": [
+          894,
+          549,
+          930,
+          585
+        ],
+        "crop_file_mask": "gray_23_mask.png"
+      },
+      "colour_hint": "gray",
+      "bbox_xyxy": [
+        894,
+        549,
+        930,
+        585
+      ],
+      "bbox_right_panel_xyxy": [
+        240,
+        148,
+        250,
+        158
+      ],
+      "timing_s": 3.3643,
+      "model_raw": "```json\n{\n  \"label\": \"nitrogenous\",\n  \"full_visual_LEFT\": \"N-\",\n  \"LEFT_SURROUNDINGS\": \"N-\"\n}\n```",
+      "json_objects": [
+        {
+          "label": "nitrogenous",
+          "full_visual_LEFT": "N-",
+          "LEFT_SURROUNDINGS": "N-"
+        }
+      ],
+      "parsed": {
+        "label": "nitrogenous",
+        "full_visual_LEFT": "N-",
+        "LEFT_SURROUNDINGS": "N-"
+      }
+    },
+    "0041_black_0_mask.png": {
+      "entry": {
+        "color_id": 11,
+        "color_name": "black",
+        "group_index_in_color": 0,
+        "stroke_indexes": [
+          115,
+          120,
+          121,
+          122,
+          127,
+          158,
+          159
+        ],
+        "bbox_xyxy": [
+          23,
+          648,
+          184,
+          786
+        ],
+        "crop_file_mask": "black_0_mask.png"
+      },
+      "colour_hint": "black",
+      "bbox_xyxy": [
+        23,
+        648,
+        184,
+        786
+      ],
+      "bbox_right_panel_xyxy": [
+        6,
+        175,
+        49,
+        212
+      ],
+      "timing_s": 2.7529,
+      "model_raw": "```json\n{\n  \"label\": \"phosphate\",\n  \"full_visual_LEFT\": \"A chemical structure showing a phosphate group with a central phosphorus atom bonded to two oxygen atoms, one of which is double-bonded to an oxygen atom, and the other is single-bonded to a negatively charged oxygen atom. The structure is depicted",
+      "json_objects": [],
+      "parsed": null
+    },
+    "0042_black_1_mask.png": {
+      "entry": {
+        "color_id": 11,
+        "color_name": "black",
+        "group_index_in_color": 1,
+        "stroke_indexes": [
+          139
+        ],
+        "bbox_xyxy": [
+          16,
+          902,
+          523,
+          948
+        ],
+        "crop_file_mask": "black_1_mask.png"
+      },
+      "colour_hint": "black",
+      "bbox_xyxy": [
+        16,
+        902,
+        523,
+        948
+      ],
+      "bbox_right_panel_xyxy": [
+        4,
+        243,
+        140,
+        255
+      ],
+      "timing_s": 2.7529,
+      "model_raw": "```json\n{\n  \"label\": \"nucleotide\",\n  \"full_visual_LEFT\": \"A red box containing a diagram of a nucleotide, with a phosphate group, a sugar, and a nitrogenous base.\",\n  \"LEFT_SURROUNDINGS\": \"A grayed-out background with a white rectangular shape above it.\"\n}\n```",
+      "json_objects": [
+        {
+          "label": "nucleotide",
+          "full_visual_LEFT": "A red box containing a diagram of a nucleotide, with a phosphate group, a sugar, and a nitrogenous base.",
+          "LEFT_SURROUNDINGS": "A grayed-out background with a white rectangular shape above it."
+        }
+      ],
+      "parsed": {
+        "label": "nucleotide",
+        "full_visual_LEFT": "A red box containing a diagram of a nucleotide, with a phosphate group, a sugar, and a nitrogenous base.",
+        "LEFT_SURROUNDINGS": "A grayed-out background with a white rectangular shape above it."
+      }
+    },
+    "0043_black_2_mask.png": {
+      "entry": {
+        "color_id": 11,
+        "color_name": "black",
+        "group_index_in_color": 2,
+        "stroke_indexes": [
+          141,
+          143,
+          145,
+          148,
+          149,
+          150,
+          152
+        ],
+        "bbox_xyxy": [
+          69,
+          935,
+          239,
+          1053
+        ],
+        "crop_file_mask": "black_2_mask.png"
+      },
+      "colour_hint": "black",
+      "bbox_xyxy": [
+        69,
+        935,
+        239,
+        1053
+      ],
+      "bbox_right_panel_xyxy": [
+        19,
+        252,
+        64,
+        284
+      ],
+      "timing_s": 2.7529,
+      "model_raw": "```json\n{\n  \"label\": \"sugar\",\n  \"full_visual_LEFT\": \"A pentagon with two hydrogen atoms labeled H on the left and right sides, and a central structure with a black outline and a gray background. The number 2 is written above the pentagon.\",\n  \"LEFT_SURROUNDINGS\": \"A gray background",
+      "json_objects": [],
+      "parsed": null
+    },
+    "0044_black_3_mask.png": {
+      "entry": {
+        "color_id": 11,
+        "color_name": "black",
+        "group_index_in_color": 3,
+        "stroke_indexes": [
+          103,
+          106,
+          110,
+          112,
+          114,
+          124,
+          125,
+          128,
+          131,
+          136,
+          138
+        ],
+        "bbox_xyxy": [
+          172,
+          548,
+          373,
+          852
+        ],
+        "crop_file_mask": "black_3_mask.png"
+      },
+      "colour_hint": "black",
+      "bbox_xyxy": [
+        172,
+        548,
+        373,
+        852
+      ],
+      "bbox_right_panel_xyxy": [
+        46,
+        148,
+        100,
+        230
+      ],
+      "timing_s": 2.7529,
+      "model_raw": "```json\n{\n  \"label\": \"sugar\",\n  \"full_visual_LEFT\": \"A light blue pentagon with a central oxygen atom and a black line connecting to the top vertex, representing a sugar molecule.\",\n  \"LEFT_SURROUNDINGS\": \"A gray background with a black line connecting to the top vertex of the pentagon, and",
+      "json_objects": [],
+      "parsed": null
+    },
+    "0045_black_4_mask.png": {
+      "entry": {
+        "color_id": 11,
+        "color_name": "black",
+        "group_index_in_color": 4,
+        "stroke_indexes": [
+          99
+        ],
+        "bbox_xyxy": [
+          164,
+          432,
+          672,
+          478
+        ],
+        "crop_file_mask": "black_4_mask.png"
+      },
+      "colour_hint": "black",
+      "bbox_xyxy": [
+        164,
+        432,
+        672,
+        478
+      ],
+      "bbox_right_panel_xyxy": [
+        44,
+        117,
+        180,
+        129
+      ],
+      "timing_s": 2.7529,
+      "model_raw": "```json\n{\n  \"label\": \"nucleoside\",\n  \"full_visual_LEFT\": \"A black box with a white border, containing a colored object and grayscaled surroundings.\",\n  \"LEFT_SURROUNDINGS\": \"A black background with a white border and a grayed-out area.\"\n}\n```",
+      "json_objects": [
+        {
+          "label": "nucleoside",
+          "full_visual_LEFT": "A black box with a white border, containing a colored object and grayscaled surroundings.",
+          "LEFT_SURROUNDINGS": "A black background with a white border and a grayed-out area."
+        }
+      ],
+      "parsed": {
+        "label": "nucleoside",
+        "full_visual_LEFT": "A black box with a white border, containing a colored object and grayscaled surroundings.",
+        "LEFT_SURROUNDINGS": "A black background with a white border and a grayed-out area."
+      }
+    },
+    "0046_black_5_mask.png": {
+      "entry": {
+        "color_id": 11,
+        "color_name": "black",
+        "group_index_in_color": 5,
+        "stroke_indexes": [
+          78,
+          79,
+          80,
+          83,
+          86,
+          87,
+          90,
+          92,
+          93,
+          95
+        ],
+        "bbox_xyxy": [
+          200,
+          279,
+          382,
+          399
+        ],
+        "crop_file_mask": "black_5_mask.png"
+      },
+      "colour_hint": "black",
+      "bbox_xyxy": [
+        200,
+        279,
+        382,
+        399
+      ],
+      "bbox_right_panel_xyxy": [
+        54,
+        76,
+        103,
+        108
+      ],
+      "timing_s": 2.7529,
+      "model_raw": "```json\n{\n  \"label\": \"purine\",\n  \"full_visual_LEFT\": \"A chemical structure of a purine molecule, which is a nitrogenous base with a six-membered ring fused to a five-membered ring, featuring nitrogen atoms and carbon atoms.\",\n  \"LEFT_SURROUNDINGS\": \"A grayscale background with a black border",
+      "json_objects": [],
+      "parsed": null
+    },
+    "0047_black_6_mask.png": {
+      "entry": {
+        "color_id": 11,
+        "color_name": "black",
+        "group_index_in_color": 6,
+        "stroke_indexes": [
+          59,
+          60,
+          64,
+          65,
+          68
+        ],
+        "bbox_xyxy": [
+          215,
+          44,
+          327,
+          138
+        ],
+        "crop_file_mask": "black_6_mask.png"
+      },
+      "colour_hint": "black",
+      "bbox_xyxy": [
+        215,
+        44,
+        327,
+        138
+      ],
+      "bbox_right_panel_xyxy": [
+        58,
+        13,
+        88,
+        38
+      ],
+      "timing_s": 2.7529,
+      "model_raw": "```json\n{\n  \"label\": \"nucleotide\",\n  \"full_visual_LEFT\": \"A chemical structure showing a nitrogen-containing ring with a double bond and a carbon atom attached to a hydrogen atom, with a number 2 above the carbon.\",\n  \"LEFT_SURROUNDINGS\": \"A grayscale background with a black border on the left side",
+      "json_objects": [],
+      "parsed": null
+    },
+    "0048_black_7_mask.png": {
+      "entry": {
+        "color_id": 11,
+        "color_name": "black",
+        "group_index_in_color": 7,
+        "stroke_indexes": [
+          74
+        ],
+        "bbox_xyxy": [
+          261,
+          131,
+          299,
+          163
+        ],
+        "crop_file_mask": "black_7_mask.png"
+      },
+      "colour_hint": "black",
+      "bbox_xyxy": [
+        261,
+        131,
+        299,
+        163
+      ],
+      "bbox_right_panel_xyxy": [
+        70,
+        36,
+        80,
+        45
+      ],
+      "timing_s": 2.7529,
+      "model_raw": "```json\n{\n  \"label\": \"nitrogenous\",\n  \"full_visual_LEFT\": \"N-C\",\n  \"LEFT_SURROUNDINGS\": \"a grayscaled surroundings\"\n}\n```",
+      "json_objects": [
+        {
+          "label": "nitrogenous",
+          "full_visual_LEFT": "N-C",
+          "LEFT_SURROUNDINGS": "a grayscaled surroundings"
+        }
+      ],
+      "parsed": {
+        "label": "nitrogenous",
+        "full_visual_LEFT": "N-C",
+        "LEFT_SURROUNDINGS": "a grayscaled surroundings"
+      }
+    },
+    "0049_black_8_mask.png": {
+      "entry": {
+        "color_id": 11,
+        "color_name": "black",
+        "group_index_in_color": 8,
+        "stroke_indexes": [
+          70
+        ],
+        "bbox_xyxy": [
+          292,
+          118,
+          326,
+          149
+        ],
+        "crop_file_mask": "black_8_mask.png"
+      },
+      "colour_hint": "black",
+      "bbox_xyxy": [
+        292,
+        118,
+        326,
+        149
+      ],
+      "bbox_right_panel_xyxy": [
+        78,
+        33,
+        87,
+        41
+      ],
+      "timing_s": 2.7683,
+      "model_raw": "```json\n{\n  \"label\": \"nucleoside\",\n  \"full_visual_LEFT\": \"A black letter 'CH' on a white background.\",\n  \"LEFT_SURROUNDINGS\": \"A grayscale image with a black letter 'CH' on a white background.\"\n}\n```",
+      "json_objects": [
+        {
+          "label": "nucleoside",
+          "full_visual_LEFT": "A black letter 'CH' on a white background.",
+          "LEFT_SURROUNDINGS": "A grayscale image with a black letter 'CH' on a white background."
+        }
+      ],
+      "parsed": {
+        "label": "nucleoside",
+        "full_visual_LEFT": "A black letter 'CH' on a white background.",
+        "LEFT_SURROUNDINGS": "A grayscale image with a black letter 'CH' on a white background."
+      }
+    },
+    "0050_black_9_mask.png": {
+      "entry": {
+        "color_id": 11,
+        "color_name": "black",
+        "group_index_in_color": 9,
+        "stroke_indexes": [
+          140,
+          142,
+          144,
+          146,
+          147,
+          151,
+          153,
+          154,
+          155
+        ],
+        "bbox_xyxy": [
+          304,
+          934,
+          474,
+          1067
+        ],
+        "crop_file_mask": "black_9_mask.png"
+      },
+      "colour_hint": "black",
+      "bbox_xyxy": [
+        304,
+        934,
+        474,
+        1067
+      ],
+      "bbox_right_panel_xyxy": [
+        82,
+        252,
+        127,
+        287
+      ],
+      "timing_s": 2.7683,
+      "model_raw": "```json\n{\n  \"label\": \"ribose\",\n  \"full_visual_LEFT\": \"A pentagon with a hydroxyl group on the bottom left and a hydrogen atom on the bottom right, with a hydroxyl group on the top left and a hydrogen atom on the top right.\",\n  \"LEFT_SURROUNDINGS\": \"A gray",
+      "json_objects": [],
+      "parsed": null
+    },
+    "0051_black_10_mask.png": {
+      "entry": {
+        "color_id": 11,
+        "color_name": "black",
+        "group_index_in_color": 10,
+        "stroke_indexes": [
+          61,
+          63,
+          66,
+          67,
+          69,
+          75
+        ],
+        "bbox_xyxy": [
+          358,
+          73,
+          479,
+          173
+        ],
+        "crop_file_mask": "black_10_mask.png"
+      },
+      "colour_hint": "black",
+      "bbox_xyxy": [
+        358,
+        73,
+        479,
+        173
+      ],
+      "bbox_right_panel_xyxy": [
+        96,
+        21,
+        129,
+        47
+      ],
+      "timing_s": 2.7683,
+      "model_raw": "```json\n{\n  \"label\": \"base\",\n  \"full_visual_LEFT\": \"A chemical structure of a nitrogenous base, showing a six-membered ring with a nitrogen atom at one position and a carbon-carbon double bond.\",\n  \"LEFT_SURROUNDINGS\": \"A grayscale background with a black border.\"\n}\n```",
+      "json_objects": [
+        {
+          "label": "base",
+          "full_visual_LEFT": "A chemical structure of a nitrogenous base, showing a six-membered ring with a nitrogen atom at one position and a carbon-carbon double bond.",
+          "LEFT_SURROUNDINGS": "A grayscale background with a black border."
+        }
+      ],
+      "parsed": {
+        "label": "base",
+        "full_visual_LEFT": "A chemical structure of a nitrogenous base, showing a six-membered ring with a nitrogen atom at one position and a carbon-carbon double bond.",
+        "LEFT_SURROUNDINGS": "A grayscale background with a black border."
+      }
+    },
+    "0052_black_11_mask.png": {
+      "entry": {
+        "color_id": 11,
+        "color_name": "black",
+        "group_index_in_color": 11,
+        "stroke_indexes": [
+          100,
+          104,
+          108,
+          156
+        ],
+        "bbox_xyxy": [
+          382,
+          513,
+          509,
+          653
+        ],
+        "crop_file_mask": "black_11_mask.png"
+      },
+      "colour_hint": "black",
+      "bbox_xyxy": [
+        382,
+        513,
+        509,
+        653
+      ],
+      "bbox_right_panel_xyxy": [
+        103,
+        139,
+        137,
+        176
+      ],
+      "timing_s": 2.7683,
+      "model_raw": "```json\n{\n  \"label\": \"purine\",\n  \"full_visual_LEFT\": \"A chemical structure of a purine base, featuring a six-membered ring fused to a five-membered ring, with an oxygen atom double-bonded to a carbon and a nitrogen atom double-bonded to a carbon.\",\n  \"LEFT_SURROUND",
+      "json_objects": [],
+      "parsed": null
+    },
+    "0053_black_12_mask.png": {
+      "entry": {
+        "color_id": 11,
+        "color_name": "black",
+        "group_index_in_color": 12,
+        "stroke_indexes": [
+          81,
+          84,
+          88,
+          89,
+          91,
+          94,
+          96,
+          97,
+          98
+        ],
+        "bbox_xyxy": [
+          409,
+          296,
+          640,
+          406
+        ],
+        "crop_file_mask": "black_12_mask.png"
+      },
+      "colour_hint": "black",
+      "bbox_xyxy": [
+        409,
+        296,
+        640,
+        406
+      ],
+      "bbox_right_panel_xyxy": [
+        110,
+        80,
+        172,
+        110
+      ],
+      "timing_s": 2.7683,
+      "model_raw": "```json\n{\n  \"label\": \"purine\",\n  \"full_visual_LEFT\": \"A chemical structure of a purine base, featuring a six-membered ring fused to a five-membered ring, with a nitrogen atom in the six-membered ring and a nitrogen atom in the five-membered ring. The structure includes a hydrogen atom on",
+      "json_objects": [],
+      "parsed": null
+    },
+    "0054_black_13_mask.png": {
+      "entry": {
+        "color_id": 11,
+        "color_name": "black",
+        "group_index_in_color": 13,
+        "stroke_indexes": [
+          77
+        ],
+        "bbox_xyxy": [
+          433,
+          234,
+          463,
+          267
+        ],
+        "crop_file_mask": "black_13_mask.png"
+      },
+      "colour_hint": "black",
+      "bbox_xyxy": [
+        433,
+        234,
+        463,
+        267
+      ],
+      "bbox_right_panel_xyxy": [
+        116,
+        64,
+        124,
+        73
+      ],
+      "timing_s": 2.7683,
+      "model_raw": "```json\n{\n  \"label\": \"nucleoside\",\n  \"full_visual_LEFT\": \"s\",\n  \"LEFT_SURROUNDINGS\": \"a\"\n}\n```",
+      "json_objects": [
+        {
+          "label": "nucleoside",
+          "full_visual_LEFT": "s",
+          "LEFT_SURROUNDINGS": "a"
+        }
+      ],
+      "parsed": {
+        "label": "nucleoside",
+        "full_visual_LEFT": "s",
+        "LEFT_SURROUNDINGS": "a"
+      }
+    },
+    "0055_black_14_mask.png": {
+      "entry": {
+        "color_id": 11,
+        "color_name": "black",
+        "group_index_in_color": 14,
+        "stroke_indexes": [
+          71,
+          72,
+          73,
+          76
+        ],
+        "bbox_xyxy": [
+          504,
+          118,
+          623,
+          177
+        ],
+        "crop_file_mask": "black_14_mask.png"
+      },
+      "colour_hint": "black",
+      "bbox_xyxy": [
+        504,
+        118,
+        623,
+        177
+      ],
+      "bbox_right_panel_xyxy": [
+        135,
+        33,
+        167,
+        48
+      ],
+      "timing_s": 2.7683,
+      "model_raw": "```json\n{\n  \"label\": \"nucleotide\",\n  \"full_visual_LEFT\": \"A chemical structure showing a carbon atom double bonded to an oxygen atom and single bonded to a nitrogen atom, which is double bonded to another oxygen atom.\",\n  \"LEFT_SURROUNDINGS\": \"A grayscale image with a black background.\"\n}\n```",
+      "json_objects": [
+        {
+          "label": "nucleotide",
+          "full_visual_LEFT": "A chemical structure showing a carbon atom double bonded to an oxygen atom and single bonded to a nitrogen atom, which is double bonded to another oxygen atom.",
+          "LEFT_SURROUNDINGS": "A grayscale image with a black background."
+        }
+      ],
+      "parsed": {
+        "label": "nucleotide",
+        "full_visual_LEFT": "A chemical structure showing a carbon atom double bonded to an oxygen atom and single bonded to a nitrogen atom, which is double bonded to another oxygen atom.",
+        "LEFT_SURROUNDINGS": "A grayscale image with a black background."
+      }
+    },
+    "0056_black_15_mask.png": {
+      "entry": {
+        "color_id": 11,
+        "color_name": "black",
+        "group_index_in_color": 15,
+        "stroke_indexes": [
+          82,
+          85
+        ],
+        "bbox_xyxy": [
+          526,
+          302,
+          591,
+          344
+        ],
+        "crop_file_mask": "black_15_mask.png"
+      },
+      "colour_hint": "black",
+      "bbox_xyxy": [
+        526,
+        302,
+        591,
+        344
+      ],
+      "bbox_right_panel_xyxy": [
+        141,
+        82,
+        159,
+        93
+      ],
+      "timing_s": 2.7683,
+      "model_raw": "```json\n{\n  \"label\": \"base\",\n  \"full_visual_LEFT\": \"C=NH\",\n  \"LEFT_SURROUNDINGS\": \"black main object and grayscaled surroundings\"\n}\n```",
+      "json_objects": [
+        {
+          "label": "base",
+          "full_visual_LEFT": "C=NH",
+          "LEFT_SURROUNDINGS": "black main object and grayscaled surroundings"
+        }
+      ],
+      "parsed": {
+        "label": "base",
+        "full_visual_LEFT": "C=NH",
+        "LEFT_SURROUNDINGS": "black main object and grayscaled surroundings"
+      }
+    },
+    "0057_black_16_mask.png": {
+      "entry": {
+        "color_id": 11,
+        "color_name": "black",
+        "group_index_in_color": 16,
+        "stroke_indexes": [
+          62
+        ],
+        "bbox_xyxy": [
+          552,
+          74,
+          590,
+          108
+        ],
+        "crop_file_mask": "black_16_mask.png"
+      },
+      "colour_hint": "black",
+      "bbox_xyxy": [
+        552,
+        74,
+        590,
+        108
+      ],
+      "bbox_right_panel_xyxy": [
+        148,
+        21,
+        158,
+        30
+      ],
+      "timing_s": 3.0535,
+      "model_raw": "```json\n{\n  \"label\": \"nitrogenous\",\n  \"full_visual_LEFT\": \"N-C\",\n  \"LEFT_SURROUNDINGS\": \"grayscaled\"\n}\n```",
+      "json_objects": [
+        {
+          "label": "nitrogenous",
+          "full_visual_LEFT": "N-C",
+          "LEFT_SURROUNDINGS": "grayscaled"
+        }
+      ],
+      "parsed": {
+        "label": "nitrogenous",
+        "full_visual_LEFT": "N-C",
+        "LEFT_SURROUNDINGS": "grayscaled"
+      }
+    },
+    "0058_black_17_mask.png": {
+      "entry": {
+        "color_id": 11,
+        "color_name": "black",
+        "group_index_in_color": 17,
+        "stroke_indexes": [
+          117,
+          118,
+          126
+        ],
+        "bbox_xyxy": [
+          605,
+          694,
+          674,
+          753
+        ],
+        "crop_file_mask": "black_17_mask.png"
+      },
+      "colour_hint": "black",
+      "bbox_xyxy": [
+        605,
+        694,
+        674,
+        753
+      ],
+      "bbox_right_panel_xyxy": [
+        162,
+        187,
+        181,
+        203
+      ],
+      "timing_s": 3.0535,
+      "model_raw": "```json\n{\n  \"label\": \"phosphate\",\n  \"full_visual_LEFT\": \"A black and white image showing a chemical structure with a phosphate group, represented by a phosphorus atom bonded to two oxygen atoms, with a single oxygen atom attached to a carbon atom.\",\n  \"LEFT_SURROUNDINGS\": \"A grayscale background with a black",
+      "json_objects": [],
+      "parsed": null
+    },
+    "0059_black_18_mask.png": {
+      "entry": {
+        "color_id": 11,
+        "color_name": "black",
+        "group_index_in_color": 18,
+        "stroke_indexes": [
+          119
+        ],
+        "bbox_xyxy": [
+          678,
+          702,
+          728,
+          728
+        ],
+        "crop_file_mask": "black_18_mask.png"
+      },
+      "colour_hint": "black",
+      "bbox_xyxy": [
+        678,
+        702,
+        728,
+        728
+      ],
+      "bbox_right_panel_xyxy": [
+        182,
+        189,
+        195,
+        196
+      ],
+      "timing_s": 3.0535,
+      "model_raw": "```json\n{\n  \"label\": \"nucleotide\",\n  \"full_visual_LEFT\": \"A black line with a red dot on the right side of the line, with a white background.\",\n  \"LEFT_SURROUNDINGS\": \"A black and white image with a red dot on the right side of the line, with a white background.\"\n",
+      "json_objects": [],
+      "parsed": null
+    },
+    "0060_black_19_mask.png": {
+      "entry": {
+        "color_id": 11,
+        "color_name": "black",
+        "group_index_in_color": 19,
+        "stroke_indexes": [
+          116
+        ],
+        "bbox_xyxy": [
+          723,
+          695,
+          771,
+          731
+        ],
+        "crop_file_mask": "black_19_mask.png"
+      },
+      "colour_hint": "black",
+      "bbox_xyxy": [
+        723,
+        695,
+        771,
+        731
+      ],
+      "bbox_right_panel_xyxy": [
+        194,
+        187,
+        207,
+        197
+      ],
+      "timing_s": 3.0535,
+      "model_raw": "```json\n{\n  \"label\": \"nucleotide\",\n  \"full_visual_LEFT\": \"-CH₂\",\n  \"LEFT_SURROUNDINGS\": \"a black box with a grayscale background\"\n}\n```",
+      "json_objects": [
+        {
+          "label": "nucleotide",
+          "full_visual_LEFT": "-CH₂",
+          "LEFT_SURROUNDINGS": "a black box with a grayscale background"
+        }
+      ],
+      "parsed": {
+        "label": "nucleotide",
+        "full_visual_LEFT": "-CH₂",
+        "LEFT_SURROUNDINGS": "a black box with a grayscale background"
+      }
+    },
+    "0061_black_20_mask.png": {
+      "entry": {
+        "color_id": 11,
+        "color_name": "black",
+        "group_index_in_color": 20,
+        "stroke_indexes": [
+          135
+        ],
+        "bbox_xyxy": [
+          765,
+          782,
+          797,
+          837
+        ],
+        "crop_file_mask": "black_20_mask.png"
+      },
+      "colour_hint": "black",
+      "bbox_xyxy": [
+        765,
+        782,
+        797,
+        837
+      ],
+      "bbox_right_panel_xyxy": [
+        205,
+        211,
+        214,
+        226
+      ],
+      "timing_s": 3.0535,
+      "model_raw": "```json\n{\n  \"label\": \"nucleotide\",\n  \"full_visual_LEFT\": \"A black and white image showing a box with a yellowish object inside, and a red dot at the bottom.\",\n  \"LEFT_SURROUNDINGS\": \"A grayed-out background with a black vertical line and a black horizontal line forming a box-like",
+      "json_objects": [],
+      "parsed": null
+    },
+    "0062_black_21_mask.png": {
+      "entry": {
+        "color_id": 11,
+        "color_name": "black",
+        "group_index_in_color": 21,
+        "stroke_indexes": [
+          113,
+          123,
+          129,
+          130,
+          132,
+          133,
+          134,
+          137
+        ],
+        "bbox_xyxy": [
+          792,
+          634,
+          927,
+          837
+        ],
+        "crop_file_mask": "black_21_mask.png"
+      },
+      "colour_hint": "black",
+      "bbox_xyxy": [
+        792,
+        634,
+        927,
+        837
+      ],
+      "bbox_right_panel_xyxy": [
+        213,
+        171,
+        249,
+        226
+      ],
+      "timing_s": 3.0535,
+      "model_raw": "```json\n{\n  \"label\": \"sugar\",\n  \"full_visual_LEFT\": \"A black and white diagram showing a pentagon with a circle at the top and a black line extending from the bottom right corner. The pentagon is outlined in black and has a yellow inner border. The circle is labeled 'O' and is positioned at",
+      "json_objects": [],
+      "parsed": null
+    },
+    "0063_black_22_mask.png": {
+      "entry": {
+        "color_id": 11,
+        "color_name": "black",
+        "group_index_in_color": 22,
+        "stroke_indexes": [
+          101,
+          102,
+          105,
+          107,
+          109,
+          111,
+          157
+        ],
+        "bbox_xyxy": [
+          910,
+          515,
+          1064,
+          663
+        ],
+        "crop_file_mask": "black_22_mask.png"
+      },
+      "colour_hint": "black",
+      "bbox_xyxy": [
+        910,
+        515,
+        1064,
+        663
+      ],
+      "bbox_right_panel_xyxy": [
+        244,
+        139,
+        286,
+        179
+      ],
+      "timing_s": 3.0535,
+      "model_raw": "```json\n{\n  \"label\": \"purine\",\n  \"full_visual_LEFT\": \"A yellowish-orange, six-membered ring with a double bond and a carbonyl group at the top, featuring two nitrogen atoms at the top and bottom of the ring, with a nitrogen atom on the left side and a carbon atom on the right",
+      "json_objects": [],
+      "parsed": null
+    }
+  },
+  "cluster_order": [
+    "0001_orange_0_mask.png",
+    "0002_orange_1_mask.png",
+    "0003_orange_2_mask.png",
+    "0004_orange_3_mask.png",
+    "0005_orange_4_mask.png",
+    "0006_cyan_0_mask.png",
+    "0007_green_0_mask.png",
+    "0008_green_1_mask.png",
+    "0009_red_0_mask.png",
+    "0010_red_1_mask.png",
+    "0011_red_2_mask.png",
+    "0012_red_3_mask.png",
+    "0013_red_4_mask.png",
+    "0014_red_5_mask.png",
+    "0015_blue_0_mask.png",
+    "0016_blue_1_mask.png",
+    "0017_gray_0_mask.png",
+    "0018_gray_1_mask.png",
+    "0019_gray_2_mask.png",
+    "0020_gray_3_mask.png",
+    "0021_gray_4_mask.png",
+    "0022_gray_5_mask.png",
+    "0023_gray_6_mask.png",
+    "0024_gray_7_mask.png",
+    "0025_gray_8_mask.png",
+    "0026_gray_9_mask.png",
+    "0027_gray_10_mask.png",
+    "0028_gray_11_mask.png",
+    "0029_gray_12_mask.png",
+    "0030_gray_13_mask.png",
+    "0031_gray_14_mask.png",
+    "0032_gray_15_mask.png",
+    "0033_gray_16_mask.png",
+    "0034_gray_17_mask.png",
+    "0035_gray_18_mask.png",
+    "0036_gray_19_mask.png",
+    "0037_gray_20_mask.png",
+    "0038_gray_21_mask.png",
+    "0039_gray_22_mask.png",
+    "0040_gray_23_mask.png",
+    "0041_black_0_mask.png",
+    "0042_black_1_mask.png",
+    "0043_black_2_mask.png",
+    "0044_black_3_mask.png",
+    "0045_black_4_mask.png",
+    "0046_black_5_mask.png",
+    "0047_black_6_mask.png",
+    "0048_black_7_mask.png",
+    "0049_black_8_mask.png",
+    "0050_black_9_mask.png",
+    "0051_black_10_mask.png",
+    "0052_black_11_mask.png",
+    "0053_black_12_mask.png",
+    "0054_black_13_mask.png",
+    "0055_black_14_mask.png",
+    "0056_black_15_mask.png",
+    "0057_black_16_mask.png",
+    "0058_black_17_mask.png",
+    "0059_black_18_mask.png",
+    "0060_black_19_mask.png",
+    "0061_black_20_mask.png",
+    "0062_black_21_mask.png",
+    "0063_black_22_mask.png"
+  ]
+}

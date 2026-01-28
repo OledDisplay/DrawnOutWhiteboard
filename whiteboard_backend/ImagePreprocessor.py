@@ -86,6 +86,8 @@ COLOR_V_WHITE   = 235
 COLOR_V_MIN_CLR = 35
 
 
+
+
 def _resolve_merge_params():
     if MERGE_LEVEL == "light":
         return dict(half_width=2.0, bridge_iters=1, clean_area=6,
@@ -160,7 +162,7 @@ def _apply_mask_to_white(img_bgr: np.ndarray, mask_bool: np.ndarray) -> np.ndarr
 
 
 # =========================================================
-# PREPROCESS (NO OCR)
+# PREPROCESS
 # =========================================================
 def preprocess(img_bgr):
     h, w = img_bgr.shape[:2]
@@ -522,7 +524,7 @@ def fill_between_outlines_tilewise(
 
 
 # =========================================================
-# SMALL HOLE (uses float half_width)
+# SMALL HOLE
 # =========================================================
 def small_hole_fill_near_edges(E: np.ndarray, half_width: float) -> np.ndarray:
     if half_width <= 0.0:
@@ -685,56 +687,90 @@ def process_one(path: Path):
         print(f"[ERR] crashed on {path}:\n{traceback.format_exc()}")
 
 
-# ===== PARALLEL WRAPPER =====
-def _worker_process_one(p_str: str):
-    # Prevent OpenCV from spawning its own thread pool inside each process.
-    # If you don't do this you get N processes * M threads oversubscription.
-    try:
-        cv2.setNumThreads(0)
-    except Exception:
-        pass
 
-    p = Path(p_str)
-    try:
-        process_one(p)
-        return (p.name, None)
-    except Exception as e:
-        return (p.name, str(e))
+def process_images_in_memory(
+    text_items: list[dict],
+    *,
+    save_outputs: bool = False,
+    parallel: bool = False,
+) -> dict[int, dict]:
+    """
+    text_items from ImageText.process_images_in_memory()
+    returns:
+      { idx: {
+          "idx": idx,
+          "cleaned_bgr": np.ndarray,
+          "passes": { gname: {"pass_img": np.ndarray, "edges": np.ndarray, "gray": np.ndarray|None } }
+        }
+      }
+    """
 
+    if parallel:
+        try:
+            cv2.setNumThreads(1)
+        except Exception:
+            pass
+    out: dict[int, dict] = {}
 
-def proccess_images(indir: Path):
-    print(f"[INFO] IN_DIR={indir}")
-    print(f"[INFO] OUT_DIR={OUT_DIR}")
+    def _one(item: dict) -> tuple[int, dict]:
+        idx = int(item["idx"])
+        img0 = item["masked_bgr"]
 
-    OUT_DIR.mkdir(parents=True, exist_ok=True)
+        cleaned = preprocess(img0)
+        pass_dir = OUT_DIR / f"processed_{idx}"
+        if save_outputs:
+            pass_dir.mkdir(parents=True, exist_ok=True)
 
-    imgs = sorted(
-        [
-            p for p in indir.glob("*")
-            if p.is_file()
-            and p.suffix.lower() in (".png", ".jpg", ".jpeg", ".bmp", ".tif", ".tiff", ".webp")
-            and not p.name.lower().startswith("edges_")
-            and not p.name.lower().startswith("gray_")
-        ],
-        key=lambda p: p.name.lower(),
-    )
+        params = _resolve_merge_params()
 
-    print(f"[INFO] found {len(imgs)} image(s).")
-    if not imgs:
-        print(f"[!] No images found in {indir}. Exiting.")
-        return
+        color_masks = _basic11_color_masks(cleaned)
+        if len(color_masks) != COLOR_GROUP_PASSES:
+            color_masks = color_masks[:COLOR_GROUP_PASSES]
 
-    # -------- PARALLEL PER IMAGE --------
-    from concurrent.futures import ProcessPoolExecutor
-    cpu = os.cpu_count() or 2
-    max_workers = max(1, cpu - 1)
+        passes: dict[str, dict] = {}
 
-    # NOTE: prints will interleave across processes; that's normal.
-    with ProcessPoolExecutor(max_workers=max_workers) as ex:
-        for name, err in ex.map(_worker_process_one, (str(p) for p in imgs)):
-            if err:
-                print(f"[fail] {name}: {err}")
+        for gname, gmask in color_masks:
+            pass_img = _apply_mask_to_white(cleaned, gmask)
 
+            edges, gray_used = edge_canny_fine(pass_img)
+            edges = prune_small_dots(edges, area_max=30, circ_min=0.6, skel_len_min=10, use_skeleton=False)
 
-if __name__ == "__main__":
-    proccess_images(IN_DIR)
+            edges = fill_outlines_pipeline(
+                edges,
+                half_width=float(params["half_width"]),
+                bridge_iters=params["bridge_iters"],
+                clean_area=params["clean_area"],
+                do_distance_gate=params["do_distance_gate"],
+                orientations=params["orientations"],
+            )
+
+            passes[str(gname)] = {"pass_img": pass_img, "edges": edges, "gray": gray_used}
+
+            if save_outputs:
+                out_img_pass = pass_dir / f"processed_{idx}_{gname}.png"
+                out_edges_pass = pass_dir / f"edges_{idx}_{gname}.png"
+                cv2.imwrite(str(out_img_pass), pass_img)
+                cv2.imwrite(str(out_edges_pass), edges)
+                if SAVE_DEBUG_GRAY and gray_used is not None:
+                    cv2.imwrite(str(pass_dir / f"gray_{idx}_{gname}.png"), gray_used)
+
+        if save_outputs:
+            OUT_DIR.mkdir(parents=True, exist_ok=True)
+            out_img = OUT_DIR / f"processed_{idx}.png"
+            cv2.imwrite(str(out_img), cleaned)
+
+        return idx, {"idx": idx, "cleaned_bgr": cleaned, "passes": passes}
+
+    if parallel:
+        from concurrent.futures import ThreadPoolExecutor, as_completed
+        with ThreadPoolExecutor(max_workers=max(1, (os.cpu_count() or 2) - 1)) as ex:
+            futs = [ex.submit(_one, it) for it in text_items]
+            for f in as_completed(futs):
+                idx, payload = f.result()
+                out[idx] = payload
+    else:
+        for it in text_items:
+            idx, payload = _one(it)
+            out[idx] = payload
+
+    return out

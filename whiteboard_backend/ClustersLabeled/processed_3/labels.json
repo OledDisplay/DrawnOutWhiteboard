@@ -1,0 +1,1459 @@
+{
+  "image_index": 3,
+  "candidate_labels_raw": [
+    "Il",
+    "Polymerase",
+    "Transcription",
+    "startsite",
+    "Promoter",
+    "TATAAA",
+    "RNA",
+    "TFIIB",
+    "TFIIH",
+    "TFIID",
+    "TFIIA",
+    "TFIIE",
+    "TFIIF",
+    "TBP",
+    "-30",
+    "+1"
+  ],
+  "candidate_labels_refined": [
+    "DNA",
+    "RNA",
+    "promoter",
+    "transcription",
+    "polymerase",
+    "start site",
+    "TATAAA",
+    "TFIID",
+    "TFIIA",
+    "TFIIE",
+    "TFIIF",
+    "TBP"
+  ],
+  "base_context": "",
+  "model_id": "Qwen/Qwen3-VL-2B-Instruct",
+  "proc_longest_edge": 600,
+  "panel_edge": 300,
+  "batch_size": 8,
+  "clusters": {
+    "0001_cyan_0_mask.png": {
+      "entry": {
+        "color_id": 4,
+        "color_name": "cyan",
+        "group_index_in_color": 0,
+        "stroke_indexes": [
+          0,
+          1,
+          2,
+          3
+        ],
+        "bbox_xyxy": [
+          336,
+          731,
+          481,
+          851
+        ],
+        "crop_file_mask": "cyan_0_mask.png"
+      },
+      "colour_hint": "cyan",
+      "bbox_xyxy": [
+        336,
+        731,
+        481,
+        851
+      ],
+      "bbox_right_panel_xyxy": [
+        144,
+        233,
+        190,
+        271
+      ],
+      "timing_s": 2.211,
+      "model_raw": "```json\n{\n  \"label\": \"RNA\",\n  \"full_visual_LEFT\": \"A cropped box with a colored cyan main object and grayscaled surroundings.\",\n  \"LEFT_SURROUNDINGS\": \"Grayscaled surroundings with a blue oval shape and white rectangular elements.\"\n}\n```",
+      "json_objects": [
+        {
+          "label": "RNA",
+          "full_visual_LEFT": "A cropped box with a colored cyan main object and grayscaled surroundings.",
+          "LEFT_SURROUNDINGS": "Grayscaled surroundings with a blue oval shape and white rectangular elements."
+        }
+      ],
+      "parsed": {
+        "label": "RNA",
+        "full_visual_LEFT": "A cropped box with a colored cyan main object and grayscaled surroundings.",
+        "LEFT_SURROUNDINGS": "Grayscaled surroundings with a blue oval shape and white rectangular elements."
+      }
+    },
+    "0002_green_0_mask.png": {
+      "entry": {
+        "color_id": 5,
+        "color_name": "green",
+        "group_index_in_color": 0,
+        "stroke_indexes": [
+          14
+        ],
+        "bbox_xyxy": [
+          92,
+          788,
+          158,
+          849
+        ],
+        "crop_file_mask": "green_0_mask.png"
+      },
+      "colour_hint": "green",
+      "bbox_xyxy": [
+        92,
+        788,
+        158,
+        849
+      ],
+      "bbox_right_panel_xyxy": [
+        66,
+        251,
+        87,
+        271
+      ],
+      "timing_s": 2.211,
+      "model_raw": "```json\n{\n  \"label\": \"transcription\",\n  \"full_visual_LEFT\": \"A green square object in the foreground of a blurred image.\",\n  \"LEFT_SURROUNDINGS\": \"A gray background with a blurred, out-of-focus appearance.\"\n}\n```",
+      "json_objects": [
+        {
+          "label": "transcription",
+          "full_visual_LEFT": "A green square object in the foreground of a blurred image.",
+          "LEFT_SURROUNDINGS": "A gray background with a blurred, out-of-focus appearance."
+        }
+      ],
+      "parsed": {
+        "label": "transcription",
+        "full_visual_LEFT": "A green square object in the foreground of a blurred image.",
+        "LEFT_SURROUNDINGS": "A gray background with a blurred, out-of-focus appearance."
+      }
+    },
+    "0003_green_1_mask.png": {
+      "entry": {
+        "color_id": 5,
+        "color_name": "green",
+        "group_index_in_color": 1,
+        "stroke_indexes": [
+          17
+        ],
+        "bbox_xyxy": [
+          94,
+          64,
+          157,
+          126
+        ],
+        "crop_file_mask": "green_1_mask.png"
+      },
+      "colour_hint": "green",
+      "bbox_xyxy": [
+        94,
+        64,
+        157,
+        126
+      ],
+      "bbox_right_panel_xyxy": [
+        67,
+        20,
+        87,
+        40
+      ],
+      "timing_s": 2.211,
+      "model_raw": "```json\n{\n  \"label\": \"DNA\",\n  \"full_visual_LEFT\": \"A green rectangular object with a blurred background.\",\n  \"LEFT_SURROUNDINGS\": \"A gray background with a blurred green object.\"\n}\n```",
+      "json_objects": [
+        {
+          "label": "DNA",
+          "full_visual_LEFT": "A green rectangular object with a blurred background.",
+          "LEFT_SURROUNDINGS": "A gray background with a blurred green object."
+        }
+      ],
+      "parsed": {
+        "label": "DNA",
+        "full_visual_LEFT": "A green rectangular object with a blurred background.",
+        "LEFT_SURROUNDINGS": "A gray background with a blurred green object."
+      }
+    },
+    "0004_green_2_mask.png": {
+      "entry": {
+        "color_id": 5,
+        "color_name": "green",
+        "group_index_in_color": 2,
+        "stroke_indexes": [
+          19
+        ],
+        "bbox_xyxy": [
+          94,
+          273,
+          158,
+          334
+        ],
+        "crop_file_mask": "green_2_mask.png"
+      },
+      "colour_hint": "green",
+      "bbox_xyxy": [
+        94,
+        273,
+        158,
+        334
+      ],
+      "bbox_right_panel_xyxy": [
+        67,
+        87,
+        87,
+        106
+      ],
+      "timing_s": 2.211,
+      "model_raw": "```json\n{\n  \"label\": \"transcription\",\n  \"full_visual_LEFT\": \"A green square with a blurred background.\",\n  \"LEFT_SURROUNDINGS\": \"A gray background with a blurred green square.\"\n}\n```",
+      "json_objects": [
+        {
+          "label": "transcription",
+          "full_visual_LEFT": "A green square with a blurred background.",
+          "LEFT_SURROUNDINGS": "A gray background with a blurred green square."
+        }
+      ],
+      "parsed": {
+        "label": "transcription",
+        "full_visual_LEFT": "A green square with a blurred background.",
+        "LEFT_SURROUNDINGS": "A gray background with a blurred green square."
+      }
+    },
+    "0005_green_3_mask.png": {
+      "entry": {
+        "color_id": 5,
+        "color_name": "green",
+        "group_index_in_color": 3,
+        "stroke_indexes": [
+          21
+        ],
+        "bbox_xyxy": [
+          94,
+          489,
+          158,
+          550
+        ],
+        "crop_file_mask": "green_3_mask.png"
+      },
+      "colour_hint": "green",
+      "bbox_xyxy": [
+        94,
+        489,
+        158,
+        550
+      ],
+      "bbox_right_panel_xyxy": [
+        67,
+        156,
+        87,
+        175
+      ],
+      "timing_s": 2.211,
+      "model_raw": "```json\n{\n  \"label\": \"DNA\",\n  \"full_visual_LEFT\": \"A green rectangular object with a blue border, set against a gray background.\",\n  \"LEFT_SURROUNDINGS\": \"A gray background with a blurred, lighter gray area on the right side.\"\n}\n```",
+      "json_objects": [
+        {
+          "label": "DNA",
+          "full_visual_LEFT": "A green rectangular object with a blue border, set against a gray background.",
+          "LEFT_SURROUNDINGS": "A gray background with a blurred, lighter gray area on the right side."
+        }
+      ],
+      "parsed": {
+        "label": "DNA",
+        "full_visual_LEFT": "A green rectangular object with a blue border, set against a gray background.",
+        "LEFT_SURROUNDINGS": "A gray background with a blurred, lighter gray area on the right side."
+      }
+    },
+    "0006_green_4_mask.png": {
+      "entry": {
+        "color_id": 5,
+        "color_name": "green",
+        "group_index_in_color": 4,
+        "stroke_indexes": [
+          18
+        ],
+        "bbox_xyxy": [
+          224,
+          64,
+          282,
+          126
+        ],
+        "crop_file_mask": "green_4_mask.png"
+      },
+      "colour_hint": "green",
+      "bbox_xyxy": [
+        224,
+        64,
+        282,
+        126
+      ],
+      "bbox_right_panel_xyxy": [
+        108,
+        20,
+        127,
+        40
+      ],
+      "timing_s": 2.211,
+      "model_raw": "```json\n{\n  \"label\": \"DNA\",\n  \"full_visual_LEFT\": \"A green rectangular object with a blurred background.\",\n  \"LEFT_SURROUNDINGS\": \"A gray background with a blurred green rectangle in the center.\"\n}\n```",
+      "json_objects": [
+        {
+          "label": "DNA",
+          "full_visual_LEFT": "A green rectangular object with a blurred background.",
+          "LEFT_SURROUNDINGS": "A gray background with a blurred green rectangle in the center."
+        }
+      ],
+      "parsed": {
+        "label": "DNA",
+        "full_visual_LEFT": "A green rectangular object with a blurred background.",
+        "LEFT_SURROUNDINGS": "A gray background with a blurred green rectangle in the center."
+      }
+    },
+    "0007_green_5_mask.png": {
+      "entry": {
+        "color_id": 5,
+        "color_name": "green",
+        "group_index_in_color": 5,
+        "stroke_indexes": [
+          20
+        ],
+        "bbox_xyxy": [
+          224,
+          273,
+          282,
+          334
+        ],
+        "crop_file_mask": "green_5_mask.png"
+      },
+      "colour_hint": "green",
+      "bbox_xyxy": [
+        224,
+        273,
+        282,
+        334
+      ],
+      "bbox_right_panel_xyxy": [
+        108,
+        87,
+        127,
+        106
+      ],
+      "timing_s": 2.211,
+      "model_raw": "```json\n{\n  \"label\": \"RNA\",\n  \"full_visual_LEFT\": \"A green rectangular object with a blurred background.\",\n  \"LEFT_SURROUNDINGS\": \"A grayed-out background with a red and orange border on the left side of the green object.\"\n}\n```",
+      "json_objects": [
+        {
+          "label": "RNA",
+          "full_visual_LEFT": "A green rectangular object with a blurred background.",
+          "LEFT_SURROUNDINGS": "A grayed-out background with a red and orange border on the left side of the green object."
+        }
+      ],
+      "parsed": {
+        "label": "RNA",
+        "full_visual_LEFT": "A green rectangular object with a blurred background.",
+        "LEFT_SURROUNDINGS": "A grayed-out background with a red and orange border on the left side of the green object."
+      }
+    },
+    "0008_green_6_mask.png": {
+      "entry": {
+        "color_id": 5,
+        "color_name": "green",
+        "group_index_in_color": 6,
+        "stroke_indexes": [
+          9
+        ],
+        "bbox_xyxy": [
+          225,
+          489,
+          266,
+          550
+        ],
+        "crop_file_mask": "green_6_mask.png"
+      },
+      "colour_hint": "green",
+      "bbox_xyxy": [
+        225,
+        489,
+        266,
+        550
+      ],
+      "bbox_right_panel_xyxy": [
+        109,
+        156,
+        122,
+        175
+      ],
+      "timing_s": 2.211,
+      "model_raw": "```json\n{\n  \"label\": \"transcription\",\n  \"full_visual_LEFT\": \"A green object with a red edge, set against a gray background.\",\n  \"LEFT_SURROUNDINGS\": \"A gray background with a red edge on the left side.\"\n}\n```",
+      "json_objects": [
+        {
+          "label": "transcription",
+          "full_visual_LEFT": "A green object with a red edge, set against a gray background.",
+          "LEFT_SURROUNDINGS": "A gray background with a red edge on the left side."
+        }
+      ],
+      "parsed": {
+        "label": "transcription",
+        "full_visual_LEFT": "A green object with a red edge, set against a gray background.",
+        "LEFT_SURROUNDINGS": "A gray background with a red edge on the left side."
+      }
+    },
+    "0009_green_7_mask.png": {
+      "entry": {
+        "color_id": 5,
+        "color_name": "green",
+        "group_index_in_color": 7,
+        "stroke_indexes": [
+          16
+        ],
+        "bbox_xyxy": [
+          393,
+          806,
+          499,
+          869
+        ],
+        "crop_file_mask": "green_7_mask.png"
+      },
+      "colour_hint": "green",
+      "bbox_xyxy": [
+        393,
+        806,
+        499,
+        869
+      ],
+      "bbox_right_panel_xyxy": [
+        162,
+        257,
+        196,
+        277
+      ],
+      "timing_s": 2.521,
+      "model_raw": "```json\n{\n  \"label\": \"DNA\",\n  \"full_visual_LEFT\": \"A green oval with a white rectangle inside, set against a gray background.\",\n  \"LEFT_SURROUNDINGS\": \"A gray background with a white rectangle in the center, and a green oval surrounding it.\"\n}\n```",
+      "json_objects": [
+        {
+          "label": "DNA",
+          "full_visual_LEFT": "A green oval with a white rectangle inside, set against a gray background.",
+          "LEFT_SURROUNDINGS": "A gray background with a white rectangle in the center, and a green oval surrounding it."
+        }
+      ],
+      "parsed": {
+        "label": "DNA",
+        "full_visual_LEFT": "A green oval with a white rectangle inside, set against a gray background.",
+        "LEFT_SURROUNDINGS": "A gray background with a white rectangle in the center, and a green oval surrounding it."
+      }
+    },
+    "0010_green_8_mask.png": {
+      "entry": {
+        "color_id": 5,
+        "color_name": "green",
+        "group_index_in_color": 8,
+        "stroke_indexes": [
+          7,
+          8
+        ],
+        "bbox_xyxy": [
+          405,
+          292,
+          499,
+          350
+        ],
+        "crop_file_mask": "green_8_mask.png"
+      },
+      "colour_hint": "green",
+      "bbox_xyxy": [
+        405,
+        292,
+        499,
+        350
+      ],
+      "bbox_right_panel_xyxy": [
+        166,
+        93,
+        196,
+        112
+      ],
+      "timing_s": 2.521,
+      "model_raw": "```json\n{\n  \"label\": \"transcription\",\n  \"full_visual_LEFT\": \"A cropped image showing a green oval-shaped object with a white rectangular center, set against a gray background.\",\n  \"LEFT_SURROUNDINGS\": \"A gray background with a white rectangular area, and a green oval-shaped object with a white rectangular center.\"\n}\n",
+      "json_objects": [
+        {
+          "label": "transcription",
+          "full_visual_LEFT": "A cropped image showing a green oval-shaped object with a white rectangular center, set against a gray background.",
+          "LEFT_SURROUNDINGS": "A gray background with a white rectangular area, and a green oval-shaped object with a white rectangular center."
+        }
+      ],
+      "parsed": {
+        "label": "transcription",
+        "full_visual_LEFT": "A cropped image showing a green oval-shaped object with a white rectangular center, set against a gray background.",
+        "LEFT_SURROUNDINGS": "A gray background with a white rectangular area, and a green oval-shaped object with a white rectangular center."
+      }
+    },
+    "0011_green_9_mask.png": {
+      "entry": {
+        "color_id": 5,
+        "color_name": "green",
+        "group_index_in_color": 9,
+        "stroke_indexes": [
+          11
+        ],
+        "bbox_xyxy": [
+          407,
+          507,
+          499,
+          570
+        ],
+        "crop_file_mask": "green_9_mask.png"
+      },
+      "colour_hint": "green",
+      "bbox_xyxy": [
+        407,
+        507,
+        499,
+        570
+      ],
+      "bbox_right_panel_xyxy": [
+        167,
+        162,
+        196,
+        182
+      ],
+      "timing_s": 2.521,
+      "model_raw": "```json\n{\n  \"label\": \"promoter\",\n  \"full_visual_LEFT\": \"A cropped box with a green main object and grayscaled surroundings.\",\n  \"LEFT_SURROUNDINGS\": \"A grayed-out background with a white rectangle in the center, surrounded by a blurred green and blue shape.\"\n}\n```",
+      "json_objects": [
+        {
+          "label": "promoter",
+          "full_visual_LEFT": "A cropped box with a green main object and grayscaled surroundings.",
+          "LEFT_SURROUNDINGS": "A grayed-out background with a white rectangle in the center, surrounded by a blurred green and blue shape."
+        }
+      ],
+      "parsed": {
+        "label": "promoter",
+        "full_visual_LEFT": "A cropped box with a green main object and grayscaled surroundings.",
+        "LEFT_SURROUNDINGS": "A grayed-out background with a white rectangle in the center, surrounded by a blurred green and blue shape."
+      }
+    },
+    "0012_green_10_mask.png": {
+      "entry": {
+        "color_id": 5,
+        "color_name": "green",
+        "group_index_in_color": 10,
+        "stroke_indexes": [
+          4,
+          5
+        ],
+        "bbox_xyxy": [
+          549,
+          59,
+          707,
+          131
+        ],
+        "crop_file_mask": "green_10_mask.png"
+      },
+      "colour_hint": "green",
+      "bbox_xyxy": [
+        549,
+        59,
+        707,
+        131
+      ],
+      "bbox_right_panel_xyxy": [
+        212,
+        19,
+        262,
+        42
+      ],
+      "timing_s": 2.521,
+      "model_raw": "```json\n{\n  \"label\": \"DNA\",\n  \"full_visual_LEFT\": \"A green, elongated object with a black arrow pointing from left to right, indicating a process of movement or transformation.\",\n  \"LEFT_SURROUNDINGS\": \"A black background with a white border on the left side of the image.\"\n}\n```",
+      "json_objects": [
+        {
+          "label": "DNA",
+          "full_visual_LEFT": "A green, elongated object with a black arrow pointing from left to right, indicating a process of movement or transformation.",
+          "LEFT_SURROUNDINGS": "A black background with a white border on the left side of the image."
+        }
+      ],
+      "parsed": {
+        "label": "DNA",
+        "full_visual_LEFT": "A green, elongated object with a black arrow pointing from left to right, indicating a process of movement or transformation.",
+        "LEFT_SURROUNDINGS": "A black background with a white border on the left side of the image."
+      }
+    },
+    "0013_green_11_mask.png": {
+      "entry": {
+        "color_id": 5,
+        "color_name": "green",
+        "group_index_in_color": 11,
+        "stroke_indexes": [
+          10,
+          12
+        ],
+        "bbox_xyxy": [
+          549,
+          484,
+          707,
+          555
+        ],
+        "crop_file_mask": "green_11_mask.png"
+      },
+      "colour_hint": "green",
+      "bbox_xyxy": [
+        549,
+        484,
+        707,
+        555
+      ],
+      "bbox_right_panel_xyxy": [
+        212,
+        154,
+        262,
+        177
+      ],
+      "timing_s": 2.521,
+      "model_raw": "```json\n{\n  \"label\": \"transcription\",\n  \"full_visual_LEFT\": \"A green bar with a black arrow pointing to the right, indicating a process of movement or transformation.\",\n  \"LEFT_SURROUNDINGS\": \"A grayscale background with a black border on the left side.\"\n}\n```",
+      "json_objects": [
+        {
+          "label": "transcription",
+          "full_visual_LEFT": "A green bar with a black arrow pointing to the right, indicating a process of movement or transformation.",
+          "LEFT_SURROUNDINGS": "A grayscale background with a black border on the left side."
+        }
+      ],
+      "parsed": {
+        "label": "transcription",
+        "full_visual_LEFT": "A green bar with a black arrow pointing to the right, indicating a process of movement or transformation.",
+        "LEFT_SURROUNDINGS": "A grayscale background with a black border on the left side."
+      }
+    },
+    "0014_green_12_mask.png": {
+      "entry": {
+        "color_id": 5,
+        "color_name": "green",
+        "group_index_in_color": 12,
+        "stroke_indexes": [
+          6
+        ],
+        "bbox_xyxy": [
+          550,
+          268,
+          707,
+          339
+        ],
+        "crop_file_mask": "green_12_mask.png"
+      },
+      "colour_hint": "green",
+      "bbox_xyxy": [
+        550,
+        268,
+        707,
+        339
+      ],
+      "bbox_right_panel_xyxy": [
+        212,
+        85,
+        262,
+        108
+      ],
+      "timing_s": 2.521,
+      "model_raw": "```json\n{\n  \"label\": \"transcription\",\n  \"full_visual_LEFT\": \"A green, elongated object with a black arrow pointing to the right, indicating a process of movement or transformation.\",\n  \"LEFT_SURROUNDINGS\": \"A grayscale background with a black border on the left side.\"\n}\n```",
+      "json_objects": [
+        {
+          "label": "transcription",
+          "full_visual_LEFT": "A green, elongated object with a black arrow pointing to the right, indicating a process of movement or transformation.",
+          "LEFT_SURROUNDINGS": "A grayscale background with a black border on the left side."
+        }
+      ],
+      "parsed": {
+        "label": "transcription",
+        "full_visual_LEFT": "A green, elongated object with a black arrow pointing to the right, indicating a process of movement or transformation.",
+        "LEFT_SURROUNDINGS": "A grayscale background with a black border on the left side."
+      }
+    },
+    "0015_green_13_mask.png": {
+      "entry": {
+        "color_id": 5,
+        "color_name": "green",
+        "group_index_in_color": 13,
+        "stroke_indexes": [
+          13,
+          15
+        ],
+        "bbox_xyxy": [
+          550,
+          783,
+          707,
+          853
+        ],
+        "crop_file_mask": "green_13_mask.png"
+      },
+      "colour_hint": "green",
+      "bbox_xyxy": [
+        550,
+        783,
+        707,
+        853
+      ],
+      "bbox_right_panel_xyxy": [
+        212,
+        250,
+        262,
+        272
+      ],
+      "timing_s": 2.521,
+      "model_raw": "```json\n{\n  \"label\": \"transcription\",\n  \"full_visual_LEFT\": \"A green cylindrical object with a black arrow pointing to the right, indicating movement or process.\",\n  \"LEFT_SURROUNDINGS\": \"A grayscale background with a white rectangular shape on the left side.\"\n}\n```",
+      "json_objects": [
+        {
+          "label": "transcription",
+          "full_visual_LEFT": "A green cylindrical object with a black arrow pointing to the right, indicating movement or process.",
+          "LEFT_SURROUNDINGS": "A grayscale background with a white rectangular shape on the left side."
+        }
+      ],
+      "parsed": {
+        "label": "transcription",
+        "full_visual_LEFT": "A green cylindrical object with a black arrow pointing to the right, indicating movement or process.",
+        "LEFT_SURROUNDINGS": "A grayscale background with a white rectangular shape on the left side."
+      }
+    },
+    "0016_red_0_mask.png": {
+      "entry": {
+        "color_id": 7,
+        "color_name": "red",
+        "group_index_in_color": 0,
+        "stroke_indexes": [
+          33
+        ],
+        "bbox_xyxy": [
+          133,
+          63,
+          249,
+          127
+        ],
+        "crop_file_mask": "red_0_mask.png"
+      },
+      "colour_hint": "red",
+      "bbox_xyxy": [
+        133,
+        63,
+        249,
+        127
+      ],
+      "bbox_right_panel_xyxy": [
+        79,
+        20,
+        116,
+        40
+      ],
+      "timing_s": 2.521,
+      "model_raw": "```json\n{\n  \"label\": \"DNA\",\n  \"full_visual_LEFT\": \"A red rectangular object with a gray background and a green vertical line on the right side.\",\n  \"LEFT_SURROUNDINGS\": \"A gray background with a green vertical line on the right side.\"\n}\n```",
+      "json_objects": [
+        {
+          "label": "DNA",
+          "full_visual_LEFT": "A red rectangular object with a gray background and a green vertical line on the right side.",
+          "LEFT_SURROUNDINGS": "A gray background with a green vertical line on the right side."
+        }
+      ],
+      "parsed": {
+        "label": "DNA",
+        "full_visual_LEFT": "A red rectangular object with a gray background and a green vertical line on the right side.",
+        "LEFT_SURROUNDINGS": "A gray background with a green vertical line on the right side."
+      }
+    },
+    "0017_red_1_mask.png": {
+      "entry": {
+        "color_id": 7,
+        "color_name": "red",
+        "group_index_in_color": 1,
+        "stroke_indexes": [
+          35
+        ],
+        "bbox_xyxy": [
+          133,
+          271,
+          249,
+          336
+        ],
+        "crop_file_mask": "red_1_mask.png"
+      },
+      "colour_hint": "red",
+      "bbox_xyxy": [
+        133,
+        271,
+        249,
+        336
+      ],
+      "bbox_right_panel_xyxy": [
+        79,
+        86,
+        116,
+        107
+      ],
+      "timing_s": 2.5455,
+      "model_raw": "```json\n{\n  \"label\": \"RNA\",\n  \"full_visual_LEFT\": \"A red rectangular object with a gray background.\",\n  \"LEFT_SURROUNDINGS\": \"A gray background with a red rectangle in the center.\"\n}\n```",
+      "json_objects": [
+        {
+          "label": "RNA",
+          "full_visual_LEFT": "A red rectangular object with a gray background.",
+          "LEFT_SURROUNDINGS": "A gray background with a red rectangle in the center."
+        }
+      ],
+      "parsed": {
+        "label": "RNA",
+        "full_visual_LEFT": "A red rectangular object with a gray background.",
+        "LEFT_SURROUNDINGS": "A gray background with a red rectangle in the center."
+      }
+    },
+    "0018_red_2_mask.png": {
+      "entry": {
+        "color_id": 7,
+        "color_name": "red",
+        "group_index_in_color": 2,
+        "stroke_indexes": [
+          27,
+          36,
+          37
+        ],
+        "bbox_xyxy": [
+          133,
+          474,
+          382,
+          564
+        ],
+        "crop_file_mask": "red_2_mask.png"
+      },
+      "colour_hint": "red",
+      "bbox_xyxy": [
+        133,
+        474,
+        382,
+        564
+      ],
+      "bbox_right_panel_xyxy": [
+        79,
+        151,
+        159,
+        180
+      ],
+      "timing_s": 2.5455,
+      "model_raw": "```json\n{\n  \"label\": \"promoter\",\n  \"full_visual_LEFT\": \"A red oval with a white rectangle inside, set against a gray and white background.\",\n  \"LEFT_SURROUNDINGS\": \"A gray and white background with a red oval and a white rectangle inside.\"\n}\n```",
+      "json_objects": [
+        {
+          "label": "promoter",
+          "full_visual_LEFT": "A red oval with a white rectangle inside, set against a gray and white background.",
+          "LEFT_SURROUNDINGS": "A gray and white background with a red oval and a white rectangle inside."
+        }
+      ],
+      "parsed": {
+        "label": "promoter",
+        "full_visual_LEFT": "A red oval with a white rectangle inside, set against a gray and white background.",
+        "LEFT_SURROUNDINGS": "A gray and white background with a red oval and a white rectangle inside."
+      }
+    },
+    "0019_red_3_mask.png": {
+      "entry": {
+        "color_id": 7,
+        "color_name": "red",
+        "group_index_in_color": 3,
+        "stroke_indexes": [
+          31,
+          32
+        ],
+        "bbox_xyxy": [
+          125,
+          773,
+          388,
+          869
+        ],
+        "crop_file_mask": "red_3_mask.png"
+      },
+      "colour_hint": "red",
+      "bbox_xyxy": [
+        125,
+        773,
+        388,
+        869
+      ],
+      "bbox_right_panel_xyxy": [
+        77,
+        246,
+        161,
+        277
+      ],
+      "timing_s": 2.5455,
+      "model_raw": "```json\n{\n  \"label\": \"DNA\",\n  \"full_visual_LEFT\": \"A red rectangular object with a white inner rectangle, set against a gray and white background.\",\n  \"LEFT_SURROUNDINGS\": \"A gray and white background with a circular shape and a red rectangle overlapping it.\"\n}\n```",
+      "json_objects": [
+        {
+          "label": "DNA",
+          "full_visual_LEFT": "A red rectangular object with a white inner rectangle, set against a gray and white background.",
+          "LEFT_SURROUNDINGS": "A gray and white background with a circular shape and a red rectangle overlapping it."
+        }
+      ],
+      "parsed": {
+        "label": "DNA",
+        "full_visual_LEFT": "A red rectangular object with a white inner rectangle, set against a gray and white background.",
+        "LEFT_SURROUNDINGS": "A gray and white background with a circular shape and a red rectangle overlapping it."
+      }
+    },
+    "0020_red_4_mask.png": {
+      "entry": {
+        "color_id": 7,
+        "color_name": "red",
+        "group_index_in_color": 4,
+        "stroke_indexes": [
+          23,
+          24,
+          25,
+          26
+        ],
+        "bbox_xyxy": [
+          436,
+          467,
+          581,
+          553
+        ],
+        "crop_file_mask": "red_4_mask.png"
+      },
+      "colour_hint": "red",
+      "bbox_xyxy": [
+        436,
+        467,
+        581,
+        553
+      ],
+      "bbox_right_panel_xyxy": [
+        176,
+        149,
+        222,
+        176
+      ],
+      "timing_s": 2.5455,
+      "model_raw": "```json\n{\n  \"label\": \"RNA\",\n  \"full_visual_LEFT\": \"A blurred image of a red and gray object with a white rectangular area in the center.\",\n  \"LEFT_SURROUNDINGS\": \"A gray and white background with a red object in the foreground.\"\n}\n```",
+      "json_objects": [
+        {
+          "label": "RNA",
+          "full_visual_LEFT": "A blurred image of a red and gray object with a white rectangular area in the center.",
+          "LEFT_SURROUNDINGS": "A gray and white background with a red object in the foreground."
+        }
+      ],
+      "parsed": {
+        "label": "RNA",
+        "full_visual_LEFT": "A blurred image of a red and gray object with a white rectangular area in the center.",
+        "LEFT_SURROUNDINGS": "A gray and white background with a red object in the foreground."
+      }
+    },
+    "0021_red_5_mask.png": {
+      "entry": {
+        "color_id": 7,
+        "color_name": "red",
+        "group_index_in_color": 5,
+        "stroke_indexes": [
+          28,
+          29,
+          30
+        ],
+        "bbox_xyxy": [
+          451,
+          766,
+          578,
+          849
+        ],
+        "crop_file_mask": "red_5_mask.png"
+      },
+      "colour_hint": "red",
+      "bbox_xyxy": [
+        451,
+        766,
+        578,
+        849
+      ],
+      "bbox_right_panel_xyxy": [
+        181,
+        244,
+        221,
+        271
+      ],
+      "timing_s": 2.5455,
+      "model_raw": "```json\n{\n  \"label\": \"RNA\",\n  \"full_visual_LEFT\": \"A cropped image showing a white rectangular object with a red and orange colored main object overlapping it, set against a gray and white background.\",\n  \"LEFT_SURROUNDINGS\": \"A gray and white background with a blurred, abstract shape.\"\n}\n```",
+      "json_objects": [
+        {
+          "label": "RNA",
+          "full_visual_LEFT": "A cropped image showing a white rectangular object with a red and orange colored main object overlapping it, set against a gray and white background.",
+          "LEFT_SURROUNDINGS": "A gray and white background with a blurred, abstract shape."
+        }
+      ],
+      "parsed": {
+        "label": "RNA",
+        "full_visual_LEFT": "A cropped image showing a white rectangular object with a red and orange colored main object overlapping it, set against a gray and white background.",
+        "LEFT_SURROUNDINGS": "A gray and white background with a blurred, abstract shape."
+      }
+    },
+    "0022_red_6_mask.png": {
+      "entry": {
+        "color_id": 7,
+        "color_name": "red",
+        "group_index_in_color": 6,
+        "stroke_indexes": [
+          34
+        ],
+        "bbox_xyxy": [
+          477,
+          64,
+          578,
+          126
+        ],
+        "crop_file_mask": "red_6_mask.png"
+      },
+      "colour_hint": "red",
+      "bbox_xyxy": [
+        477,
+        64,
+        578,
+        126
+      ],
+      "bbox_right_panel_xyxy": [
+        189,
+        20,
+        221,
+        40
+      ],
+      "timing_s": 2.5455,
+      "model_raw": "```json\n{\n  \"label\": \"RNA\",\n  \"full_visual_LEFT\": \"A red-colored object with a gray background, appearing as a rectangular shape.\",\n  \"LEFT_SURROUNDINGS\": \"A gray background with a black vertical bar on the right side.\"\n}\n```",
+      "json_objects": [
+        {
+          "label": "RNA",
+          "full_visual_LEFT": "A red-colored object with a gray background, appearing as a rectangular shape.",
+          "LEFT_SURROUNDINGS": "A gray background with a black vertical bar on the right side."
+        }
+      ],
+      "parsed": {
+        "label": "RNA",
+        "full_visual_LEFT": "A red-colored object with a gray background, appearing as a rectangular shape.",
+        "LEFT_SURROUNDINGS": "A gray background with a black vertical bar on the right side."
+      }
+    },
+    "0023_red_7_mask.png": {
+      "entry": {
+        "color_id": 7,
+        "color_name": "red",
+        "group_index_in_color": 7,
+        "stroke_indexes": [
+          22
+        ],
+        "bbox_xyxy": [
+          481,
+          272,
+          579,
+          335
+        ],
+        "crop_file_mask": "red_7_mask.png"
+      },
+      "colour_hint": "red",
+      "bbox_xyxy": [
+        481,
+        272,
+        579,
+        335
+      ],
+      "bbox_right_panel_xyxy": [
+        190,
+        87,
+        222,
+        107
+      ],
+      "timing_s": 2.5455,
+      "model_raw": "```json\n{\n  \"label\": \"transcription\",\n  \"full_visual_LEFT\": \"A red, cylindrical object with a grayed-out background, appearing to be a part of a biological process.\",\n  \"LEFT_SURROUNDINGS\": \"A grayed-out background with a black line, suggesting a biological or molecular context.\"\n}\n```",
+      "json_objects": [
+        {
+          "label": "transcription",
+          "full_visual_LEFT": "A red, cylindrical object with a grayed-out background, appearing to be a part of a biological process.",
+          "LEFT_SURROUNDINGS": "A grayed-out background with a black line, suggesting a biological or molecular context."
+        }
+      ],
+      "parsed": {
+        "label": "transcription",
+        "full_visual_LEFT": "A red, cylindrical object with a grayed-out background, appearing to be a part of a biological process.",
+        "LEFT_SURROUNDINGS": "A grayed-out background with a black line, suggesting a biological or molecular context."
+      }
+    },
+    "0024_purple_0_mask.png": {
+      "entry": {
+        "color_id": 9,
+        "color_name": "purple",
+        "group_index_in_color": 0,
+        "stroke_indexes": [
+          38,
+          39
+        ],
+        "bbox_xyxy": [
+          227,
+          731,
+          373,
+          811
+        ],
+        "crop_file_mask": "purple_0_mask.png"
+      },
+      "colour_hint": "purple",
+      "bbox_xyxy": [
+        227,
+        731,
+        373,
+        811
+      ],
+      "bbox_right_panel_xyxy": [
+        109,
+        233,
+        156,
+        259
+      ],
+      "timing_s": 2.5455,
+      "model_raw": "```json\n{\n  \"label\": \"transcription\",\n  \"full_visual_LEFT\": \"A purple oval with a white rectangle inside, set against a gray background.\",\n  \"LEFT_SURROUNDINGS\": \"A gray background with a dark gray shape on the right side.\"\n}\n```",
+      "json_objects": [
+        {
+          "label": "transcription",
+          "full_visual_LEFT": "A purple oval with a white rectangle inside, set against a gray background.",
+          "LEFT_SURROUNDINGS": "A gray background with a dark gray shape on the right side."
+        }
+      ],
+      "parsed": {
+        "label": "transcription",
+        "full_visual_LEFT": "A purple oval with a white rectangle inside, set against a gray background.",
+        "LEFT_SURROUNDINGS": "A gray background with a dark gray shape on the right side."
+      }
+    },
+    "0025_gray_0_mask.png": {
+      "entry": {
+        "color_id": 10,
+        "color_name": "gray",
+        "group_index_in_color": 0,
+        "stroke_indexes": [
+          40
+        ],
+        "bbox_xyxy": [
+          225,
+          11,
+          510,
+          82
+        ],
+        "crop_file_mask": "gray_0_mask.png"
+      },
+      "colour_hint": "gray",
+      "bbox_xyxy": [
+        225,
+        11,
+        510,
+        82
+      ],
+      "bbox_right_panel_xyxy": [
+        109,
+        4,
+        200,
+        26
+      ],
+      "timing_s": 2.2805,
+      "model_raw": "```json\n{\n  \"label\": \"promoter\",\n  \"full_visual_LEFT\": \"A black line with a curved end, resembling a bracket or a bracket-like symbol.\",\n  \"LEFT_SURROUNDINGS\": \"A black background with a white rectangular area containing the black line.\"\n}\n```",
+      "json_objects": [
+        {
+          "label": "promoter",
+          "full_visual_LEFT": "A black line with a curved end, resembling a bracket or a bracket-like symbol.",
+          "LEFT_SURROUNDINGS": "A black background with a white rectangular area containing the black line."
+        }
+      ],
+      "parsed": {
+        "label": "promoter",
+        "full_visual_LEFT": "A black line with a curved end, resembling a bracket or a bracket-like symbol.",
+        "LEFT_SURROUNDINGS": "A black background with a white rectangular area containing the black line."
+      }
+    },
+    "0026_gray_1_mask.png": {
+      "entry": {
+        "color_id": 10,
+        "color_name": "gray",
+        "group_index_in_color": 1,
+        "stroke_indexes": [
+          41,
+          42,
+          43
+        ],
+        "bbox_xyxy": [
+          307,
+          128,
+          397,
+          268
+        ],
+        "crop_file_mask": "gray_1_mask.png"
+      },
+      "colour_hint": "gray",
+      "bbox_xyxy": [
+        307,
+        128,
+        397,
+        268
+      ],
+      "bbox_right_panel_xyxy": [
+        135,
+        41,
+        164,
+        85
+      ],
+      "timing_s": 2.2805,
+      "model_raw": "```json\n{\n  \"label\": \"transcription\",\n  \"full_visual_LEFT\": \"A large gray downward arrow.\",\n  \"LEFT_SURROUNDINGS\": \"A white background with a gray arrow.\"\n}\n```",
+      "json_objects": [
+        {
+          "label": "transcription",
+          "full_visual_LEFT": "A large gray downward arrow.",
+          "LEFT_SURROUNDINGS": "A white background with a gray arrow."
+        }
+      ],
+      "parsed": {
+        "label": "transcription",
+        "full_visual_LEFT": "A large gray downward arrow.",
+        "LEFT_SURROUNDINGS": "A white background with a gray arrow."
+      }
+    },
+    "0027_gray_2_mask.png": {
+      "entry": {
+        "color_id": 10,
+        "color_name": "gray",
+        "group_index_in_color": 2,
+        "stroke_indexes": [
+          46,
+          47
+        ],
+        "bbox_xyxy": [
+          305,
+          559,
+          397,
+          699
+        ],
+        "crop_file_mask": "gray_2_mask.png"
+      },
+      "colour_hint": "gray",
+      "bbox_xyxy": [
+        305,
+        559,
+        397,
+        699
+      ],
+      "bbox_right_panel_xyxy": [
+        134,
+        178,
+        164,
+        223
+      ],
+      "timing_s": 2.2805,
+      "model_raw": "```json\n{\n  \"label\": \"transcription\",\n  \"full_visual_LEFT\": \"A large gray downward arrow.\",\n  \"LEFT_SURROUNDINGS\": \"A white background with a gray arrow.\"\n}\n```",
+      "json_objects": [
+        {
+          "label": "transcription",
+          "full_visual_LEFT": "A large gray downward arrow.",
+          "LEFT_SURROUNDINGS": "A white background with a gray arrow."
+        }
+      ],
+      "parsed": {
+        "label": "transcription",
+        "full_visual_LEFT": "A large gray downward arrow.",
+        "LEFT_SURROUNDINGS": "A white background with a gray arrow."
+      }
+    },
+    "0028_gray_3_mask.png": {
+      "entry": {
+        "color_id": 10,
+        "color_name": "gray",
+        "group_index_in_color": 3,
+        "stroke_indexes": [
+          44,
+          45
+        ],
+        "bbox_xyxy": [
+          315,
+          335,
+          397,
+          476
+        ],
+        "crop_file_mask": "gray_3_mask.png"
+      },
+      "colour_hint": "gray",
+      "bbox_xyxy": [
+        315,
+        335,
+        397,
+        476
+      ],
+      "bbox_right_panel_xyxy": [
+        137,
+        107,
+        164,
+        152
+      ],
+      "timing_s": 2.2805,
+      "model_raw": "```json\n{\n  \"label\": \"transcription\",\n  \"full_visual_LEFT\": \"A large gray arrow pointing downward.\",\n  \"LEFT_SURROUNDINGS\": \"A white background with a black border on the left side.\"\n}\n```",
+      "json_objects": [
+        {
+          "label": "transcription",
+          "full_visual_LEFT": "A large gray arrow pointing downward.",
+          "LEFT_SURROUNDINGS": "A white background with a black border on the left side."
+        }
+      ],
+      "parsed": {
+        "label": "transcription",
+        "full_visual_LEFT": "A large gray arrow pointing downward.",
+        "LEFT_SURROUNDINGS": "A white background with a black border on the left side."
+      }
+    },
+    "0029_black_0_mask.png": {
+      "entry": {
+        "color_id": 11,
+        "color_name": "black",
+        "group_index_in_color": 0,
+        "stroke_indexes": [
+          48
+        ],
+        "bbox_xyxy": [
+          7,
+          12,
+          280,
+          92
+        ],
+        "crop_file_mask": "black_0_mask.png"
+      },
+      "colour_hint": "black",
+      "bbox_xyxy": [
+        7,
+        12,
+        280,
+        92
+      ],
+      "bbox_right_panel_xyxy": [
+        39,
+        4,
+        126,
+        29
+      ],
+      "timing_s": 2.2805,
+      "model_raw": "```json\n{\n  \"label\": \"promoter\",\n  \"full_visual_LEFT\": \"A black curved line with a hook at the end, positioned on a gray horizontal bar.\",\n  \"LEFT_SURROUNDINGS\": \"A black background with a gray horizontal bar below the black line.\"\n}\n```",
+      "json_objects": [
+        {
+          "label": "promoter",
+          "full_visual_LEFT": "A black curved line with a hook at the end, positioned on a gray horizontal bar.",
+          "LEFT_SURROUNDINGS": "A black background with a gray horizontal bar below the black line."
+        }
+      ],
+      "parsed": {
+        "label": "promoter",
+        "full_visual_LEFT": "A black curved line with a hook at the end, positioned on a gray horizontal bar.",
+        "LEFT_SURROUNDINGS": "A black background with a gray horizontal bar below the black line."
+      }
+    },
+    "0030_black_1_mask.png": {
+      "entry": {
+        "color_id": 11,
+        "color_name": "black",
+        "group_index_in_color": 1,
+        "stroke_indexes": [
+          49
+        ],
+        "bbox_xyxy": [
+          652,
+          290,
+          684,
+          326
+        ],
+        "crop_file_mask": "black_1_mask.png"
+      },
+      "colour_hint": "black",
+      "bbox_xyxy": [
+        652,
+        290,
+        684,
+        326
+      ],
+      "bbox_right_panel_xyxy": [
+        245,
+        92,
+        255,
+        104
+      ],
+      "timing_s": 2.2805,
+      "model_raw": "```json\n{\n  \"label\": \"transcription\",\n  \"full_visual_LEFT\": \"A black arrow pointing to a grayscale background.\",\n  \"LEFT_SURROUNDINGS\": \"A grayscale background with a black arrow pointing to the left.\"\n}\n```",
+      "json_objects": [
+        {
+          "label": "transcription",
+          "full_visual_LEFT": "A black arrow pointing to a grayscale background.",
+          "LEFT_SURROUNDINGS": "A grayscale background with a black arrow pointing to the left."
+        }
+      ],
+      "parsed": {
+        "label": "transcription",
+        "full_visual_LEFT": "A black arrow pointing to a grayscale background.",
+        "LEFT_SURROUNDINGS": "A grayscale background with a black arrow pointing to the left."
+      }
+    },
+    "0031_black_2_mask.png": {
+      "entry": {
+        "color_id": 11,
+        "color_name": "black",
+        "group_index_in_color": 2,
+        "stroke_indexes": [
+          50
+        ],
+        "bbox_xyxy": [
+          653,
+          806,
+          682,
+          843
+        ],
+        "crop_file_mask": "black_2_mask.png"
+      },
+      "colour_hint": "black",
+      "bbox_xyxy": [
+        653,
+        806,
+        682,
+        843
+      ],
+      "bbox_right_panel_xyxy": [
+        245,
+        257,
+        254,
+        269
+      ],
+      "timing_s": 2.2805,
+      "model_raw": "```json\n{\n  \"label\": \"RNA\",\n  \"full_visual_LEFT\": \"A black arrow-shaped object with a green tip, positioned in the foreground of a grayscale image.\",\n  \"LEFT_SURROUNDINGS\": \"A grayscale background with a blurred, dark shape on the left side.\"\n}\n```",
+      "json_objects": [
+        {
+          "label": "RNA",
+          "full_visual_LEFT": "A black arrow-shaped object with a green tip, positioned in the foreground of a grayscale image.",
+          "LEFT_SURROUNDINGS": "A grayscale background with a blurred, dark shape on the left side."
+        }
+      ],
+      "parsed": {
+        "label": "RNA",
+        "full_visual_LEFT": "A black arrow-shaped object with a green tip, positioned in the foreground of a grayscale image.",
+        "LEFT_SURROUNDINGS": "A grayscale background with a blurred, dark shape on the left side."
+      }
+    }
+  },
+  "cluster_order": [
+    "0001_cyan_0_mask.png",
+    "0002_green_0_mask.png",
+    "0003_green_1_mask.png",
+    "0004_green_2_mask.png",
+    "0005_green_3_mask.png",
+    "0006_green_4_mask.png",
+    "0007_green_5_mask.png",
+    "0008_green_6_mask.png",
+    "0009_green_7_mask.png",
+    "0010_green_8_mask.png",
+    "0011_green_9_mask.png",
+    "0012_green_10_mask.png",
+    "0013_green_11_mask.png",
+    "0014_green_12_mask.png",
+    "0015_green_13_mask.png",
+    "0016_red_0_mask.png",
+    "0017_red_1_mask.png",
+    "0018_red_2_mask.png",
+    "0019_red_3_mask.png",
+    "0020_red_4_mask.png",
+    "0021_red_5_mask.png",
+    "0022_red_6_mask.png",
+    "0023_red_7_mask.png",
+    "0024_purple_0_mask.png",
+    "0025_gray_0_mask.png",
+    "0026_gray_1_mask.png",
+    "0027_gray_2_mask.png",
+    "0028_gray_3_mask.png",
+    "0029_black_0_mask.png",
+    "0030_black_1_mask.png",
+    "0031_black_2_mask.png"
+  ]
+}

@@ -1,56 +1,72 @@
 {
   "image_index": 7,
-  "full_image_source": "C:\\Users\\marti\\allFolder\\code\\DRAWNOUT\\whiteboard_backend\\ProccessedImages\\processed_7.png",
-  "clusters_json": "C:\\Users\\marti\\allFolder\\code\\DRAWNOUT\\whiteboard_backend\\ClusterMaps\\processed_7\\clusters.json",
   "candidate_labels_raw": [
-    "fibrous",
-    "Microtubules",
-    "Nuclear",
-    "Interrediate",
-    "pores",
+    "that",
+    "lipids.-",
     "organelles",
-    "membrane",
-    "Smooth",
+    "DNA",
     "mitotic",
-    "Microfilaments",
-    "Golgi",
-    "where",
-    "Rough",
-    "condensed",
-    "Chromatin",
-    "makes",
     "associated",
-    "digests",
-    "organizing",
-    "Mitochondria"
+    "materials.",
+    "Smooth:",
+    "metabolism.",
+    "Lysosome:",
+    "move",
+    "ribosomes;",
+    "condensed",
+    "envelope:",
+    "proteins.",
+    "Cytoskeleton",
+    "Endoplasmic",
+    "secretory",
+    "Nuclear",
+    "Microfilaments:",
+    "Mitochondria:",
+    "Microtubules:",
+    "formed.",
+    "Cytoplasm",
+    "makes",
+    "Intermediate",
+    "waste",
+    "Peroxisome:",
+    "Centrosome:",
+    "apparatus:",
+    "Vacuole",
+    "houses",
+    "region",
+    "Protein-lined",
+    "microtubule",
+    "Chromatin:",
+    "filaments:",
+    "Nucleolus:",
+    "membrane",
+    "food"
   ],
   "candidate_labels_refined": [
-    "cytoplasm",
+    "cell",
     "nucleus",
     "mitochondria",
-    "lysosome",
+    "ribosomes",
     "endoplasmic",
-    "reticulum",
     "golgi",
-    "mitotic",
+    "lysosome",
+    "vacuole",
+    "peroxisome",
+    "centrosome",
+    "cytoskeleton",
     "microtubules",
     "microfilaments",
-    "cortex",
     "nucleolus",
-    "centrosome",
     "chromatin",
-    "pores",
-    "membrane",
-    "organelles",
-    "smooth",
-    "rough",
-    "ribosomes"
+    "plasma membrane",
+    "cytoplasm",
+    "nuclear envelope",
+    "rough endoplasmic reticulum",
+    "smooth endoplasmic reticulum",
+    "endoplasm"
   ],
   "base_context": "",
   "model_id": "Qwen/Qwen3-VL-2B-Instruct",
-  "quant_mode": null,
-  "used_quant": false,
-  "device": "cuda:0",
   "proc_longest_edge": 600,
   "panel_edge": 300,
   "batch_size": 8,
@@ -70,11 +86,8 @@
           355,
           293
         ],
-        "crop_file_bbox": "yellow_0_bbox.png",
         "crop_file_mask": "yellow_0_mask.png"
       },
-      "mask_file": "yellow_0_mask.png",
-      "mask_path": "C:\\Users\\marti\\allFolder\\code\\DRAWNOUT\\whiteboard_backend\\ClusterRenders\\processed_7\\yellow_0_mask.png",
       "colour_hint": "yellow",
       "bbox_xyxy": [
         304,
@@ -82,32 +95,16 @@
         355,
         293
       ],
-      "bbox_resized_xyxy": [
-        113,
-        94,
-        132,
-        109
-      ],
       "bbox_right_panel_xyxy": [
         137,
         94,
         156,
         109
       ],
-      "bbox_norm_xyxy": [
-        0.45103857566765576,
-        0.31265508684863524,
-        0.526706231454006,
-        0.36352357320099254
-      ],
-      "batch_size": 8,
-      "batch_timing_s": 17.3592,
-      "avg_per_item_s": 2.1699,
-      "model_raw": "```json\n{\n  \"label\": \"nucleus\",\n  \"shapes\": [\n    \"circle\"\n  ],\n  \"evidence\": \"The highlighted object in the left panel is a large, roughly circular structure with a dense, granular appearance, consistent with the appearance of a nucleus. The red rectangle in the right panel also highlights a",
+      "timing_s": 2.8453,
+      "model_raw": "```json\n{\n  \"label\": \"nucleus\",\n  \"full_visual_LEFT\": \"A blurry image showing a yellowish, irregularly shaped object with a faint greenish hue, set against a grayscale background with horizontal lines.\",\n  \"LEFT_SURROUNDINGS\": \"A grayscale background with horizontal lines, suggesting a blurred or abstract image.\"\n",
       "json_objects": [],
-      "parsed": null,
-      "final": null,
-      "auto_capped": false
+      "parsed": null
     },
     "0002_yellow_1_mask.png": {
       "entry": {
@@ -124,11 +121,8 @@
           401,
           301
         ],
-        "crop_file_bbox": "yellow_1_bbox.png",
         "crop_file_mask": "yellow_1_mask.png"
       },
-      "mask_file": "yellow_1_mask.png",
-      "mask_path": "C:\\Users\\marti\\allFolder\\code\\DRAWNOUT\\whiteboard_backend\\ClusterRenders\\processed_7\\yellow_1_mask.png",
       "colour_hint": "yellow",
       "bbox_xyxy": [
         355,
@@ -136,32 +130,16 @@
         401,
         301
       ],
-      "bbox_resized_xyxy": [
-        132,
-        99,
-        149,
-        112
-      ],
       "bbox_right_panel_xyxy": [
         156,
         99,
         173,
         112
       ],
-      "bbox_norm_xyxy": [
-        0.526706231454006,
-        0.33002481389578164,
-        0.5949554896142433,
-        0.37344913151364767
-      ],
-      "batch_size": 8,
-      "batch_timing_s": 17.3592,
-      "avg_per_item_s": 2.1699,
-      "model_raw": "```json\n{\n  \"label\": \"organelles\",\n  \"shapes\": [\n    \"circle\",\n    \"line\",\n    \"square\"\n  ],\n  \"evidence\": \"The left panel shows a blurry image of a cell with a large, central structure (likely the nucleus) and smaller structures (possibly mitochondria or other organel",
+      "timing_s": 2.8453,
+      "model_raw": "```json\n{\n  \"label\": \"nucleus\",\n  \"full_visual_LEFT\": \"A blurry image of a yellowish object with a greenish outline, possibly a cell or a part of a cell, in the foreground.\",\n  \"LEFT_SURROUNDINGS\": \"A grayscale background with vertical black lines, possibly a window or a barrier",
       "json_objects": [],
-      "parsed": null,
-      "final": null,
-      "auto_capped": false
+      "parsed": null
     },
     "0003_orange_0_mask.png": {
       "entry": {
@@ -199,11 +177,8 @@
           519,
           633
         ],
-        "crop_file_bbox": "orange_0_bbox.png",
         "crop_file_mask": "orange_0_mask.png"
       },
-      "mask_file": "orange_0_mask.png",
-      "mask_path": "C:\\Users\\marti\\allFolder\\code\\DRAWNOUT\\whiteboard_backend\\ClusterRenders\\processed_7\\orange_0_mask.png",
       "colour_hint": "orange",
       "bbox_xyxy": [
         130,
@@ -211,32 +186,16 @@
         519,
         633
       ],
-      "bbox_resized_xyxy": [
-        48,
-        81,
-        193,
-        236
-      ],
       "bbox_right_panel_xyxy": [
         72,
         81,
         217,
         236
       ],
-      "bbox_norm_xyxy": [
-        0.19287833827893175,
-        0.2692307692307692,
-        0.7700296735905044,
-        0.7853598014888338
-      ],
-      "batch_size": 8,
-      "batch_timing_s": 17.3592,
-      "avg_per_item_s": 2.1699,
-      "model_raw": "```json\n{\n  \"label\": \"nucleus\",\n  \"shapes\": [\n    \"circle\"\n  ],\n  \"evidence\": \"The highlighted region in the left panel contains a large, purple, spherical structure with a dense nucleus, which is the nucleus of a cell. This is the primary organelle in the cell and is",
+      "timing_s": 2.8453,
+      "model_raw": "```json\n{\n  \"label\": \"cell\",\n  \"full_visual_LEFT\": \"A detailed illustration of a plant cell, showing various organelles such as the nucleus, mitochondria, endoplasmic reticulum, and other cellular components.\",\n  \"LEFT_SURROUNDINGS\": \"The cell is surrounded by a cell wall, which",
       "json_objects": [],
-      "parsed": null,
-      "final": null,
-      "auto_capped": false
+      "parsed": null
     },
     "0004_orange_1_mask.png": {
       "entry": {
@@ -252,11 +211,8 @@
           447,
           406
         ],
-        "crop_file_bbox": "orange_1_bbox.png",
         "crop_file_mask": "orange_1_mask.png"
       },
-      "mask_file": "orange_1_mask.png",
-      "mask_path": "C:\\Users\\marti\\allFolder\\code\\DRAWNOUT\\whiteboard_backend\\ClusterRenders\\processed_7\\orange_1_mask.png",
       "colour_hint": "orange",
       "bbox_xyxy": [
         405,
@@ -264,32 +220,26 @@
         447,
         406
       ],
-      "bbox_resized_xyxy": [
-        151,
-        119,
-        166,
-        151
-      ],
       "bbox_right_panel_xyxy": [
         175,
         119,
         190,
         151
       ],
-      "bbox_norm_xyxy": [
-        0.6008902077151336,
-        0.3970223325062035,
-        0.6632047477744807,
-        0.5037220843672456
+      "timing_s": 2.8453,
+      "model_raw": "```json\n{\n  \"label\": \"chromatin\",\n  \"full_visual_LEFT\": \"A blurry image of two long, thin, brown structures with a light orange outline, resembling chromosomes.\",\n  \"LEFT_SURROUNDINGS\": \"A grayscale background with faint, out-of-focus shapes, including a circular object and some dark specks.\"\n}\n```",
+      "json_objects": [
+        {
+          "label": "chromatin",
+          "full_visual_LEFT": "A blurry image of two long, thin, brown structures with a light orange outline, resembling chromosomes.",
+          "LEFT_SURROUNDINGS": "A grayscale background with faint, out-of-focus shapes, including a circular object and some dark specks."
+        }
       ],
-      "batch_size": 8,
-      "batch_timing_s": 17.3592,
-      "avg_per_item_s": 2.1699,
-      "model_raw": "```json\n{\n  \"label\": \"chromatin\",\n  \"shapes\": [\n    \"circle\",\n    \"line\"\n  ],\n  \"evidence\": \"The highlighted object in the left panel is a pair of long, thin, rod-like structures that are consistent with the appearance of chromatin, which is the material that makes up chromosomes.",
-      "json_objects": [],
-      "parsed": null,
-      "final": null,
-      "auto_capped": false
+      "parsed": {
+        "label": "chromatin",
+        "full_visual_LEFT": "A blurry image of two long, thin, brown structures with a light orange outline, resembling chromosomes.",
+        "LEFT_SURROUNDINGS": "A grayscale background with faint, out-of-focus shapes, including a circular object and some dark specks."
+      }
     },
     "0005_cyan_0_mask.png": {
       "entry": {
@@ -311,11 +261,8 @@
           322,
           562
         ],
-        "crop_file_bbox": "cyan_0_bbox.png",
         "crop_file_mask": "cyan_0_mask.png"
       },
-      "mask_file": "cyan_0_mask.png",
-      "mask_path": "C:\\Users\\marti\\allFolder\\code\\DRAWNOUT\\whiteboard_backend\\ClusterRenders\\processed_7\\cyan_0_mask.png",
       "colour_hint": "cyan",
       "bbox_xyxy": [
         222,
@@ -323,32 +270,26 @@
         322,
         562
       ],
-      "bbox_resized_xyxy": [
-        83,
-        184,
-        120,
-        209
-      ],
       "bbox_right_panel_xyxy": [
         107,
         184,
         144,
         209
       ],
-      "bbox_norm_xyxy": [
-        0.3293768545994065,
-        0.6129032258064516,
-        0.47774480712166173,
-        0.6972704714640199
+      "timing_s": 2.8453,
+      "model_raw": "```json\n{\n  \"label\": \"cytoplasm\",\n  \"full_visual_LEFT\": \"A collection of blue, oval-shaped objects in a gray, blurred background.\",\n  \"LEFT_SURROUNDINGS\": \"A gray, blurred background with a circular shape and a dark gray outline.\"\n}\n```",
+      "json_objects": [
+        {
+          "label": "cytoplasm",
+          "full_visual_LEFT": "A collection of blue, oval-shaped objects in a gray, blurred background.",
+          "LEFT_SURROUNDINGS": "A gray, blurred background with a circular shape and a dark gray outline."
+        }
       ],
-      "batch_size": 8,
-      "batch_timing_s": 17.3592,
-      "avg_per_item_s": 2.1699,
-      "model_raw": "```json\n{\n  \"label\": \"lysosome\",\n  \"shapes\": [\n    \"circle\"\n  ],\n  \"evidence\": \"The highlighted object in the left panel is a cluster of small, blue, oval-shaped structures. These are consistent with the appearance of lysosomes, which are membrane-bound organelles containing digestive enzymes. The",
-      "json_objects": [],
-      "parsed": null,
-      "final": null,
-      "auto_capped": false
+      "parsed": {
+        "label": "cytoplasm",
+        "full_visual_LEFT": "A collection of blue, oval-shaped objects in a gray, blurred background.",
+        "LEFT_SURROUNDINGS": "A gray, blurred background with a circular shape and a dark gray outline."
+      }
     },
     "0006_green_0_mask.png": {
       "entry": {
@@ -364,11 +305,8 @@
           203,
           529
         ],
-        "crop_file_bbox": "green_0_bbox.png",
         "crop_file_mask": "green_0_mask.png"
       },
-      "mask_file": "green_0_mask.png",
-      "mask_path": "C:\\Users\\marti\\allFolder\\code\\DRAWNOUT\\whiteboard_backend\\ClusterRenders\\processed_7\\green_0_mask.png",
       "colour_hint": "green",
       "bbox_xyxy": [
         159,
@@ -376,32 +314,16 @@
         203,
         529
       ],
-      "bbox_resized_xyxy": [
-        59,
-        173,
-        76,
-        197
-      ],
       "bbox_right_panel_xyxy": [
         83,
         173,
         100,
         197
       ],
-      "bbox_norm_xyxy": [
-        0.23590504451038577,
-        0.575682382133995,
-        0.30118694362017806,
-        0.6563275434243176
-      ],
-      "batch_size": 8,
-      "batch_timing_s": 17.3592,
-      "avg_per_item_s": 2.1699,
-      "model_raw": "```json\n{\n  \"label\": \"mitochondria\",\n  \"shapes\": [\n    \"circle\"\n  ],\n  \"evidence\": \"The highlighted object in the left panel is a small, green, circular structure with a distinct shape, which is consistent with the appearance of a mitochondrion. The right panel shows a diagram of a",
+      "timing_s": 2.8453,
+      "model_raw": "```json\n{\n  \"label\": \"nucleus\",\n  \"full_visual_LEFT\": \"A green, circular object with a slightly darker center, appearing as a cell with two stacked structures.\",\n  \"LEFT_SURROUNDINGS\": \"A grayscale image with a black line pointing to the green object, and a blurred background with a gear-like structure",
       "json_objects": [],
-      "parsed": null,
-      "final": null,
-      "auto_capped": false
+      "parsed": null
     },
     "0007_green_1_mask.png": {
       "entry": {
@@ -417,11 +339,8 @@
           258,
           603
         ],
-        "crop_file_bbox": "green_1_bbox.png",
         "crop_file_mask": "green_1_mask.png"
       },
-      "mask_file": "green_1_mask.png",
-      "mask_path": "C:\\Users\\marti\\allFolder\\code\\DRAWNOUT\\whiteboard_backend\\ClusterRenders\\processed_7\\green_1_mask.png",
       "colour_hint": "green",
       "bbox_xyxy": [
         221,
@@ -429,32 +348,26 @@
         258,
         603
       ],
-      "bbox_resized_xyxy": [
-        82,
-        194,
-        96,
-        224
-      ],
       "bbox_right_panel_xyxy": [
         106,
         194,
         120,
         224
       ],
-      "bbox_norm_xyxy": [
-        0.327893175074184,
-        0.6476426799007444,
-        0.3827893175074184,
-        0.7481389578163772
+      "timing_s": 2.8453,
+      "model_raw": "```json\n{\n  \"label\": \"cytoplasm\",\n  \"full_visual_LEFT\": \"A green, curved, elongated object in a grayscale background.\",\n  \"LEFT_SURROUNDINGS\": \"A grayscale background with two vertical black lines and a faint gray shape at the bottom.\"\n}\n```",
+      "json_objects": [
+        {
+          "label": "cytoplasm",
+          "full_visual_LEFT": "A green, curved, elongated object in a grayscale background.",
+          "LEFT_SURROUNDINGS": "A grayscale background with two vertical black lines and a faint gray shape at the bottom."
+        }
       ],
-      "batch_size": 8,
-      "batch_timing_s": 17.3592,
-      "avg_per_item_s": 2.1699,
-      "model_raw": "```json\n{\n  \"label\": \"nucleus\",\n  \"shapes\": [\n    \"circle\"\n  ],\n  \"evidence\": \"The highlighted object in the left panel is a large, dark, circular structure with a dense, granular appearance, consistent with the appearance of a nucleus. The right panel shows a detailed diagram of a",
-      "json_objects": [],
-      "parsed": null,
-      "final": null,
-      "auto_capped": false
+      "parsed": {
+        "label": "cytoplasm",
+        "full_visual_LEFT": "A green, curved, elongated object in a grayscale background.",
+        "LEFT_SURROUNDINGS": "A grayscale background with two vertical black lines and a faint gray shape at the bottom."
+      }
     },
     "0008_green_2_mask.png": {
       "entry": {
@@ -477,11 +390,8 @@
           499,
           476
         ],
-        "crop_file_bbox": "green_2_bbox.png",
         "crop_file_mask": "green_2_mask.png"
       },
-      "mask_file": "green_2_mask.png",
-      "mask_path": "C:\\Users\\marti\\allFolder\\code\\DRAWNOUT\\whiteboard_backend\\ClusterRenders\\processed_7\\green_2_mask.png",
       "colour_hint": "green",
       "bbox_xyxy": [
         290,
@@ -489,32 +399,16 @@
         499,
         476
       ],
-      "bbox_resized_xyxy": [
-        108,
-        93,
-        186,
-        177
-      ],
       "bbox_right_panel_xyxy": [
         132,
         93,
         210,
         177
       ],
-      "bbox_norm_xyxy": [
-        0.43026706231454004,
-        0.30893300248138955,
-        0.7403560830860534,
-        0.5905707196029777
-      ],
-      "batch_size": 8,
-      "batch_timing_s": 17.3592,
-      "avg_per_item_s": 2.1699,
-      "model_raw": "```json\n{\n  \"label\": \"nucleus\",\n  \"shapes\": [\n    \"circle\"\n  ],\n  \"evidence\": \"The highlighted region in the left panel is a large, centrally located organelle with a distinct nucleus, which is surrounded by a membrane. The shape is a large circle, consistent with the nucleus.\",\n",
+      "timing_s": 2.8453,
+      "model_raw": "```json\n{\n  \"label\": \"cytoplasm\",\n  \"full_visual_LEFT\": \"A detailed illustration of a cell with various organelles, including a prominent green-colored main object and grayscaled surroundings.\",\n  \"LEFT_SURROUNDINGS\": \"The surrounding area of the cell is grayscaled, with various organelles and",
       "json_objects": [],
-      "parsed": null,
-      "final": null,
-      "auto_capped": false
+      "parsed": null
     },
     "0009_magenta_0_mask.png": {
       "entry": {
@@ -537,11 +431,8 @@
           375,
           516
         ],
-        "crop_file_bbox": "magenta_0_bbox.png",
         "crop_file_mask": "magenta_0_mask.png"
       },
-      "mask_file": "magenta_0_mask.png",
-      "mask_path": "C:\\Users\\marti\\allFolder\\code\\DRAWNOUT\\whiteboard_backend\\ClusterRenders\\processed_7\\magenta_0_mask.png",
       "colour_hint": "magenta",
       "bbox_xyxy": [
         176,
@@ -549,32 +440,16 @@
         375,
         516
       ],
-      "bbox_resized_xyxy": [
-        66,
-        125,
-        140,
-        192
-      ],
       "bbox_right_panel_xyxy": [
         90,
         125,
         164,
         192
       ],
-      "bbox_norm_xyxy": [
-        0.26112759643916916,
-        0.41563275434243174,
-        0.5563798219584569,
-        0.6401985111662531
-      ],
-      "batch_size": 8,
-      "batch_timing_s": 7.0948,
-      "avg_per_item_s": 0.8868,
-      "model_raw": "```json\n{\n  \"label\": \"nucleus\",\n  \"shapes\": [\n    \"circle\"\n  ],\n  \"evidence\": \"The highlighted object in the left panel is a large, centrally located structure with a dense, dark interior and a distinct outer membrane. This is characteristic of a nucleus, which is the primary organelle",
+      "timing_s": 2.8321,
+      "model_raw": "```json\n{\n  \"label\": \"nucleus\",\n  \"full_visual_LEFT\": \"A detailed, magnified view of a cell's nucleus, highlighted with a magenta-colored main object and a grayscale background, showing its internal structure and surrounding components.\",\n  \"LEFT_SURROUNDINGS\": \"A grayscale image of the surrounding cellular structures,",
       "json_objects": [],
-      "parsed": null,
-      "final": null,
-      "auto_capped": false
+      "parsed": null
     },
     "0010_red_0_mask.png": {
       "entry": {
@@ -597,11 +472,8 @@
           334,
           529
         ],
-        "crop_file_bbox": "red_0_bbox.png",
         "crop_file_mask": "red_0_mask.png"
       },
-      "mask_file": "red_0_mask.png",
-      "mask_path": "C:\\Users\\marti\\allFolder\\code\\DRAWNOUT\\whiteboard_backend\\ClusterRenders\\processed_7\\red_0_mask.png",
       "colour_hint": "red",
       "bbox_xyxy": [
         181,
@@ -609,32 +481,16 @@
         334,
         529
       ],
-      "bbox_resized_xyxy": [
-        67,
-        124,
-        124,
-        197
-      ],
       "bbox_right_panel_xyxy": [
         91,
         124,
         148,
         197
       ],
-      "bbox_norm_xyxy": [
-        0.2685459940652819,
-        0.413151364764268,
-        0.49554896142433236,
-        0.6563275434243176
-      ],
-      "batch_size": 8,
-      "batch_timing_s": 7.0948,
-      "avg_per_item_s": 0.8868,
-      "model_raw": "```json\n{\n  \"label\": \"nucleus\",\n  \"shapes\": [\n    \"circle\"\n  ],\n  \"evidence\": \"The highlighted object in the left panel is a large, centrally located structure with a dense, dark interior and a distinct outer membrane, which is characteristic of a nucleus. The red rectangle in the right panel",
+      "timing_s": 2.8321,
+      "model_raw": "```json\n{\n  \"label\": \"nucleus\",\n  \"full_visual_LEFT\": \"A detailed, magnified view of a cell's nucleus, highlighted in red, with a grayscale background showing surrounding cellular structures.\",\n  \"LEFT_SURROUNDINGS\": \"A grayscale image of the cell's cytoplasm and other organelles, including",
       "json_objects": [],
-      "parsed": null,
-      "final": null,
-      "auto_capped": false
+      "parsed": null
     },
     "0011_red_1_mask.png": {
       "entry": {
@@ -659,11 +515,8 @@
           467,
           566
         ],
-        "crop_file_bbox": "red_1_bbox.png",
         "crop_file_mask": "red_1_mask.png"
       },
-      "mask_file": "red_1_mask.png",
-      "mask_path": "C:\\Users\\marti\\allFolder\\code\\DRAWNOUT\\whiteboard_backend\\ClusterRenders\\processed_7\\red_1_mask.png",
       "colour_hint": "red",
       "bbox_xyxy": [
         327,
@@ -671,32 +524,16 @@
         467,
         566
       ],
-      "bbox_resized_xyxy": [
-        122,
-        157,
-        174,
-        211
-      ],
       "bbox_right_panel_xyxy": [
         146,
         157,
         198,
         211
       ],
-      "bbox_norm_xyxy": [
-        0.48516320474777447,
-        0.5223325062034739,
-        0.6928783382789317,
-        0.7022332506203474
-      ],
-      "batch_size": 8,
-      "batch_timing_s": 7.0948,
-      "avg_per_item_s": 0.8868,
-      "model_raw": "```json\n{\n  \"label\": \"endoplasmic reticulum\",\n  \"shapes\": [\n    \"circle\",\n    \"line\",\n    \"square\"\n  ],\n  \"evidence\": \"The highlighted object in the left panel is a network of interconnected, elongated, pink structures that are characteristic of the endoplasmic ret",
+      "timing_s": 2.8321,
+      "model_raw": "```json\n{\n  \"label\": \"endoplasmic reticulum\",\n  \"full_visual_LEFT\": \"A red-colored, folded, and elongated structure with a granular appearance, located in the foreground of the image.\",\n  \"LEFT_SURROUNDINGS\": \"A grayscale, detailed image of a cell with various organelles,",
       "json_objects": [],
-      "parsed": null,
-      "final": null,
-      "auto_capped": false
+      "parsed": null
     },
     "0012_red_2_mask.png": {
       "entry": {
@@ -712,11 +549,8 @@
           383,
           579
         ],
-        "crop_file_bbox": "red_2_bbox.png",
         "crop_file_mask": "red_2_mask.png"
       },
-      "mask_file": "red_2_mask.png",
-      "mask_path": "C:\\Users\\marti\\allFolder\\code\\DRAWNOUT\\whiteboard_backend\\ClusterRenders\\processed_7\\red_2_mask.png",
       "colour_hint": "red",
       "bbox_xyxy": [
         343,
@@ -724,32 +558,26 @@
         383,
         579
       ],
-      "bbox_resized_xyxy": [
-        128,
-        201,
-        143,
-        216
-      ],
       "bbox_right_panel_xyxy": [
         152,
         201,
         167,
         216
       ],
-      "bbox_norm_xyxy": [
-        0.5089020771513353,
-        0.6699751861042184,
-        0.5682492581602374,
-        0.7183622828784119
+      "timing_s": 2.8321,
+      "model_raw": "```json\n{\n  \"label\": \"nucleus\",\n  \"full_visual_LEFT\": \"A red, circular object with a blurry, pinkish appearance, surrounded by a gray, out-of-focus background.\",\n  \"LEFT_SURROUNDINGS\": \"A gray, out-of-focus background with black diagonal lines.\"\n}\n```",
+      "json_objects": [
+        {
+          "label": "nucleus",
+          "full_visual_LEFT": "A red, circular object with a blurry, pinkish appearance, surrounded by a gray, out-of-focus background.",
+          "LEFT_SURROUNDINGS": "A gray, out-of-focus background with black diagonal lines."
+        }
       ],
-      "batch_size": 8,
-      "batch_timing_s": 7.0948,
-      "avg_per_item_s": 0.8868,
-      "model_raw": "```json\n{\n  \"label\": \"nucleus\",\n  \"shapes\": [\n    \"circle\"\n  ],\n  \"evidence\": \"The left panel shows a large, pink, circular structure with a dense, granular appearance, which is consistent with the appearance of a nucleus. The right panel shows a detailed diagram of a cell,",
-      "json_objects": [],
-      "parsed": null,
-      "final": null,
-      "auto_capped": false
+      "parsed": {
+        "label": "nucleus",
+        "full_visual_LEFT": "A red, circular object with a blurry, pinkish appearance, surrounded by a gray, out-of-focus background.",
+        "LEFT_SURROUNDINGS": "A gray, out-of-focus background with black diagonal lines."
+      }
     },
     "0013_red_3_mask.png": {
       "entry": {
@@ -776,11 +604,8 @@
           428,
           429
         ],
-        "crop_file_bbox": "red_3_bbox.png",
         "crop_file_mask": "red_3_mask.png"
       },
-      "mask_file": "red_3_mask.png",
-      "mask_path": "C:\\Users\\marti\\allFolder\\code\\DRAWNOUT\\whiteboard_backend\\ClusterRenders\\processed_7\\red_3_mask.png",
       "colour_hint": "red",
       "bbox_xyxy": [
         345,
@@ -788,32 +613,26 @@
         428,
         429
       ],
-      "bbox_resized_xyxy": [
-        128,
-        125,
-        159,
-        160
-      ],
       "bbox_right_panel_xyxy": [
         152,
         125,
         183,
         160
       ],
-      "bbox_norm_xyxy": [
-        0.5118694362017804,
-        0.41811414392059554,
-        0.6350148367952523,
-        0.532258064516129
+      "timing_s": 2.8321,
+      "model_raw": "```json\n{\n  \"label\": \"nucleus\",\n  \"full_visual_LEFT\": \"A red box highlighting a nucleus in a cell diagram.\",\n  \"LEFT_SURROUNDINGS\": \"A grayscale image with a red box highlighting a nucleus in a cell diagram.\"\n}\n```",
+      "json_objects": [
+        {
+          "label": "nucleus",
+          "full_visual_LEFT": "A red box highlighting a nucleus in a cell diagram.",
+          "LEFT_SURROUNDINGS": "A grayscale image with a red box highlighting a nucleus in a cell diagram."
+        }
       ],
-      "batch_size": 8,
-      "batch_timing_s": 7.0948,
-      "avg_per_item_s": 0.8868,
-      "model_raw": "```json\n{\n  \"label\": \"mitochondria\",\n  \"shapes\": [\n    \"circle\"\n  ],\n  \"evidence\": \"The highlighted region in the left panel shows a small, circular organelle with a distinct inner membrane structure, which is characteristic of a mitochondrion. The right panel confirms this with a detailed diagram",
-      "json_objects": [],
-      "parsed": null,
-      "final": null,
-      "auto_capped": false
+      "parsed": {
+        "label": "nucleus",
+        "full_visual_LEFT": "A red box highlighting a nucleus in a cell diagram.",
+        "LEFT_SURROUNDINGS": "A grayscale image with a red box highlighting a nucleus in a cell diagram."
+      }
     },
     "0014_blue_0_mask.png": {
       "entry": {
@@ -829,11 +648,8 @@
           212,
           421
         ],
-        "crop_file_bbox": "blue_0_bbox.png",
         "crop_file_mask": "blue_0_mask.png"
       },
-      "mask_file": "blue_0_mask.png",
-      "mask_path": "C:\\Users\\marti\\allFolder\\code\\DRAWNOUT\\whiteboard_backend\\ClusterRenders\\processed_7\\blue_0_mask.png",
       "colour_hint": "blue",
       "bbox_xyxy": [
         180,
@@ -841,32 +657,26 @@
         212,
         421
       ],
-      "bbox_resized_xyxy": [
-        67,
-        144,
-        79,
-        157
-      ],
       "bbox_right_panel_xyxy": [
         91,
         144,
         103,
         157
       ],
-      "bbox_norm_xyxy": [
-        0.26706231454005935,
-        0.4813895781637717,
-        0.314540059347181,
-        0.5223325062034739
+      "timing_s": 2.8321,
+      "model_raw": "```json\n{\n  \"label\": \"nucleus\",\n  \"full_visual_LEFT\": \"A blurry image showing a blue-colored object with red and purple highlights, surrounded by a grayscale background.\",\n  \"LEFT_SURROUNDINGS\": \"A grayscale background with dark, irregular shapes, possibly representing cellular structures or a cellular environment.\"\n}\n```",
+      "json_objects": [
+        {
+          "label": "nucleus",
+          "full_visual_LEFT": "A blurry image showing a blue-colored object with red and purple highlights, surrounded by a grayscale background.",
+          "LEFT_SURROUNDINGS": "A grayscale background with dark, irregular shapes, possibly representing cellular structures or a cellular environment."
+        }
       ],
-      "batch_size": 8,
-      "batch_timing_s": 7.0948,
-      "avg_per_item_s": 0.8868,
-      "model_raw": "```json\n{\n  \"label\": \"nucleus\",\n  \"shapes\": [\n    \"circle\"\n  ],\n  \"evidence\": \"The highlighted object in the left panel is a large, dark, roughly circular structure with a dense, granular appearance, consistent with the appearance of a nucleus in a cell. The right panel shows a",
-      "json_objects": [],
-      "parsed": null,
-      "final": null,
-      "auto_capped": false
+      "parsed": {
+        "label": "nucleus",
+        "full_visual_LEFT": "A blurry image showing a blue-colored object with red and purple highlights, surrounded by a grayscale background.",
+        "LEFT_SURROUNDINGS": "A grayscale background with dark, irregular shapes, possibly representing cellular structures or a cellular environment."
+      }
     },
     "0015_blue_1_mask.png": {
       "entry": {
@@ -883,11 +693,8 @@
           286,
           519
         ],
-        "crop_file_bbox": "blue_1_bbox.png",
         "crop_file_mask": "blue_1_mask.png"
       },
-      "mask_file": "blue_1_mask.png",
-      "mask_path": "C:\\Users\\marti\\allFolder\\code\\DRAWNOUT\\whiteboard_backend\\ClusterRenders\\processed_7\\blue_1_mask.png",
       "colour_hint": "blue",
       "bbox_xyxy": [
         194,
@@ -895,32 +702,16 @@
         286,
         519
       ],
-      "bbox_resized_xyxy": [
-        72,
-        150,
-        106,
-        193
-      ],
       "bbox_right_panel_xyxy": [
         96,
         150,
         130,
         193
       ],
-      "bbox_norm_xyxy": [
-        0.2878338278931751,
-        0.5012406947890818,
-        0.42433234421364985,
-        0.6439205955334988
-      ],
-      "batch_size": 8,
-      "batch_timing_s": 7.0948,
-      "avg_per_item_s": 0.8868,
-      "model_raw": "```json\n{\n  \"label\": \"nucleus\",\n  \"shapes\": [\n    \"circle\"\n  ],\n  \"evidence\": \"The highlighted region in the left panel is a large, dark, circular structure with a dense, granular interior, which is characteristic of a nucleus. The right panel shows a detailed diagram of a cell",
+      "timing_s": 2.8321,
+      "model_raw": "```json\n{\n  \"label\": \"nucleus\",\n  \"full_visual_LEFT\": \"A close-up view of a cell's nucleus, highlighted in a red box, with a grayscale background showing the surrounding cytoplasmic structures.\",\n  \"LEFT_SURROUNDINGS\": \"A grayscale image of the cell's cytoplasm, showing the",
       "json_objects": [],
-      "parsed": null,
-      "final": null,
-      "auto_capped": false
+      "parsed": null
     },
     "0016_blue_2_mask.png": {
       "entry": {
@@ -938,11 +729,8 @@
           371,
           463
         ],
-        "crop_file_bbox": "blue_2_bbox.png",
         "crop_file_mask": "blue_2_mask.png"
       },
-      "mask_file": "blue_2_mask.png",
-      "mask_path": "C:\\Users\\marti\\allFolder\\code\\DRAWNOUT\\whiteboard_backend\\ClusterRenders\\processed_7\\blue_2_mask.png",
       "colour_hint": "blue",
       "bbox_xyxy": [
         241,
@@ -950,32 +738,26 @@
         371,
         463
       ],
-      "bbox_resized_xyxy": [
-        90,
-        140,
-        138,
-        172
-      ],
       "bbox_right_panel_xyxy": [
         114,
         140,
         162,
         172
       ],
-      "bbox_norm_xyxy": [
-        0.35756676557863504,
-        0.4665012406947891,
-        0.5504451038575667,
-        0.5744416873449132
+      "timing_s": 2.8321,
+      "model_raw": "```json\n{\n  \"label\": \"nucleus\",\n  \"full_visual_LEFT\": \"A close-up view of a cell's nucleus, highlighted with a blue outline and surrounded by a grayscale background.\",\n  \"LEFT_SURROUNDINGS\": \"A grayscale image of the cell's cytoplasm, showing the nucleus and surrounding structures.\"\n}\n```",
+      "json_objects": [
+        {
+          "label": "nucleus",
+          "full_visual_LEFT": "A close-up view of a cell's nucleus, highlighted with a blue outline and surrounded by a grayscale background.",
+          "LEFT_SURROUNDINGS": "A grayscale image of the cell's cytoplasm, showing the nucleus and surrounding structures."
+        }
       ],
-      "batch_size": 8,
-      "batch_timing_s": 7.0948,
-      "avg_per_item_s": 0.8868,
-      "model_raw": "```json\n{\n  \"label\": \"nucleus\",\n  \"shapes\": [\n    \"circle\"\n  ],\n  \"evidence\": \"The highlighted object in the left panel is a large, circular structure with a dense, granular interior, which is characteristic of a nucleus. The red rectangle in the right panel also highlights a nucleus,",
-      "json_objects": [],
-      "parsed": null,
-      "final": null,
-      "auto_capped": false
+      "parsed": {
+        "label": "nucleus",
+        "full_visual_LEFT": "A close-up view of a cell's nucleus, highlighted with a blue outline and surrounded by a grayscale background.",
+        "LEFT_SURROUNDINGS": "A grayscale image of the cell's cytoplasm, showing the nucleus and surrounding structures."
+      }
     },
     "0017_blue_3_mask.png": {
       "entry": {
@@ -991,11 +773,8 @@
           328,
           381
         ],
-        "crop_file_bbox": "blue_3_bbox.png",
         "crop_file_mask": "blue_3_mask.png"
       },
-      "mask_file": "blue_3_mask.png",
-      "mask_path": "C:\\Users\\marti\\allFolder\\code\\DRAWNOUT\\whiteboard_backend\\ClusterRenders\\processed_7\\blue_3_mask.png",
       "colour_hint": "blue",
       "bbox_xyxy": [
         254,
@@ -1003,32 +782,26 @@
         328,
         381
       ],
-      "bbox_resized_xyxy": [
-        95,
-        125,
-        122,
-        142
-      ],
       "bbox_right_panel_xyxy": [
         119,
         125,
         146,
         142
       ],
-      "bbox_norm_xyxy": [
-        0.3768545994065282,
-        0.41687344913151364,
-        0.486646884272997,
-        0.47270471464019853
+      "timing_s": 2.9319,
+      "model_raw": "```json\n{\n  \"label\": \"cytoplasm\",\n  \"full_visual_LEFT\": \"A blurry image showing a long, thin, blue structure with red dots, surrounded by a grayscale background.\",\n  \"LEFT_SURROUNDINGS\": \"A grayscale background with a blurry, segmented structure.\"\n}\n```",
+      "json_objects": [
+        {
+          "label": "cytoplasm",
+          "full_visual_LEFT": "A blurry image showing a long, thin, blue structure with red dots, surrounded by a grayscale background.",
+          "LEFT_SURROUNDINGS": "A grayscale background with a blurry, segmented structure."
+        }
       ],
-      "batch_size": 8,
-      "batch_timing_s": 7.3231,
-      "avg_per_item_s": 0.9154,
-      "model_raw": "```json\n{\n  \"label\": \"mitochondria\",\n  \"shapes\": [\n    \"circle\"\n  ],\n  \"evidence\": \"The highlighted object in the left panel is a long, elongated structure with a distinct shape, which is consistent with the appearance of a mitochondrion. The right panel shows a detailed diagram of an",
-      "json_objects": [],
-      "parsed": null,
-      "final": null,
-      "auto_capped": false
+      "parsed": {
+        "label": "cytoplasm",
+        "full_visual_LEFT": "A blurry image showing a long, thin, blue structure with red dots, surrounded by a grayscale background.",
+        "LEFT_SURROUNDINGS": "A grayscale background with a blurry, segmented structure."
+      }
     },
     "0018_purple_0_mask.png": {
       "entry": {
@@ -1051,11 +824,8 @@
           302,
           528
         ],
-        "crop_file_bbox": "purple_0_bbox.png",
         "crop_file_mask": "purple_0_mask.png"
       },
-      "mask_file": "purple_0_mask.png",
-      "mask_path": "C:\\Users\\marti\\allFolder\\code\\DRAWNOUT\\whiteboard_backend\\ClusterRenders\\processed_7\\purple_0_mask.png",
       "colour_hint": "purple",
       "bbox_xyxy": [
         186,
@@ -1063,32 +833,16 @@
         302,
         528
       ],
-      "bbox_resized_xyxy": [
-        69,
-        126,
-        112,
-        197
-      ],
       "bbox_right_panel_xyxy": [
         93,
         126,
         136,
         197
       ],
-      "bbox_norm_xyxy": [
-        0.27596439169139464,
-        0.41935483870967744,
-        0.44807121661721067,
-        0.6550868486352357
-      ],
-      "batch_size": 8,
-      "batch_timing_s": 7.3231,
-      "avg_per_item_s": 0.9154,
-      "model_raw": "```json\n{\n  \"label\": \"nucleus\",\n  \"shapes\": [\n    \"circle\"\n  ],\n  \"evidence\": \"The highlighted region in the left panel is a large, centrally located structure with a dense, dark interior and a distinct outer boundary, which is characteristic of a nucleus. The red rectangle in the right panel",
+      "timing_s": 2.9319,
+      "model_raw": "```json\n{\n  \"label\": \"nucleus\",\n  \"full_visual_LEFT\": \"A purple-colored, circular object with a dense, granular interior, surrounded by a gray, textured background.\",\n  \"LEFT_SURROUNDINGS\": \"A gray, textured background with a circular, dark gray center and a ring of gray and purple structures",
       "json_objects": [],
-      "parsed": null,
-      "final": null,
-      "auto_capped": false
+      "parsed": null
     },
     "0019_purple_1_mask.png": {
       "entry": {
@@ -1108,11 +862,8 @@
           363,
           508
         ],
-        "crop_file_bbox": "purple_1_bbox.png",
         "crop_file_mask": "purple_1_mask.png"
       },
-      "mask_file": "purple_1_mask.png",
-      "mask_path": "C:\\Users\\marti\\allFolder\\code\\DRAWNOUT\\whiteboard_backend\\ClusterRenders\\processed_7\\purple_1_mask.png",
       "colour_hint": "purple",
       "bbox_xyxy": [
         286,
@@ -1120,32 +871,26 @@
         363,
         508
       ],
-      "bbox_resized_xyxy": [
-        106,
-        150,
-        135,
-        189
-      ],
       "bbox_right_panel_xyxy": [
         130,
         150,
         159,
         189
       ],
-      "bbox_norm_xyxy": [
-        0.42433234421364985,
-        0.5012406947890818,
-        0.5385756676557863,
-        0.630272952853598
+      "timing_s": 2.9319,
+      "model_raw": "```json\n{\n  \"label\": \"endoplasmic reticulum\",\n  \"full_visual_LEFT\": \"A cropped box with a purple main object and grayscaled surroundings.\",\n  \"LEFT_SURROUNDINGS\": \"A grayscaled background with a purple object in the foreground.\"\n}\n```",
+      "json_objects": [
+        {
+          "label": "endoplasmic reticulum",
+          "full_visual_LEFT": "A cropped box with a purple main object and grayscaled surroundings.",
+          "LEFT_SURROUNDINGS": "A grayscaled background with a purple object in the foreground."
+        }
       ],
-      "batch_size": 8,
-      "batch_timing_s": 7.3231,
-      "avg_per_item_s": 0.9154,
-      "model_raw": "```json\n{\n  \"label\": \"nucleus\",\n  \"shapes\": [\n    \"circle\"\n  ],\n  \"evidence\": \"The highlighted region in the left panel is a large, dark, circular structure with a dense, granular appearance, consistent with the appearance of a nucleus. The red rectangle in the right panel also highlights",
-      "json_objects": [],
-      "parsed": null,
-      "final": null,
-      "auto_capped": false
+      "parsed": {
+        "label": "endoplasmic reticulum",
+        "full_visual_LEFT": "A cropped box with a purple main object and grayscaled surroundings.",
+        "LEFT_SURROUNDINGS": "A grayscaled background with a purple object in the foreground."
+      }
     },
     "0020_gray_0_mask.png": {
       "entry": {
@@ -1153,52 +898,44 @@
         "color_name": "gray",
         "group_index_in_color": 0,
         "stroke_indexes": [
-          104
+          104,
+          105
         ],
         "bbox_xyxy": [
-          251,
-          548,
-          324,
-          610
+          40,
+          63,
+          119,
+          105
         ],
-        "crop_file_bbox": "gray_0_bbox.png",
         "crop_file_mask": "gray_0_mask.png"
       },
-      "mask_file": "gray_0_mask.png",
-      "mask_path": "C:\\Users\\marti\\allFolder\\code\\DRAWNOUT\\whiteboard_backend\\ClusterRenders\\processed_7\\gray_0_mask.png",
       "colour_hint": "gray",
       "bbox_xyxy": [
-        251,
-        548,
-        324,
-        610
-      ],
-      "bbox_resized_xyxy": [
-        93,
-        204,
-        121,
-        227
+        40,
+        63,
+        119,
+        105
       ],
       "bbox_right_panel_xyxy": [
-        117,
-        204,
-        145,
-        227
+        39,
+        23,
+        68,
+        39
       ],
-      "bbox_norm_xyxy": [
-        0.3724035608308605,
-        0.6799007444168734,
-        0.4807121661721068,
-        0.7568238213399504
+      "timing_s": 2.9319,
+      "model_raw": "```json\n{\n  \"label\": \"nucleus\",\n  \"full_visual_LEFT\": \"nucleus\",\n  \"LEFT_SURROUNDINGS\": \"nucleus\"\n}\n```",
+      "json_objects": [
+        {
+          "label": "nucleus",
+          "full_visual_LEFT": "nucleus",
+          "LEFT_SURROUNDINGS": "nucleus"
+        }
       ],
-      "batch_size": 8,
-      "batch_timing_s": 7.3231,
-      "avg_per_item_s": 0.9154,
-      "model_raw": "```json\n{\n  \"label\": \"cytoplasm\",\n  \"shapes\": [\n    \"circle\"\n  ],\n  \"evidence\": \"The highlighted object in the left panel is a large, irregularly shaped, light-blue area with a smooth surface, which is consistent with the appearance of cytoplasm in a cell. The right panel",
-      "json_objects": [],
-      "parsed": null,
-      "final": null,
-      "auto_capped": false
+      "parsed": {
+        "label": "nucleus",
+        "full_visual_LEFT": "nucleus",
+        "LEFT_SURROUNDINGS": "nucleus"
+      }
     },
     "0021_gray_1_mask.png": {
       "entry": {
@@ -1206,107 +943,113 @@
         "color_name": "gray",
         "group_index_in_color": 1,
         "stroke_indexes": [
-          105
+          107
         ],
         "bbox_xyxy": [
-          386,
-          554,
-          440,
-          609
+          251,
+          549,
+          325,
+          610
         ],
-        "crop_file_bbox": "gray_1_bbox.png",
         "crop_file_mask": "gray_1_mask.png"
       },
-      "mask_file": "gray_1_mask.png",
-      "mask_path": "C:\\Users\\marti\\allFolder\\code\\DRAWNOUT\\whiteboard_backend\\ClusterRenders\\processed_7\\gray_1_mask.png",
       "colour_hint": "gray",
       "bbox_xyxy": [
-        386,
-        554,
-        440,
-        609
-      ],
-      "bbox_resized_xyxy": [
-        144,
-        206,
-        164,
-        227
+        251,
+        549,
+        325,
+        610
       ],
       "bbox_right_panel_xyxy": [
-        168,
-        206,
-        188,
+        117,
+        204,
+        145,
         227
       ],
-      "bbox_norm_xyxy": [
-        0.5727002967359051,
-        0.6873449131513648,
-        0.6528189910979229,
-        0.7555831265508685
-      ],
-      "batch_size": 8,
-      "batch_timing_s": 7.3231,
-      "avg_per_item_s": 0.9154,
-      "model_raw": "```json\n{\n  \"label\": \"lysosome\",\n  \"shapes\": [\n    \"circle\"\n  ],\n  \"evidence\": \"The highlighted object in the left panel is a small, dark, circular structure located within the cell. This is consistent with the appearance of a lysosome, which is a membrane-bound organelle that contains",
+      "timing_s": 2.9319,
+      "model_raw": "```json\n{\n  \"label\": \"nucleus\",\n  \"full_visual_LEFT\": \"A blurry, light-colored, oval-shaped object with a soft, rounded outline, appearing to be the main focus of the left image.\",\n  \"LEFT_SURROUNDINGS\": \"A darker, grayish background with a faint, horizontal line at the bottom",
       "json_objects": [],
-      "parsed": null,
-      "final": null,
-      "auto_capped": false
+      "parsed": null
     },
-    "0022_black_0_mask.png": {
+    "0022_gray_2_mask.png": {
+      "entry": {
+        "color_id": 10,
+        "color_name": "gray",
+        "group_index_in_color": 2,
+        "stroke_indexes": [
+          106
+        ],
+        "bbox_xyxy": [
+          377,
+          155,
+          422,
+          187
+        ],
+        "crop_file_mask": "gray_2_mask.png"
+      },
+      "colour_hint": "gray",
+      "bbox_xyxy": [
+        377,
+        155,
+        422,
+        187
+      ],
+      "bbox_right_panel_xyxy": [
+        164,
+        58,
+        181,
+        70
+      ],
+      "timing_s": 2.9319,
+      "model_raw": "```json\n{\n  \"label\": \"nucleus\",\n  \"full_visual_LEFT\": \"A black, L-shaped object on a white background.\",\n  \"LEFT_SURROUNDINGS\": \"A white background with a black border on the left side.\"\n}\n```",
+      "json_objects": [
+        {
+          "label": "nucleus",
+          "full_visual_LEFT": "A black, L-shaped object on a white background.",
+          "LEFT_SURROUNDINGS": "A white background with a black border on the left side."
+        }
+      ],
+      "parsed": {
+        "label": "nucleus",
+        "full_visual_LEFT": "A black, L-shaped object on a white background.",
+        "LEFT_SURROUNDINGS": "A white background with a black border on the left side."
+      }
+    },
+    "0023_black_0_mask.png": {
       "entry": {
         "color_id": 11,
         "color_name": "black",
         "group_index_in_color": 0,
         "stroke_indexes": [
-          116
+          120
         ],
         "bbox_xyxy": [
-          110,
-          498,
-          243,
-          637
+          88,
+          497,
+          244,
+          638
         ],
-        "crop_file_bbox": "black_0_bbox.png",
         "crop_file_mask": "black_0_mask.png"
       },
-      "mask_file": "black_0_mask.png",
-      "mask_path": "C:\\Users\\marti\\allFolder\\code\\DRAWNOUT\\whiteboard_backend\\ClusterRenders\\processed_7\\black_0_mask.png",
       "colour_hint": "black",
       "bbox_xyxy": [
-        110,
-        498,
-        243,
-        637
-      ],
-      "bbox_resized_xyxy": [
-        41,
-        185,
-        90,
-        237
+        88,
+        497,
+        244,
+        638
       ],
       "bbox_right_panel_xyxy": [
-        65,
+        57,
         185,
-        114,
+        115,
         237
       ],
-      "bbox_norm_xyxy": [
-        0.1632047477744807,
-        0.6178660049627791,
-        0.36053412462908013,
-        0.7903225806451613
-      ],
-      "batch_size": 8,
-      "batch_timing_s": 7.3231,
-      "avg_per_item_s": 0.9154,
-      "model_raw": "```json\n{\n  \"label\": \"mitochondria\",\n  \"shapes\": [\n    \"circle\"\n  ],\n  \"evidence\": \"The highlighted object in the left panel is a circular structure with a distinct, folded inner membrane, which is characteristic of a mitochondrion. The right panel shows a detailed diagram of a cell, and",
+      "timing_s": 2.9319,
+      "model_raw": "```json\n{\n  \"label\": \"mitochondria\",\n  \"full_visual_LEFT\": \"A grayscale image of a mitochondrion, showing its characteristic folded inner membrane and outer membrane, with a red line indicating its boundary.\",\n  \"LEFT_SURROUNDINGS\": \"A grayscale image of a cell with a rounded shape, containing a large central",
       "json_objects": [],
-      "parsed": null,
-      "final": null,
-      "auto_capped": false
+      "parsed": null
     },
-    "0023_black_1_mask.png": {
+    "0024_black_1_mask.png": {
       "entry": {
         "color_id": 11,
         "color_name": "black",
@@ -1315,134 +1058,176 @@
           110
         ],
         "bbox_xyxy": [
-          131,
-          195,
-          270,
-          462
+          101,
+          74,
+          143,
+          103
         ],
-        "crop_file_bbox": "black_1_bbox.png",
         "crop_file_mask": "black_1_mask.png"
       },
-      "mask_file": "black_1_mask.png",
-      "mask_path": "C:\\Users\\marti\\allFolder\\code\\DRAWNOUT\\whiteboard_backend\\ClusterRenders\\processed_7\\black_1_mask.png",
       "colour_hint": "black",
       "bbox_xyxy": [
-        131,
-        195,
-        270,
-        462
-      ],
-      "bbox_resized_xyxy": [
-        49,
-        73,
-        100,
-        172
+        101,
+        74,
+        143,
+        103
       ],
       "bbox_right_panel_xyxy": [
-        73,
-        73,
-        124,
-        172
+        62,
+        28,
+        77,
+        38
       ],
-      "bbox_norm_xyxy": [
-        0.1943620178041543,
-        0.24193548387096775,
-        0.40059347181008903,
-        0.5732009925558312
+      "timing_s": 2.9319,
+      "model_raw": "```json\n{\n  \"label\": \"nucleus\",\n  \"full_visual_LEFT\": \"a blurry image of the word 'nucleus.'\",\n  \"LEFT_SURROUNDINGS\": \"a black background with a white area containing the word 'nucleus.'\"\n}\n```",
+      "json_objects": [
+        {
+          "label": "nucleus",
+          "full_visual_LEFT": "a blurry image of the word 'nucleus.'",
+          "LEFT_SURROUNDINGS": "a black background with a white area containing the word 'nucleus.'"
+        }
       ],
-      "batch_size": 8,
-      "batch_timing_s": 7.3231,
-      "avg_per_item_s": 0.9154,
-      "model_raw": "```json\n{\n  \"label\": \"nucleus\",\n  \"shapes\": [\n    \"circle\"\n  ],\n  \"evidence\": \"The highlighted region in the left panel is a large, circular structure with a dense, dark center, which is characteristic of a nucleus. The red rectangle in the right panel also highlights a large, circular",
-      "json_objects": [],
-      "parsed": null,
-      "final": null,
-      "auto_capped": false
+      "parsed": {
+        "label": "nucleus",
+        "full_visual_LEFT": "a blurry image of the word 'nucleus.'",
+        "LEFT_SURROUNDINGS": "a black background with a white area containing the word 'nucleus.'"
+      }
     },
-    "0024_black_2_mask.png": {
+    "0025_black_2_mask.png": {
       "entry": {
         "color_id": 11,
         "color_name": "black",
         "group_index_in_color": 2,
         "stroke_indexes": [
-          106
+          112,
+          113
         ],
         "bbox_xyxy": [
-          216,
-          11,
-          325,
-          437
+          118,
+          139,
+          292,
+          462
         ],
-        "crop_file_bbox": "black_2_bbox.png",
         "crop_file_mask": "black_2_mask.png"
       },
-      "mask_file": "black_2_mask.png",
-      "mask_path": "C:\\Users\\marti\\allFolder\\code\\DRAWNOUT\\whiteboard_backend\\ClusterRenders\\processed_7\\black_2_mask.png",
       "colour_hint": "black",
       "bbox_xyxy": [
-        216,
-        11,
-        325,
-        437
-      ],
-      "bbox_resized_xyxy": [
-        80,
-        4,
-        121,
-        163
+        118,
+        139,
+        292,
+        462
       ],
       "bbox_right_panel_xyxy": [
-        104,
-        4,
-        145,
-        163
+        68,
+        52,
+        133,
+        172
       ],
-      "bbox_norm_xyxy": [
-        0.32047477744807124,
-        0.013647642679900745,
-        0.4821958456973294,
-        0.5421836228287841
-      ],
-      "batch_size": 8,
-      "batch_timing_s": 7.3231,
-      "avg_per_item_s": 0.9154,
-      "model_raw": "```json\n{\n  \"label\": \"nucleus\",\n  \"shapes\": [\n    \"circle\"\n  ],\n  \"evidence\": \"The highlighted region in the left panel is a large, circular structure with a dense, dark interior, which is characteristic of a nucleus. The red rectangle in the right panel also highlights a nucleus, which",
+      "timing_s": 2.8023,
+      "model_raw": "```json\n{\n  \"label\": \"nucleus\",\n  \"full_visual_LEFT\": \"A black line drawing of a nucleus with a red outline, showing a circular shape with a dense center and a surrounding membrane.\",\n  \"LEFT_SURROUNDINGS\": \"A grayscale image of a cell with a complex internal structure, including a dense, gran",
       "json_objects": [],
-      "parsed": null,
-      "final": null,
-      "auto_capped": false
+      "parsed": null
     },
-    "0025_black_3_mask.png": {
+    "0026_black_3_mask.png": {
       "entry": {
         "color_id": 11,
         "color_name": "black",
         "group_index_in_color": 3,
         "stroke_indexes": [
-          117
+          118
+        ],
+        "bbox_xyxy": [
+          143,
+          460,
+          190,
+          497
+        ],
+        "crop_file_mask": "black_3_mask.png"
+      },
+      "colour_hint": "black",
+      "bbox_xyxy": [
+        143,
+        460,
+        190,
+        497
+      ],
+      "bbox_right_panel_xyxy": [
+        77,
+        171,
+        95,
+        185
+      ],
+      "timing_s": 2.8023,
+      "model_raw": "```json\n{\n  \"label\": \"nucleus\",\n  \"full_visual_LEFT\": \"A blurry image showing a dark, elongated object with a greenish tip, possibly a cell or a structure within a cell, in the foreground.\",\n  \"LEFT_SURROUNDINGS\": \"A grayscale background with a circular shape, possibly a cell or",
+      "json_objects": [],
+      "parsed": null
+    },
+    "0027_black_4_mask.png": {
+      "entry": {
+        "color_id": 11,
+        "color_name": "black",
+        "group_index_in_color": 4,
+        "stroke_indexes": [
+          108
+        ],
+        "bbox_xyxy": [
+          200,
+          11,
+          325,
+          437
+        ],
+        "crop_file_mask": "black_4_mask.png"
+      },
+      "colour_hint": "black",
+      "bbox_xyxy": [
+        200,
+        11,
+        325,
+        437
+      ],
+      "bbox_right_panel_xyxy": [
+        98,
+        4,
+        145,
+        163
+      ],
+      "timing_s": 2.8023,
+      "model_raw": "```json\n{\n  \"label\": \"nucleus\",\n  \"full_visual_LEFT\": \"A cropped box with a colored black main object and grayscaled surroundings\",\n  \"LEFT_SURROUNDINGS\": \"A grayscaled image of a cell with a circular structure in the center, surrounded by a darker, textured area.\"\n}\n```",
+      "json_objects": [
+        {
+          "label": "nucleus",
+          "full_visual_LEFT": "A cropped box with a colored black main object and grayscaled surroundings",
+          "LEFT_SURROUNDINGS": "A grayscaled image of a cell with a circular structure in the center, surrounded by a darker, textured area."
+        }
+      ],
+      "parsed": {
+        "label": "nucleus",
+        "full_visual_LEFT": "A cropped box with a colored black main object and grayscaled surroundings",
+        "LEFT_SURROUNDINGS": "A grayscaled image of a cell with a circular structure in the center, surrounded by a darker, textured area."
+      }
+    },
+    "0028_black_5_mask.png": {
+      "entry": {
+        "color_id": 11,
+        "color_name": "black",
+        "group_index_in_color": 5,
+        "stroke_indexes": [
+          121
         ],
         "bbox_xyxy": [
           230,
           514,
           270,
-          741
+          742
         ],
-        "crop_file_bbox": "black_3_bbox.png",
-        "crop_file_mask": "black_3_mask.png"
+        "crop_file_mask": "black_5_mask.png"
       },
-      "mask_file": "black_3_mask.png",
-      "mask_path": "C:\\Users\\marti\\allFolder\\code\\DRAWNOUT\\whiteboard_backend\\ClusterRenders\\processed_7\\black_3_mask.png",
       "colour_hint": "black",
       "bbox_xyxy": [
         230,
         514,
         270,
-        741
-      ],
-      "bbox_resized_xyxy": [
-        86,
-        191,
-        100,
-        276
+        742
       ],
       "bbox_right_panel_xyxy": [
         110,
@@ -1450,446 +1235,256 @@
         124,
         276
       ],
-      "bbox_norm_xyxy": [
-        0.34124629080118696,
-        0.6377171215880894,
-        0.40059347181008903,
-        0.9193548387096774
+      "timing_s": 2.8023,
+      "model_raw": "```json\n{\n  \"label\": \"cytoplasm\",\n  \"full_visual_LEFT\": \"A black line with a colored object at the end, set against a gray background.\",\n  \"LEFT_SURROUNDINGS\": \"A gray background with a black line and a colored object at the end.\"\n}\n```",
+      "json_objects": [
+        {
+          "label": "cytoplasm",
+          "full_visual_LEFT": "A black line with a colored object at the end, set against a gray background.",
+          "LEFT_SURROUNDINGS": "A gray background with a black line and a colored object at the end."
+        }
       ],
-      "batch_size": 8,
-      "batch_timing_s": 7.2491,
-      "avg_per_item_s": 0.9061,
-      "model_raw": "```json\n{\n  \"label\": \"mitochondria\",\n  \"shapes\": [\n    \"circle\"\n  ],\n  \"evidence\": \"The highlighted object in the left panel is a small, circular structure with a distinct, dense appearance, consistent with the appearance of a mitochondrion. The right panel shows a detailed view of a cell",
-      "json_objects": [],
-      "parsed": null,
-      "final": null,
-      "auto_capped": false
+      "parsed": {
+        "label": "cytoplasm",
+        "full_visual_LEFT": "A black line with a colored object at the end, set against a gray background.",
+        "LEFT_SURROUNDINGS": "A gray background with a black line and a colored object at the end."
+      }
     },
-    "0026_black_4_mask.png": {
-      "entry": {
-        "color_id": 11,
-        "color_name": "black",
-        "group_index_in_color": 4,
-        "stroke_indexes": [
-          109
-        ],
-        "bbox_xyxy": [
-          246,
-          140,
-          292,
-          444
-        ],
-        "crop_file_bbox": "black_4_bbox.png",
-        "crop_file_mask": "black_4_mask.png"
-      },
-      "mask_file": "black_4_mask.png",
-      "mask_path": "C:\\Users\\marti\\allFolder\\code\\DRAWNOUT\\whiteboard_backend\\ClusterRenders\\processed_7\\black_4_mask.png",
-      "colour_hint": "black",
-      "bbox_xyxy": [
-        246,
-        140,
-        292,
-        444
-      ],
-      "bbox_resized_xyxy": [
-        92,
-        52,
-        109,
-        165
-      ],
-      "bbox_right_panel_xyxy": [
-        116,
-        52,
-        133,
-        165
-      ],
-      "bbox_norm_xyxy": [
-        0.3649851632047478,
-        0.17369727047146402,
-        0.4332344213649852,
-        0.5508684863523573
-      ],
-      "batch_size": 8,
-      "batch_timing_s": 7.2491,
-      "avg_per_item_s": 0.9061,
-      "model_raw": "```json\n{\n  \"label\": \"nucleus\",\n  \"shapes\": [\n    \"circle\"\n  ],\n  \"evidence\": \"The highlighted object in the left panel is a large, circular structure with a dense, dark interior, which is characteristic of a nucleus. The red rectangle in the right panel also highlights this same structure.\",\n",
-      "json_objects": [],
-      "parsed": null,
-      "final": null,
-      "auto_capped": false
-    },
-    "0027_black_5_mask.png": {
-      "entry": {
-        "color_id": 11,
-        "color_name": "black",
-        "group_index_in_color": 5,
-        "stroke_indexes": [
-          119
-        ],
-        "bbox_xyxy": [
-          282,
-          568,
-          331,
-          690
-        ],
-        "crop_file_bbox": "black_5_bbox.png",
-        "crop_file_mask": "black_5_mask.png"
-      },
-      "mask_file": "black_5_mask.png",
-      "mask_path": "C:\\Users\\marti\\allFolder\\code\\DRAWNOUT\\whiteboard_backend\\ClusterRenders\\processed_7\\black_5_mask.png",
-      "colour_hint": "black",
-      "bbox_xyxy": [
-        282,
-        568,
-        331,
-        690
-      ],
-      "bbox_resized_xyxy": [
-        105,
-        211,
-        123,
-        257
-      ],
-      "bbox_right_panel_xyxy": [
-        129,
-        211,
-        147,
-        257
-      ],
-      "bbox_norm_xyxy": [
-        0.41839762611275966,
-        0.7047146401985112,
-        0.4910979228486647,
-        0.8560794044665012
-      ],
-      "batch_size": 8,
-      "batch_timing_s": 7.2491,
-      "avg_per_item_s": 0.9061,
-      "model_raw": "```json\n{\n  \"label\": \"mitochondria\",\n  \"shapes\": [\n    \"circle\"\n  ],\n  \"evidence\": \"The highlighted object in the left panel is a small, dark, circular structure with a distinct boundary, which is consistent with the appearance of a mitochondrion. The right panel shows a detailed view of",
-      "json_objects": [],
-      "parsed": null,
-      "final": null,
-      "auto_capped": false
-    },
-    "0028_black_6_mask.png": {
+    "0029_black_6_mask.png": {
       "entry": {
         "color_id": 11,
         "color_name": "black",
         "group_index_in_color": 6,
         "stroke_indexes": [
-          118
+          124
         ],
         "bbox_xyxy": [
-          325,
-          539,
-          440,
-          656
+          281,
+          567,
+          334,
+          698
         ],
-        "crop_file_bbox": "black_6_bbox.png",
         "crop_file_mask": "black_6_mask.png"
       },
-      "mask_file": "black_6_mask.png",
-      "mask_path": "C:\\Users\\marti\\allFolder\\code\\DRAWNOUT\\whiteboard_backend\\ClusterRenders\\processed_7\\black_6_mask.png",
       "colour_hint": "black",
       "bbox_xyxy": [
-        325,
-        539,
-        440,
-        656
-      ],
-      "bbox_resized_xyxy": [
-        121,
-        201,
-        164,
-        244
+        281,
+        567,
+        334,
+        698
       ],
       "bbox_right_panel_xyxy": [
-        145,
-        201,
-        188,
-        244
+        129,
+        211,
+        148,
+        260
       ],
-      "bbox_norm_xyxy": [
-        0.4821958456973294,
-        0.6687344913151365,
-        0.6528189910979229,
-        0.8138957816377171
-      ],
-      "batch_size": 8,
-      "batch_timing_s": 7.2491,
-      "avg_per_item_s": 0.9061,
-      "model_raw": "```json\n{\n  \"label\": \"organelles\",\n  \"shapes\": [\n    \"circle\",\n    \"line\",\n    \"square\"\n  ],\n  \"evidence\": \"The left panel shows a highlighted object that is a large, circular structure with a dense, granular appearance, consistent with the appearance of a nucleus. The object",
+      "timing_s": 2.8023,
+      "model_raw": "```json\n{\n  \"label\": \"cytoskeleton\",\n  \"full_visual_LEFT\": \"A black, elongated object with a thick, dark outline and a lighter, yellowish-orange tip, set against a gray, blurred background.\",\n  \"LEFT_SURROUNDINGS\": \"A gray, blurred background with a curved, light gray shape above",
       "json_objects": [],
-      "parsed": null,
-      "final": null,
-      "auto_capped": false
+      "parsed": null
     },
-    "0029_black_7_mask.png": {
+    "0030_black_7_mask.png": {
       "entry": {
         "color_id": 11,
         "color_name": "black",
         "group_index_in_color": 7,
         "stroke_indexes": [
-          107
+          123
         ],
         "bbox_xyxy": [
-          319,
-          14,
-          391,
-          326
+          324,
+          538,
+          460,
+          678
         ],
-        "crop_file_bbox": "black_7_bbox.png",
         "crop_file_mask": "black_7_mask.png"
       },
-      "mask_file": "black_7_mask.png",
-      "mask_path": "C:\\Users\\marti\\allFolder\\code\\DRAWNOUT\\whiteboard_backend\\ClusterRenders\\processed_7\\black_7_mask.png",
       "colour_hint": "black",
       "bbox_xyxy": [
-        319,
-        14,
-        391,
-        326
-      ],
-      "bbox_resized_xyxy": [
-        119,
-        5,
-        146,
-        121
+        324,
+        538,
+        460,
+        678
       ],
       "bbox_right_panel_xyxy": [
-        143,
-        5,
-        170,
-        121
+        145,
+        200,
+        195,
+        252
       ],
-      "bbox_norm_xyxy": [
-        0.4732937685459941,
-        0.017369727047146403,
-        0.5801186943620178,
-        0.4044665012406948
-      ],
-      "batch_size": 8,
-      "batch_timing_s": 7.2491,
-      "avg_per_item_s": 0.9061,
-      "model_raw": "```json\n{\n  \"label\": \"organelles\",\n  \"shapes\": [\n    \"circle\",\n    \"line\",\n    \"square\"\n  ],\n  \"evidence\": \"The left panel shows a highlighted region that is a large, circular structure with a distinct boundary, which is consistent with the appearance of an organelle. The",
+      "timing_s": 2.8023,
+      "model_raw": "```json\n{\n  \"label\": \"cytoplasm\",\n  \"full_visual_LEFT\": \"A black object with a diagonal orientation, appearing as a thick, dark line with a yellowish-orange highlight, set against a grayscale background.\",\n  \"LEFT_SURROUNDINGS\": \"A grayscale image with a circular, textured pattern in the background, possibly",
       "json_objects": [],
-      "parsed": null,
-      "final": null,
-      "auto_capped": false
+      "parsed": null
     },
-    "0030_black_8_mask.png": {
+    "0031_black_8_mask.png": {
       "entry": {
         "color_id": 11,
         "color_name": "black",
         "group_index_in_color": 8,
         "stroke_indexes": [
-          108
+          109
         ],
         "bbox_xyxy": [
-          347,
-          95,
-          388,
-          325
+          319,
+          14,
+          430,
+          326
         ],
-        "crop_file_bbox": "black_8_bbox.png",
         "crop_file_mask": "black_8_mask.png"
       },
-      "mask_file": "black_8_mask.png",
-      "mask_path": "C:\\Users\\marti\\allFolder\\code\\DRAWNOUT\\whiteboard_backend\\ClusterRenders\\processed_7\\black_8_mask.png",
       "colour_hint": "black",
       "bbox_xyxy": [
-        347,
-        95,
-        388,
-        325
-      ],
-      "bbox_resized_xyxy": [
-        129,
-        35,
-        144,
-        121
+        319,
+        14,
+        430,
+        326
       ],
       "bbox_right_panel_xyxy": [
-        153,
-        35,
-        168,
+        143,
+        5,
+        184,
         121
       ],
-      "bbox_norm_xyxy": [
-        0.5148367952522255,
-        0.11786600496277916,
-        0.5756676557863502,
-        0.4032258064516129
+      "timing_s": 2.8023,
+      "model_raw": "```json\n{\n  \"label\": \"nucleus\",\n  \"full_visual_LEFT\": \"A black line drawing of a nucleus with a purple center and a surrounding structure.\",\n  \"LEFT_SURROUNDINGS\": \"A grayscale background with a black line drawing of a nucleus and a gray background.\"\n}\n```",
+      "json_objects": [
+        {
+          "label": "nucleus",
+          "full_visual_LEFT": "A black line drawing of a nucleus with a purple center and a surrounding structure.",
+          "LEFT_SURROUNDINGS": "A grayscale background with a black line drawing of a nucleus and a gray background."
+        }
       ],
-      "batch_size": 8,
-      "batch_timing_s": 7.2491,
-      "avg_per_item_s": 0.9061,
-      "model_raw": "```json\n{\n  \"label\": \"nucleus\",\n  \"shapes\": [\n    \"circle\"\n  ],\n  \"evidence\": \"The highlighted object in the left panel is a large, dark purple circle with a dense, granular appearance, which is characteristic of the nucleus. The red rectangle in the right panel also highlights a large",
-      "json_objects": [],
-      "parsed": null,
-      "final": null,
-      "auto_capped": false
+      "parsed": {
+        "label": "nucleus",
+        "full_visual_LEFT": "A black line drawing of a nucleus with a purple center and a surrounding structure.",
+        "LEFT_SURROUNDINGS": "A grayscale background with a black line drawing of a nucleus and a gray background."
+      }
     },
-    "0031_black_9_mask.png": {
+    "0032_black_9_mask.png": {
       "entry": {
         "color_id": 11,
         "color_name": "black",
         "group_index_in_color": 9,
         "stroke_indexes": [
-          115
+          111
         ],
         "bbox_xyxy": [
-          371,
-          478,
-          478,
-          549
+          347,
+          96,
+          429,
+          325
         ],
-        "crop_file_bbox": "black_9_bbox.png",
         "crop_file_mask": "black_9_mask.png"
       },
-      "mask_file": "black_9_mask.png",
-      "mask_path": "C:\\Users\\marti\\allFolder\\code\\DRAWNOUT\\whiteboard_backend\\ClusterRenders\\processed_7\\black_9_mask.png",
       "colour_hint": "black",
       "bbox_xyxy": [
-        371,
-        478,
-        478,
-        549
-      ],
-      "bbox_resized_xyxy": [
-        138,
-        178,
-        178,
-        204
+        347,
+        96,
+        429,
+        325
       ],
       "bbox_right_panel_xyxy": [
-        162,
-        178,
-        202,
-        204
+        153,
+        36,
+        184,
+        121
       ],
-      "bbox_norm_xyxy": [
-        0.5504451038575667,
-        0.5930521091811415,
-        0.7091988130563798,
-        0.6811414392059554
-      ],
-      "batch_size": 8,
-      "batch_timing_s": 7.2491,
-      "avg_per_item_s": 0.9061,
-      "model_raw": "```json\n{\n  \"label\": \"organelles\",\n  \"shapes\": [\n    \"circle\",\n    \"line\",\n    \"square\"\n  ],\n  \"evidence\": \"The left panel shows a highlighted object that is a large, circular structure with a line extending from it, which is consistent with the appearance of an organelle",
+      "timing_s": 2.8023,
+      "model_raw": "```json\n{\n  \"label\": \"nucleus\",\n  \"full_visual_LEFT\": \"A black line drawing of the letter 'F' with a gray and black background.\",\n  \"LEFT_SURROUNDINGS\": \"A grayscale image of a cell structure, possibly a mitochondrion or a similar organelle, with a black outline.\"\n",
       "json_objects": [],
-      "parsed": null,
-      "final": null,
-      "auto_capped": false
+      "parsed": null
     },
-    "0032_black_10_mask.png": {
+    "0033_black_10_mask.png": {
       "entry": {
         "color_id": 11,
         "color_name": "black",
         "group_index_in_color": 10,
         "stroke_indexes": [
-          111
+          122
         ],
         "bbox_xyxy": [
-          375,
-          232,
-          405,
-          373
+          361,
+          530,
+          459,
+          626
         ],
-        "crop_file_bbox": "black_10_bbox.png",
         "crop_file_mask": "black_10_mask.png"
       },
-      "mask_file": "black_10_mask.png",
-      "mask_path": "C:\\Users\\marti\\allFolder\\code\\DRAWNOUT\\whiteboard_backend\\ClusterRenders\\processed_7\\black_10_mask.png",
       "colour_hint": "black",
       "bbox_xyxy": [
-        375,
-        232,
-        405,
-        373
-      ],
-      "bbox_resized_xyxy": [
-        140,
-        86,
-        151,
-        139
+        361,
+        530,
+        459,
+        626
       ],
       "bbox_right_panel_xyxy": [
-        164,
-        86,
-        175,
-        139
+        158,
+        197,
+        195,
+        233
       ],
-      "bbox_norm_xyxy": [
-        0.5563798219584569,
-        0.2878411910669975,
-        0.6008902077151336,
-        0.4627791563275434
+      "timing_s": 2.5597,
+      "model_raw": "```json\n{\n  \"label\": \"cytoplasm\",\n  \"full_visual_LEFT\": \"A black object with a yellow highlight, positioned diagonally in the foreground.\",\n  \"LEFT_SURROUNDINGS\": \"A grayscale background with a blurred, circular shape and a gray, elongated structure.\"\n}\n```",
+      "json_objects": [
+        {
+          "label": "cytoplasm",
+          "full_visual_LEFT": "A black object with a yellow highlight, positioned diagonally in the foreground.",
+          "LEFT_SURROUNDINGS": "A grayscale background with a blurred, circular shape and a gray, elongated structure."
+        }
       ],
-      "batch_size": 8,
-      "batch_timing_s": 7.2491,
-      "avg_per_item_s": 0.9061,
-      "model_raw": "```json\n{\n  \"label\": \"nucleus\",\n  \"shapes\": [\n    \"circle\"\n  ],\n  \"evidence\": \"The highlighted object in the left panel is a large, circular structure with a dense, purple nucleus, which is consistent with the appearance of a nucleus in a cell. The red rectangle in the right panel",
-      "json_objects": [],
-      "parsed": null,
-      "final": null,
-      "auto_capped": false
+      "parsed": {
+        "label": "cytoplasm",
+        "full_visual_LEFT": "A black object with a yellow highlight, positioned diagonally in the foreground.",
+        "LEFT_SURROUNDINGS": "A grayscale background with a blurred, circular shape and a gray, elongated structure."
+      }
     },
-    "0033_black_11_mask.png": {
+    "0034_black_11_mask.png": {
       "entry": {
         "color_id": 11,
         "color_name": "black",
         "group_index_in_color": 11,
         "stroke_indexes": [
-          112
+          119
         ],
         "bbox_xyxy": [
-          431,
-          282,
-          478,
-          341
+          369,
+          476,
+          505,
+          566
         ],
-        "crop_file_bbox": "black_11_bbox.png",
         "crop_file_mask": "black_11_mask.png"
       },
-      "mask_file": "black_11_mask.png",
-      "mask_path": "C:\\Users\\marti\\allFolder\\code\\DRAWNOUT\\whiteboard_backend\\ClusterRenders\\processed_7\\black_11_mask.png",
       "colour_hint": "black",
       "bbox_xyxy": [
-        431,
-        282,
-        478,
-        341
-      ],
-      "bbox_resized_xyxy": [
-        160,
-        105,
-        178,
-        127
+        369,
+        476,
+        505,
+        566
       ],
       "bbox_right_panel_xyxy": [
-        184,
-        105,
-        202,
-        127
+        161,
+        177,
+        212,
+        211
       ],
-      "bbox_norm_xyxy": [
-        0.6394658753709199,
-        0.34987593052109184,
-        0.7091988130563798,
-        0.4230769230769231
+      "timing_s": 2.5597,
+      "model_raw": "```json\n{\n  \"label\": \"cytoplasm\",\n  \"full_visual_LEFT\": \"A black line with a red dot on a gray background, with a gray, curved structure in the background.\",\n  \"LEFT_SURROUNDINGS\": \"A gray, curved structure in the background.\"\n}\n```",
+      "json_objects": [
+        {
+          "label": "cytoplasm",
+          "full_visual_LEFT": "A black line with a red dot on a gray background, with a gray, curved structure in the background.",
+          "LEFT_SURROUNDINGS": "A gray, curved structure in the background."
+        }
       ],
-      "batch_size": 3,
-      "batch_timing_s": 6.9078,
-      "avg_per_item_s": 2.3026,
-      "model_raw": "```json\n{\n  \"label\": \"mitochondria\",\n  \"shapes\": [\n    \"circle\"\n  ],\n  \"evidence\": \"The highlighted object in the left panel is a mitochondrion, which is a double-membrane-bound organelle with a characteristic shape. The right panel shows a diagram of a cell with a",
-      "json_objects": [],
-      "parsed": null,
-      "final": null,
-      "auto_capped": false
+      "parsed": {
+        "label": "cytoplasm",
+        "full_visual_LEFT": "A black line with a red dot on a gray background, with a gray, curved structure in the background.",
+        "LEFT_SURROUNDINGS": "A gray, curved structure in the background."
+      }
     },
-    "0034_black_12_mask.png": {
+    "0035_black_12_mask.png": {
       "entry": {
         "color_id": 11,
         "color_name": "black",
@@ -1898,81 +1493,131 @@
           114
         ],
         "bbox_xyxy": [
-          440,
-          448,
-          501,
-          474
+          375,
+          229,
+          405,
+          373
         ],
-        "crop_file_bbox": "black_12_bbox.png",
         "crop_file_mask": "black_12_mask.png"
       },
-      "mask_file": "black_12_mask.png",
-      "mask_path": "C:\\Users\\marti\\allFolder\\code\\DRAWNOUT\\whiteboard_backend\\ClusterRenders\\processed_7\\black_12_mask.png",
       "colour_hint": "black",
       "bbox_xyxy": [
-        440,
-        448,
-        501,
-        474
-      ],
-      "bbox_resized_xyxy": [
-        164,
-        167,
-        186,
-        176
+        375,
+        229,
+        405,
+        373
       ],
       "bbox_right_panel_xyxy": [
-        188,
-        167,
-        210,
-        176
+        164,
+        85,
+        175,
+        139
       ],
-      "bbox_norm_xyxy": [
-        0.6528189910979229,
-        0.5558312655086849,
-        0.7433234421364985,
-        0.5880893300248139
-      ],
-      "batch_size": 3,
-      "batch_timing_s": 6.9078,
-      "avg_per_item_s": 2.3026,
-      "model_raw": "```json\n{\n  \"label\": \"nucleus\",\n  \"shapes\": [\n    \"circle\"\n  ],\n  \"evidence\": \"The highlighted object in the left panel is a large, dark, circular structure with a dense, granular appearance, consistent with the appearance of a nucleus. The right panel shows a detailed diagram of a",
+      "timing_s": 2.5597,
+      "model_raw": "```json\n{\n  \"label\": \"nucleus\",\n  \"full_visual_LEFT\": \"A black vertical line with a gray background and a faint outline of a cell structure.\",\n  \"LEFT_SURROUNDINGS\": \"A grayscale image of a cell with a black vertical line in the center, surrounded by a faint outline of a cell structure.\"\n",
       "json_objects": [],
-      "parsed": null,
-      "final": null,
-      "auto_capped": false
+      "parsed": null
     },
-    "0035_black_13_mask.png": {
+    "0036_black_13_mask.png": {
       "entry": {
         "color_id": 11,
         "color_name": "black",
         "group_index_in_color": 13,
         "stroke_indexes": [
-          113
+          115
+        ],
+        "bbox_xyxy": [
+          431,
+          253,
+          499,
+          341
+        ],
+        "crop_file_mask": "black_13_mask.png"
+      },
+      "colour_hint": "black",
+      "bbox_xyxy": [
+        431,
+        253,
+        499,
+        341
+      ],
+      "bbox_right_panel_xyxy": [
+        184,
+        94,
+        210,
+        127
+      ],
+      "timing_s": 2.5597,
+      "model_raw": "```json\n{\n  \"label\": \"nucleus\",\n  \"full_visual_LEFT\": \"A black, diagonal object with a green tip and an orange section, set against a grayscale background with circular patterns.\",\n  \"LEFT_SURROUNDINGS\": \"A grayscale, circular, patterned background with a black diagonal object.\"\n}\n```",
+      "json_objects": [
+        {
+          "label": "nucleus",
+          "full_visual_LEFT": "A black, diagonal object with a green tip and an orange section, set against a grayscale background with circular patterns.",
+          "LEFT_SURROUNDINGS": "A grayscale, circular, patterned background with a black diagonal object."
+        }
+      ],
+      "parsed": {
+        "label": "nucleus",
+        "full_visual_LEFT": "A black, diagonal object with a green tip and an orange section, set against a grayscale background with circular patterns.",
+        "LEFT_SURROUNDINGS": "A grayscale, circular, patterned background with a black diagonal object."
+      }
+    },
+    "0037_black_14_mask.png": {
+      "entry": {
+        "color_id": 11,
+        "color_name": "black",
+        "group_index_in_color": 14,
+        "stroke_indexes": [
+          117
+        ],
+        "bbox_xyxy": [
+          440,
+          447,
+          505,
+          474
+        ],
+        "crop_file_mask": "black_14_mask.png"
+      },
+      "colour_hint": "black",
+      "bbox_xyxy": [
+        440,
+        447,
+        505,
+        474
+      ],
+      "bbox_right_panel_xyxy": [
+        188,
+        166,
+        212,
+        176
+      ],
+      "timing_s": 2.5597,
+      "model_raw": "```json\n{\n  \"label\": \"nucleus\",\n  \"full_visual_LEFT\": \"A blurry image showing a circular structure with a pinkish-red outline and a black bar across it, set against a grayscale background.\",\n  \"LEFT_SURROUNDINGS\": \"A grayscale background with a black bar and a circular structure with a pinkish-red",
+      "json_objects": [],
+      "parsed": null
+    },
+    "0038_black_15_mask.png": {
+      "entry": {
+        "color_id": 11,
+        "color_name": "black",
+        "group_index_in_color": 15,
+        "stroke_indexes": [
+          116
         ],
         "bbox_xyxy": [
           479,
           372,
-          539,
+          541,
           410
         ],
-        "crop_file_bbox": "black_13_bbox.png",
-        "crop_file_mask": "black_13_mask.png"
+        "crop_file_mask": "black_15_mask.png"
       },
-      "mask_file": "black_13_mask.png",
-      "mask_path": "C:\\Users\\marti\\allFolder\\code\\DRAWNOUT\\whiteboard_backend\\ClusterRenders\\processed_7\\black_13_mask.png",
       "colour_hint": "black",
       "bbox_xyxy": [
         479,
         372,
-        539,
+        541,
         410
-      ],
-      "bbox_resized_xyxy": [
-        178,
-        138,
-        201,
-        153
       ],
       "bbox_right_panel_xyxy": [
         202,
@@ -1980,20 +1625,20 @@
         225,
         153
       ],
-      "bbox_norm_xyxy": [
-        0.7106824925816023,
-        0.46153846153846156,
-        0.7997032640949555,
-        0.5086848635235732
+      "timing_s": 2.5597,
+      "model_raw": "```json\n{\n  \"label\": \"cytoplasm\",\n  \"full_visual_LEFT\": \"A black, elongated object with a yellowish-orange tip, set against a background of gray, vertically striped patterns.\",\n  \"LEFT_SURROUNDINGS\": \"A gray, vertically striped background with a black, elongated object in the foreground.\"\n}\n",
+      "json_objects": [
+        {
+          "label": "cytoplasm",
+          "full_visual_LEFT": "A black, elongated object with a yellowish-orange tip, set against a background of gray, vertically striped patterns.",
+          "LEFT_SURROUNDINGS": "A gray, vertically striped background with a black, elongated object in the foreground."
+        }
       ],
-      "batch_size": 3,
-      "batch_timing_s": 6.9078,
-      "avg_per_item_s": 2.3026,
-      "model_raw": "```json\n{\n  \"label\": \"mitochondria\",\n  \"shapes\": [\n    \"circle\"\n  ],\n  \"evidence\": \"The highlighted object in the left panel is a small, dark, elongated structure with a circular base, which is consistent with the appearance of a mitochondrion. The right panel shows a diagram of",
-      "json_objects": [],
-      "parsed": null,
-      "final": null,
-      "auto_capped": false
+      "parsed": {
+        "label": "cytoplasm",
+        "full_visual_LEFT": "A black, elongated object with a yellowish-orange tip, set against a background of gray, vertically striped patterns.",
+        "LEFT_SURROUNDINGS": "A gray, vertically striped background with a black, elongated object in the foreground."
+      }
     }
   },
   "cluster_order": [
@@ -2018,19 +1663,22 @@
     "0019_purple_1_mask.png",
     "0020_gray_0_mask.png",
     "0021_gray_1_mask.png",
-    "0022_black_0_mask.png",
-    "0023_black_1_mask.png",
-    "0024_black_2_mask.png",
-    "0025_black_3_mask.png",
-    "0026_black_4_mask.png",
-    "0027_black_5_mask.png",
-    "0028_black_6_mask.png",
-    "0029_black_7_mask.png",
-    "0030_black_8_mask.png",
-    "0031_black_9_mask.png",
-    "0032_black_10_mask.png",
-    "0033_black_11_mask.png",
-    "0034_black_12_mask.png",
-    "0035_black_13_mask.png"
+    "0022_gray_2_mask.png",
+    "0023_black_0_mask.png",
+    "0024_black_1_mask.png",
+    "0025_black_2_mask.png",
+    "0026_black_3_mask.png",
+    "0027_black_4_mask.png",
+    "0028_black_5_mask.png",
+    "0029_black_6_mask.png",
+    "0030_black_7_mask.png",
+    "0031_black_8_mask.png",
+    "0032_black_9_mask.png",
+    "0033_black_10_mask.png",
+    "0034_black_11_mask.png",
+    "0035_black_12_mask.png",
+    "0036_black_13_mask.png",
+    "0037_black_14_mask.png",
+    "0038_black_15_mask.png"
   ]
 }

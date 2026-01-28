@@ -26,7 +26,7 @@ except Exception:
 
 
 # ============================
-# PATHS (NO ARGS)
+# PATHS
 # ============================
 BASE_DIR = Path(__file__).resolve().parent
 
@@ -42,7 +42,7 @@ JSON_CACHE_PATH = CACHE_DIR / "processed_json_index.json"
 
 
 # ============================
-# MODEL CONFIG (VRAM CAP)
+# MODEL CONFIG 
 # ============================
 MODEL_ID = "Qwen/Qwen3-VL-2B-Instruct"
 
@@ -55,11 +55,11 @@ GPU_INDEX = 0
 FORCE_CPU = False
 
 QUANT_MODE = None # "4bit" | "8bit" | "none"
-INT8_CPU_OFFLOAD = False  # only relevant if QUANT_MODE=="8bit"
+INT8_CPU_OFFLOAD = False 
 
 
 # ============================
-# BATCHING (NO AUTO BACKOFF)
+# BATCHING 
 # ============================
 # Set to 1 => strict cluster-by-cluster (lowest VRAM).
 # Set >1 => batching (faster, more VRAM).
@@ -72,7 +72,7 @@ BATCH_SIZE = 8
 # PANEL_EDGE = PROC_LONGEST_EDGE//2
 PROC_LONGEST_EDGE = 600 # composite max side;
 
-SUGGESTION_LIMIT = 20
+SUGGESTION_LIMIT = 40
 MAX_NEW_TOKENS = 70
 DO_SAMPLE = False
 
@@ -392,39 +392,48 @@ def build_label_refine_prompt(base_context: str, raw_candidates: List[str]) -> s
     cand_text = ", ".join(cand) if cand else "(none)"
 
     return (
-        "You are given a noisy list of candidate words, part of a main object.\n\n"
-        "TASK:\n"
-        "Return a NEW label list of OBJECT COMPONENTS / PARTS that the main object is built from.\n"
-        "These must be plausible sub-objects/components that could appear in a diagram/photo.\n\n"
+        f"You are given a noisy list of candidate words, describing parts of a(n) {base_context} - MAIN .\n\n"
+        f"Return a NEW list of OBJECT COMPONENTS / PARTS that the {base_context} would be built from.\n"
+        "Fill in gaps in the pruned list so that it becomes a set of ALL objects that build up MAIN.\n\n"
+        "Fill the new list with as many unique objects as possible"
         "Examples:\n"
-        "- face -> face parts\n"
-        "- eukaryotic cell -> organels\n"
+        "- face -> f each face part\n"
+        "- eukaryotic cell -> all organels\n"
         "- car -> wheel, tire, rim, door...n\n"
-        f"MAIN OBJECT: {bc}\n"
         f"RAW CANDIDATES: {cand_text}\n\n"
         "RULES:\n"
         "- Output ONLY JSON\n"
-        "- JSON format: {\"labels\":[\"...\",\"...\",...]}\n"
+        "- Example JSON in format:{"
+        "{\"labels\": [\"...\", \"...\"]}\n"
         "- labels must be short strings (1-4 words max)\n"
-        "- 8 to 30 labels max\n"
         "- no duplicates\n"
-        "- no full sentences\n"
-        "- prefer lowercase\n"
     )
 
 
 def _parse_refined_labels(text_out: str) -> List[str]:
     obj = extract_json_object(text_out)
+
     if isinstance(obj, dict):
         labels = obj.get("labels")
+
         if isinstance(labels, list):
             out: List[str] = []
             seen = set()
-            for x in labels:
-                if not isinstance(x, str):
+
+            for item in labels:
+                name = None
+
+                if isinstance(item, str):
+                    name = item
+                elif isinstance(item, dict):
+                    n = item.get("name")
+                    if isinstance(n, str):
+                        name = n
+
+                if not isinstance(name, str):
                     continue
-                # reuse your cleaner to keep format consistent
-                c = _clean_word(x)
+
+                c = _clean_word(name)
                 if not c:
                     continue
                 k = c.lower()
@@ -432,7 +441,9 @@ def _parse_refined_labels(text_out: str) -> List[str]:
                     continue
                 seen.add(k)
                 out.append(c)
-            return out
+
+            if out:
+                return out
 
     # fallback: try comma/newline split if model didn't follow JSON
     out: List[str] = []
@@ -447,6 +458,7 @@ def _parse_refined_labels(text_out: str) -> List[str]:
         seen.add(k)
         out.append(c)
     return out
+
 
 
 def refine_candidate_labels_with_qwen(
@@ -533,19 +545,18 @@ def build_prompt(
         sug_text = "(none)"
 
     return (
-        "Here is an image with LEFT and RIGHT panels.\n"
-        "- LEFT: a cropped target region with highlighted object\n"
-        f"- RIGHT: the full image ({base_context}) with a red rectangle marking where LEFT came from (coloured)\n\n"
-        "Identify, count and describe pure shapes building up LEFT - big / small circles, lines, squares\n"
-        "Analyze RIGHT + coloured crop for semantic context.\n"
-        "Based on known shapes and visual characteristics pick the best LEFT label:\n\n"
+        "Input : Two images merged horizontally\n"
+        f"- LEFT: Cropped box with with coloured {colour_txt} main object and grayscaled surroundings\n"
+        f"- RIGHT: A(n) {base_context}, LEFT crop from there\n\n"
+        f"Visually charecterize the features of LEFT's object and its placement in the {base_context} based on foreground.\n"
+        "Look at RIGHT and LEFTS FOREGROUND and link the crop to WIDER surroundings (their shapes, colours) for RELATIVE context \n"
+        "Based on LEFT's full semantic profile label it, matching it's characteristics with a candidate  label:\n\n"
         f"{sug_text}\n\n"
         "Return ONLY JSON with REQUIRED keys:\n"
         "{"
-        "\"label\":string,"
-        "\"shapes\": Found shapes listed,"
-        "\"evidence\": What identifies it as that label,"
-        "\"confidence\": 0 - 1"
+        "\"label\":string|null,"
+        "\"full_visual_LEFT\": string,"
+        "\"LEFT_SURROUNDINGS\": string,"
         "}\n"
     )
 
@@ -709,11 +720,495 @@ def load_model_and_processor():
 
     return model, processor, device, used_quant
 
+# ============================
+# Preload + warmup (for orchestrator)
+# ============================
+def _make_dummy_vl_sample() -> tuple[str, Image.Image]:
+    # Small image keeps warmup cheap
+    img = Image.new("RGB", (32, 32), (0, 0, 0))
+    SYSTEM_MSG = "You are a test harness. Reply with JSON only."
+    prompt_text = 'Return ONLY JSON: {"ok": true}'
+    conv = [
+        {"role": "system", "content": [{"type": "text", "text": SYSTEM_MSG}]},
+        {"role": "user", "content": [{"type": "image"}, {"type": "text", "text": prompt_text}]},
+    ]
+    return conv, img
+
+def _img_tensor_dtype(device: torch.device) -> torch.dtype:
+    # CPU fp16 is a common source of pain; keep CPU on fp32.
+    return DTYPE if device.type == "cuda" else torch.float32
+
+
+def _as_rgb_uint8(arr: Any) -> Optional[np.ndarray]:
+    """
+    Accepts: np arrays in RGB/BGR, PIL Image, etc.
+    Returns: np.ndarray RGB uint8 (H,W,3) or None.
+    """
+    if arr is None:
+        return None
+
+    if isinstance(arr, Image.Image):
+        arr = np.asarray(arr.convert("RGB"), dtype=np.uint8)
+
+    if not isinstance(arr, np.ndarray):
+        return None
+
+    if arr.dtype != np.uint8:
+        try:
+            arr = arr.astype(np.uint8, copy=False)
+        except Exception:
+            return None
+
+    if arr.ndim == 2:
+        arr = np.stack([arr, arr, arr], axis=-1)
+
+    if arr.ndim != 3 or arr.shape[2] < 3:
+        return None
+
+    # If 4ch, drop alpha.
+    if arr.shape[2] == 4:
+        arr = arr[:, :, :3]
+
+    return arr
+
+
+def _extract_mask_map(pack: Dict[str, Any]) -> Dict[str, np.ndarray]:
+    """
+    Tries multiple key shapes that ImageClusters might use.
+    Returns dict: mask_filename -> RGB uint8 array.
+    """
+    # Common dict-style keys
+    dict_keys_rgb = [
+        "renders_mask_rgb",
+        "mask_renders_rgb",
+        "mask_crops_rgb",
+        "render_masks_rgb",
+    ]
+    dict_keys_bgr = [
+        "renders_mask_bgr",
+        "mask_renders_bgr",
+        "mask_crops_bgr",
+        "render_masks_bgr",
+    ]
+
+    for k in dict_keys_rgb:
+        mm = pack.get(k)
+        if isinstance(mm, dict):
+            out: Dict[str, np.ndarray] = {}
+            for name, img in mm.items():
+                rgb = _as_rgb_uint8(img)
+                if rgb is not None:
+                    out[str(name)] = rgb
+            if out:
+                return out
+
+    for k in dict_keys_bgr:
+        mm = pack.get(k)
+        if isinstance(mm, dict):
+            out: Dict[str, np.ndarray] = {}
+            for name, img in mm.items():
+                bgr = _as_rgb_uint8(img)
+                if bgr is None:
+                    continue
+                # treat as BGR -> convert to RGB
+                rgb = bgr[:, :, ::-1].copy()
+                out[str(name)] = rgb
+            if out:
+                return out
+
+    # List-style payloads (less common)
+    list_keys = [
+        "mask_crops",
+        "mask_renders",
+        "renders_masks",
+        "mask_images",
+    ]
+    for k in list_keys:
+        lst = pack.get(k)
+        if isinstance(lst, list):
+            out: Dict[str, np.ndarray] = {}
+            for it in lst:
+                if not isinstance(it, dict):
+                    continue
+                name = it.get("name") or it.get("file") or it.get("filename")
+                img = it.get("rgb") or it.get("img_rgb") or it.get("image_rgb")
+                if img is None:
+                    img = it.get("bgr") or it.get("img_bgr") or it.get("image_bgr")
+                    bgr = _as_rgb_uint8(img)
+                    if bgr is not None:
+                        out[str(name)] = bgr[:, :, ::-1].copy()
+                    continue
+                rgb = _as_rgb_uint8(img)
+                if rgb is not None:
+                    out[str(name)] = rgb
+            if out:
+                return out
+
+    return {}
+
+
+
+def warmup_qwen_once(model, processor, device: torch.device) -> None:
+    conv, img = _make_dummy_vl_sample()
+    prompt_str = processor.apply_chat_template(conv, tokenize=False, add_generation_prompt=True)
+
+    inputs = processor(
+        text=[prompt_str],
+        images=[img],
+        return_tensors="pt",
+        padding=True,
+        truncation=True,
+    )
+
+    img_dtype = _img_tensor_dtype(device)
+
+    for k, v in list(inputs.items()):
+        if torch.is_tensor(v):
+            if k == "pixel_values":
+                inputs[k] = v.to(device=device, dtype=img_dtype, non_blocking=True)
+            else:
+                inputs[k] = v.to(device=device, non_blocking=True)
+
+    with torch.inference_mode():
+        _ = model.generate(**inputs, max_new_tokens=8, do_sample=False, num_beams=1, use_cache=True)
+
+    if device.type == "cuda":
+        torch.cuda.synchronize(device)
+
+
+
+def preload_qwen_cpu_only(
+    model_id: str = MODEL_ID,
+) -> tuple[Any, Any, torch.device]:
+    """
+    Loads Qwen on CPU and runs a dummy prompt.
+    Safe to do while Paddle/other GPU work is running.
+    """
+    device = torch.device("cpu")
+
+    try:
+        processor = AutoProcessor.from_pretrained(
+            model_id,
+            min_pixels=QWEN_MIN_PIXELS,
+            max_pixels=QWEN_MAX_PIXELS,
+            trust_remote_code=True,
+        )
+    except Exception:
+        processor = AutoProcessor.from_pretrained(model_id, trust_remote_code=True)
+
+    tok = getattr(processor, "tokenizer", None)
+    if tok is not None:
+        tok.padding_side = "left"
+        tok.truncation_side = "left"
+        if tok.pad_token_id is None:
+            tok.pad_token = tok.eos_token
+
+    # CPU: use fp32 (much less likely to break)
+    model = Qwen3VLForConditionalGeneration.from_pretrained(
+        model_id,
+        torch_dtype=torch.float32,
+        low_cpu_mem_usage=True,
+        trust_remote_code=True,
+    ).eval().to(device)
+
+    if tok is not None and hasattr(model, "generation_config"):
+        model.generation_config.pad_token_id = tok.pad_token_id
+        model.generation_config.eos_token_id = tok.eos_token_id
+
+    try:
+        model.config.use_cache = True
+    except Exception:
+        pass
+
+    warmup_qwen_once(model, processor, device)
+    return model, processor, device
+
+
+
+def move_qwen_to_cuda_if_available(
+    model,
+    *,
+    gpu_index: int = GPU_INDEX,
+) -> tuple[Any, torch.device]:
+    if torch.cuda.is_available() and not FORCE_CPU:
+        device = torch.device(f"cuda:{gpu_index}")
+        model = model.to(device)
+        model.eval()
+
+        # Try to reduce VRAM by casting after moving (safe-ish, but guard it)
+        try:
+            if hasattr(model, "to"):
+                model = model.to(dtype=DTYPE)
+        except Exception:
+            pass
+
+        return model, device
+
+    return model, torch.device("cpu")
 
 
 
 # ============================
-# MAIN
+# In-memory entrypoint (called by Orchestrator)
+# ============================
+def label_clusters_transformers(
+    clusters_state: Dict[int, Dict[str, Any]],
+    model,
+    processor,
+    device: torch.device,
+    *,
+    save_outputs: bool = False,
+) -> Dict[int, Dict[str, Any]]:
+
+    out_dir = (Path(__file__).resolve().parent / "ClustersLabeled")
+    out_dir.mkdir(parents=True, exist_ok=True)
+
+    panel_edge = max(64, int(PROC_LONGEST_EDGE) // 2)
+
+    gen_kwargs = dict(
+        max_new_tokens=int(MAX_NEW_TOKENS),
+        do_sample=bool(DO_SAMPLE),
+        num_beams=1,
+        use_cache=True,
+    )
+
+    img_dtype = _img_tensor_dtype(device)
+
+    results_by_idx: Dict[int, Dict[str, Any]] = {}
+
+    for idx in sorted(clusters_state.keys()):
+        pack = clusters_state[idx]
+        t0 = time.time()
+
+        base_context = str(pack.get("base_context", "") or "")
+        suggestions_all = list(pack.get("candidate_labels_raw", []) or [])
+
+        refined = refine_candidate_labels_with_qwen(
+            model=model,
+            processor=processor,
+            device=device,
+            base_context=base_context,
+            raw_candidates=suggestions_all,
+        ) if suggestions_all else []
+
+        suggestions = (refined or suggestions_all)[: int(SUGGESTION_LIMIT)]
+
+        # full_img_rgb is required (your pipeline provides it)
+        full_img_rgb = _as_rgb_uint8(pack.get("full_img_rgb"))
+        if full_img_rgb is None:
+            print(f"[skip] idx={idx}: missing full_img_rgb")
+            continue
+
+        full_img0 = Image.fromarray(full_img_rgb, mode="RGB")
+        right_panel_base, full_scale, full_rw, full_rh, full_pad_x, full_pad_y = _fit_into_square(full_img0, panel_edge)
+
+        results: Dict[str, Any] = {
+            "image_index": int(idx),
+            "candidate_labels_raw": suggestions_all[: int(SUGGESTION_LIMIT)],
+            "candidate_labels_refined": suggestions,
+            "base_context": base_context,
+            "model_id": str(getattr(model, "name_or_path", MODEL_ID)),
+            "proc_longest_edge": int(PROC_LONGEST_EDGE),
+            "panel_edge": int(panel_edge),
+            "batch_size": int(BATCH_SIZE),
+            "clusters": {},
+            "cluster_order": [],
+        }
+        results_by_idx[idx] = results
+
+        entries = pack.get("clusters") or []
+        if not isinstance(entries, list) or not entries:
+            print(f"[skip] idx={idx}: pack has no clusters list")
+            continue
+
+        # Get masks from pack (robust), else fallback to disk renders
+        mask_map = _extract_mask_map(pack)
+
+        renders_dir = CLUSTER_RENDER_DIR / f"processed_{idx}"
+
+        def _load_mask_from_disk(mask_name: str) -> Optional[np.ndarray]:
+            p = renders_dir / mask_name
+            if not p.exists():
+                return None
+            try:
+                img = Image.open(p).convert("RGB")
+                return np.asarray(img, dtype=np.uint8)
+            except Exception:
+                return None
+
+        def _store(cluster_key: str, payload: Dict[str, Any]) -> None:
+            if cluster_key not in results["clusters"]:
+                results["cluster_order"].append(cluster_key)
+            results["clusters"][cluster_key] = payload
+
+        # Build tasks
+        tasks: List[Dict[str, Any]] = []
+        for ci, entry in enumerate(entries, start=1):
+            bbox_xyxy = entry.get("bbox_xyxy")
+            mask_name = entry.get("crop_file_mask")
+
+            if not (isinstance(bbox_xyxy, list) and len(bbox_xyxy) == 4):
+                continue
+            if not isinstance(mask_name, str) or not mask_name.strip():
+                continue
+
+            mask_name = mask_name.strip()
+
+            mask_rgb = mask_map.get(mask_name)
+            if mask_rgb is None:
+                # fallback to disk if available
+                mask_rgb = _load_mask_from_disk(mask_name)
+
+            if mask_rgb is None:
+                continue
+
+            colour_hint = None
+            if isinstance(entry.get("color_name"), str) and entry.get("color_name").strip():
+                colour_hint = entry["color_name"].strip().lower()
+            else:
+                colour_hint = parse_colour_hint_from_filename(mask_name)
+
+            tasks.append({
+                "ci": ci,
+                "entry": entry,
+                "bbox_xyxy": [int(x) for x in bbox_xyxy],
+                "mask_name": mask_name,
+                "mask_rgb": mask_rgb,
+                "colour_hint": colour_hint,
+            })
+
+        # Batch inference
+        bs = max(1, int(BATCH_SIZE))
+        for start in range(0, len(tasks), bs):
+            chunk = tasks[start:start + bs]
+            if not chunk:
+                continue
+
+            texts_batch: List[str] = []
+            images_batch: List[Image.Image] = []
+            meta_batch: List[Dict[str, Any]] = []
+
+            for task in chunk:
+                ci = int(task["ci"])
+                entry = task["entry"]
+                bbox_xyxy = task["bbox_xyxy"]
+                mask_rgb = task["mask_rgb"]
+                colour_hint = task.get("colour_hint")
+
+                cluster_key = f"{ci:04d}_{task['mask_name']}"
+
+                left_img = Image.fromarray(_as_rgb_uint8(mask_rgb), mode="RGB")
+                left_sq, _, _, _, _, _ = _fit_into_square(left_img, panel_edge)
+
+                bbox_resized = _scale_bbox_xyxy(bbox_xyxy, full_scale)
+                bbox_resized = _clamp_bbox_xyxy(bbox_resized, full_rw, full_rh)
+                bbox_panel = [
+                    bbox_resized[0] + full_pad_x,
+                    bbox_resized[1] + full_pad_y,
+                    bbox_resized[2] + full_pad_x,
+                    bbox_resized[3] + full_pad_y,
+                ]
+
+                right_sq = right_panel_base.copy()
+                _draw_red_rect_pil(right_sq, bbox_panel, thickness=RECT_THICKNESS_PX)
+
+                composite = _make_composite(left_sq, right_sq)
+
+                prompt_text = build_prompt(colour_hint, suggestions, base_context)
+
+                SYSTEM_MSG = (
+                    "You are a visual object labeling engine.\n"
+                    "Use ONLY the provided candidate labels.\n"
+                    "Return ONLY JSON.\n"
+                )
+                conv = [
+                    {"role": "system", "content": [{"type": "text", "text": SYSTEM_MSG}]},
+                    {"role": "user", "content": [{"type": "image"}, {"type": "text", "text": prompt_text}]},
+                ]
+                prompt_str = processor.apply_chat_template(conv, tokenize=False, add_generation_prompt=True)
+
+                texts_batch.append(prompt_str)
+                images_batch.append(composite)
+
+                meta_batch.append({
+                    "ci": ci,
+                    "cluster_key": cluster_key,
+                    "entry": entry,
+                    "colour_hint": colour_hint,
+                    "bbox_xyxy": bbox_xyxy,
+                    "bbox_right_panel_xyxy": bbox_panel,
+                })
+
+            if not texts_batch:
+                continue
+
+            t_req0 = time.time()
+            try:
+                inputs = processor(
+                    text=texts_batch,
+                    images=images_batch,
+                    return_tensors="pt",
+                    padding=True,
+                    truncation=True,
+                )
+
+                for k, v in list(inputs.items()):
+                    if torch.is_tensor(v):
+                        if k == "pixel_values":
+                            inputs[k] = v.to(device=device, dtype=img_dtype, non_blocking=True)
+                        else:
+                            inputs[k] = v.to(device=device, non_blocking=True)
+
+                with torch.inference_mode():
+                    out_ids = model.generate(**inputs, **gen_kwargs)
+
+                if "input_ids" in inputs and torch.is_tensor(inputs["input_ids"]):
+                    prompt_len = int(inputs["input_ids"].shape[1])
+                    gen_only_ids = out_ids[:, prompt_len:]
+                else:
+                    gen_only_ids = out_ids
+
+                texts_out = processor.batch_decode(gen_only_ids, skip_special_tokens=True)
+                dt = time.time() - t_req0
+
+            except Exception as e:
+                for meta in meta_batch:
+                    _store(meta["cluster_key"], {"entry": meta["entry"], "error": f"batch_inference_failed: {e}"})
+                if torch.cuda.is_available() and device.type == "cuda":
+                    torch.cuda.empty_cache()
+                continue
+
+            n_out = min(len(texts_out), len(meta_batch))
+            for j in range(n_out):
+                text_out = texts_out[j]
+                meta = meta_batch[j]
+
+                json_objects = extract_json_objects(text_out)
+                parsed = json_objects[0] if json_objects else None
+
+                _store(meta["cluster_key"], {
+                    "entry": meta["entry"],
+                    "colour_hint": meta["colour_hint"],
+                    "bbox_xyxy": meta["bbox_xyxy"],
+                    "bbox_right_panel_xyxy": meta["bbox_right_panel_xyxy"],
+                    "timing_s": float(f"{dt:.4f}"),
+                    "model_raw": text_out,
+                    "json_objects": json_objects,
+                    "parsed": parsed,
+                })
+
+        if save_outputs:
+            folder = out_dir / f"processed_{idx}"
+            folder.mkdir(parents=True, exist_ok=True)
+            (folder / "labels.json").write_text(json.dumps(results, ensure_ascii=False, indent=2), encoding="utf-8")
+
+        print(f"[ok] idx={idx}: clusters={len(tasks)} dt={time.time()-t0:.2f}s")
+
+    return results_by_idx
+
+
+# ============================
+# MAIN - kept for testing
 # ============================
 def main() -> None:
     OUT_DIR.mkdir(parents=True, exist_ok=True)
