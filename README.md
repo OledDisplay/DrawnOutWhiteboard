@@ -1,6 +1,6 @@
 Whiteboard settings:
-Control LOD by going in whiteboard_backend\StrokeBundleMerger.py
-OVERLAP_TOL_MATCH = 4 -> lowest, 1 - highest
+Control LOD by going in whiteboard_backend\StrokeBundleMerger.py\
+OVERLAP_TOL_MATCH = 4 -> lowest, 1 - highest\
 
 Control drawing speed by droping travel and all anim time clamps
 
@@ -16,11 +16,11 @@ Setting up enviorment(s):
   (this is done because adding tesseract to path doesnt work for me for some reason) \
 
 create a py -3.11 venv \
-pip install -r SAVEDrequirements.txt
+pip install -r SAVEDrequirements.txt\
 
 Make sure you have flutter setup for windows (flutter, visual studio) \
 cd visual_whiteboard \
-flutter pub get
+flutter pub get\
 
 2. For researcher: \
 
@@ -32,7 +32,7 @@ flutter pub get
 
 Setting up program and Running: \
   Prep images:
-  cd whiteboard_backend
+  cd whiteboard_backend\
   Run Imageresearcher.py to get images\
   Run Imagepipeline.py to process images for whiteboard\
 
