@@ -35,19 +35,19 @@ _UAS_FALLBACK = [
 ]
 
 
-def _resolve_main_deps():
-    """
-    Pull required globals from the running main module (your imageresearcher.py),
-    without importing it (avoids circular imports).
-    """
+def _resolve_main_deps(
+    images_path: str | None = None,
+    dbg_fn=None,
+    register_meta_fn=None,
+    normalize_ctx_meta_fn=None,
+    download_image_fn=None,
+):
     main = sys.modules.get("__main__")
 
-    IMAGES_PATH = getattr(main, "IMAGES_PATH", os.path.join(os.getcwd(), "ResearchImages"))
-    dbg = getattr(main, "dbg", lambda *a, **k: None)
-    register_meta = getattr(main, "_register_image_metadata", lambda path, meta: None)
-    normalize_ctx_meta = getattr(main, "_normalize_ctx_meta", lambda d: d or {})
-
-    download_to = getattr(main, "_download_to", None)
+    IMAGES_PATH = images_path or getattr(main, "IMAGES_PATH", os.path.join(os.getcwd(), "ResearchImages"))
+    dbg = dbg_fn or getattr(main, "dbg", lambda *a, **k: None)
+    register_meta = register_meta_fn or getattr(main, "_register_image_metadata", lambda path, meta: None)
+    normalize_ctx_meta = normalize_ctx_meta_fn or getattr(main, "_normalize_ctx_meta", lambda d: d or {})
 
     _UAS = getattr(main, "_UAS", _UAS_FALLBACK)
     _BLOCKED_HOSTS = getattr(main, "_BLOCKED_HOSTS", _BLOCKED_HOSTS_FALLBACK)
@@ -58,11 +58,12 @@ def _resolve_main_deps():
         "dbg": dbg,
         "register_meta": register_meta,
         "normalize_ctx_meta": normalize_ctx_meta,
-        "download_to": download_to,
+        "download_image_fn": download_image_fn,
         "_UAS": _UAS,
         "_BLOCKED_HOSTS": _BLOCKED_HOSTS,
         "_CC_RX": _CC_RX,
     }
+
 
 
 def _is_blocked_host(u: str, blocked_hosts: set[str]) -> bool:
@@ -153,38 +154,50 @@ def _download_to_fallback(u: str, dest_dir: str, idx: int, dbg=print) -> str | N
 def ddg_cc_image_harvest(
     query: str,
     target_count: int = 10,
-    ddg_cap: int = 60,               # soft cap on how many DDG items we *scan*
-    sleep_between: float = 1.0,      # seconds between item fetches
-    backoff_base: float = 4.0,       # starting backoff on 403
-    backoff_max: float = 45.0,       # max backoff cap
+    ddg_cap: int = 60,
+    sleep_between: float = 0.5,
+    backoff_base: float = 4.0,
+    backoff_max: float = 45.0,
     safesearch: str = "moderate",
     region: str = "wt-wt",
     proxies: dict | None = None,
     lemma_obj: Optional[dict] = None,
     encoder: Optional[Any] = None,
     query_embedding: Optional[Any] = None,
-    base_ctx_embedding: Optional[Any] = None
+    base_ctx_embedding: Optional[Any] = None,
+
+    # NEW (non-breaking)
+    prompt_id: str | None = None,
+    images_path: str | None = None,
+    dbg_fn=None,
+    register_meta_fn=None,
+    normalize_ctx_meta_fn=None,
+    download_image_fn=None,
 ) -> list[str]:
-    """
-    Rate-limit-aware DDG image flow:
-      - streams results gently
-      - retries on 403 with backoff + jitter
-      - downloads ONLY if the result page shows CC evidence
-      - attaches per-image context from ddg_image_context (filename/alt/title + nearby text)
-      - optionally attaches context embedding/semantic score
-      - stops early if 20 consecutive pages have no CC evidence
-    """
-    deps = _resolve_main_deps()
+    deps = _resolve_main_deps(
+        images_path=images_path,
+        dbg_fn=dbg_fn,
+        register_meta_fn=register_meta_fn,
+        normalize_ctx_meta_fn=normalize_ctx_meta_fn,
+        download_image_fn=download_image_fn,
+    )
+
     IMAGES_PATH = deps["IMAGES_PATH"]
     dbg = deps["dbg"]
     register_meta = deps["register_meta"]
     normalize_ctx_meta = deps["normalize_ctx_meta"]
-    download_to = deps["download_to"]
     _UAS = deps["_UAS"]
     _BLOCKED_HOSTS = deps["_BLOCKED_HOSTS"]
     _CC_RX = deps["_CC_RX"]
+    download_fn = deps["download_image_fn"]
 
-    dest_dir = os.path.join(IMAGES_PATH, "ddg")
+    def _safe_dir(s: str) -> str:
+        s = (s or "").strip()
+        s = re.sub(r"[^a-zA-Z0-9._-]+", "_", s)[:60]
+        return s or "prompt"
+
+    pid = _safe_dir(prompt_id or query)
+    dest_dir = os.path.join(IMAGES_PATH, "ddg", pid)
     os.makedirs(dest_dir, exist_ok=True)
 
     s = requests.Session()
@@ -192,16 +205,84 @@ def ddg_cc_image_harvest(
         "User-Agent": random.choice(_UAS),
         "Accept-Language": "en-US,en;q=0.9",
         "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+        "Connection": "keep-alive",
     })
     if proxies:
         s.proxies.update(proxies)
+
+    SLEEP_EFF = min(max(float(sleep_between), 0.0), 0.15)
+    TO_SNIP =  (3, 6)
+    TO_FULL = (4, 10) 
+    HEAD_BYTES = 140_000
+    TAIL_BYTES = 140_000
+    FULL_HTML_CAP_BYTES = 1_200_000
+    MIN_SCAN_BEFORE_EARLY_STOP = max(25, target_count * 8)
+    NO_CC_STREAK_LIMIT = 30
+    NO_SAVE_STREAK_LIMIT = 80
 
     saved: list[str] = []
     seen_pages: set[str] = set()
     seen_imgs: set[str] = set()
 
     no_cc_streak = 0
-    NO_CC_STREAK_LIMIT = 20
+    no_save_streak = 0
+    scanned = 0
+
+    def _safe_decode_bytes(b: bytes) -> str:
+        try:
+            return b.decode("utf-8", errors="ignore")
+        except Exception:
+            try:
+                return b.decode("latin-1", errors="ignore")
+            except Exception:
+                return ""
+
+    def _fetch_head_html(url: str) -> tuple[str, str]:
+        """
+        FAST: single request, read only first HEAD_BYTES then stop.
+        Returns (html_snip, content_type).
+        """
+        try:
+            r = s.get(url, timeout=TO_SNIP, stream=True, allow_redirects=True)
+            ct = (r.headers.get("Content-Type") or "").lower()
+
+            if ("html" not in ct) and ("xml" not in ct) and ("text/" not in ct):
+                r.close()
+                return "", ct
+
+            head = bytearray()
+            for chunk in r.iter_content(chunk_size=16384):
+                if not chunk:
+                    continue
+                head.extend(chunk)
+                if len(head) >= HEAD_BYTES:
+                    break
+
+            r.close()
+            return _safe_decode_bytes(bytes(head)), ct
+        except Exception:
+            return "", ""
+
+     
+
+    def _fetch_full_html_capped(url: str) -> str:
+        try:
+            r = s.get(url, timeout=TO_FULL, stream=True, allow_redirects=True)
+            ct = (r.headers.get("Content-Type") or "").lower()
+            if ("html" not in ct) and ("xml" not in ct) and ("text/" not in ct):
+                r.close()
+                return ""
+            buf = b""
+            for chunk in r.iter_content(chunk_size=32768):
+                if not chunk:
+                    continue
+                buf += chunk
+                if len(buf) >= FULL_HTML_CAP_BYTES:
+                    break
+            r.close()
+            return _safe_decode_bytes(buf)
+        except Exception:
+            return ""
 
     def _yield_ddg_images(q: str, cap: int):
         total = 0
@@ -218,7 +299,8 @@ def ddg_cc_image_harvest(
                         total += 1
                         if total >= cap:
                             break
-                        time.sleep(sleep_between)
+                        if SLEEP_EFF:
+                            time.sleep(SLEEP_EFF)
                 break
             except Exception as e:
                 msg = str(e).lower()
@@ -238,10 +320,6 @@ def ddg_cc_image_harvest(
         if len(saved) >= target_count:
             break
 
-        if no_cc_streak >= NO_CC_STREAK_LIMIT:
-            dbg(f"[DDG] stopping: {no_cc_streak} consecutive pages without CC evidence")
-            break
-
         page_url = r.get("url") or r.get("source") or ""
         img_url = r.get("image") or ""
         if not page_url or not img_url:
@@ -249,89 +327,91 @@ def ddg_cc_image_harvest(
 
         if _is_blocked_host(page_url, _BLOCKED_HOSTS) or _is_blocked_host(img_url, _BLOCKED_HOSTS):
             continue
-
         if page_url in seen_pages or img_url in seen_imgs:
             continue
 
         seen_pages.add(page_url)
         seen_imgs.add(img_url)
+        scanned += 1
 
-        # fetch the *page* and check for CC evidence
-        try:
-            pr = s.get(page_url, timeout=25)
-            ct = (pr.headers.get("Content-Type") or "").lower()
-            if "html" not in ct and "xml" not in ct:
-                dbg(f"[DDG] non-HTML page ct={ct} -> skip  {page_url}")
-                no_cc_streak += 1
-                continue
-            html = pr.text
-        except Exception:
+        snip_html, ct = _fetch_head_html(page_url)
+        if not snip_html:
             no_cc_streak += 1
+            no_save_streak += 1
             continue
 
-        if not _cc_evidence_in_html(html, _CC_RX):
+        if not _cc_evidence_in_html(snip_html, _CC_RX):
             dbg(f"[DDG] no CC evidence -> skip  {page_url}")
             no_cc_streak += 1
-            continue
-
-        no_cc_streak = 0
-
-        # --- per-image context (filename/alt/title + nearby text) ---
-        ctx_meta: dict = {}
-        try:
-            soup = BeautifulSoup(html, "html.parser")
-            try:
-                from ddg_image_context import ddg_extract_image_context
-                ctx_meta = ddg_extract_image_context(
-                    soup,
-                    page_url=page_url,
-                    image_url=img_url,
-                    base_query=query,
-                    lemma_obj=lemma_obj or {},
-                    encoder=encoder,
-                    query_embedding=query_embedding,
-                    return_embedding=True,
-                ) or {}
-                ctx_meta = normalize_ctx_meta(ctx_meta)
-            except ImportError as e:
-                dbg(f"[DDG] ddg_image_context import error: {e}")
-            except Exception as e:
-                dbg(f"[DDG] ddg_extract_image_context error: {e}")
-        except Exception as e:
-            dbg(f"[DDG] context soup error: {e}")
-
-        # ok to download the image
-        if download_to is None:
-            p = _download_to_fallback(img_url, dest_dir, len(saved), dbg=dbg)
+            no_save_streak += 1
         else:
-            p = download_to(img_url, dest_dir, len(saved), dbg=dbg)
+            no_cc_streak = 0
 
-        if p:
-            meta = {
-                "source_kind": "ddg",
-                "page_url": page_url,
-                "image_url": img_url,
-                "base_context": query,
-            }
+            full_html = _fetch_full_html_capped(page_url)
+            if not full_html:
+                full_html = snip_html
 
-            if base_ctx_embedding is not None:
-                meta["prompt_embedding"] = base_ctx_embedding
+            ctx_meta: dict = {}
+            try:
+                soup = BeautifulSoup(full_html, "html.parser")
+                try:
+                    from ddg_image_context import ddg_extract_image_context
+                    ctx_meta = ddg_extract_image_context(
+                        soup,
+                        page_url=page_url,
+                        image_url=img_url,
+                        base_query=query,
+                        lemma_obj=lemma_obj or {},
+                        encoder=encoder,
+                        query_embedding=query_embedding,
+                        return_embedding=True,
+                    ) or {}
+                    ctx_meta = normalize_ctx_meta(ctx_meta)
+                except Exception as e:
+                    dbg(f"[DDG] ddg_extract_image_context error: {e}")
+            except Exception as e:
+                dbg(f"[DDG] context soup error: {e}")
 
-            if ctx_meta:
-                meta.update(ctx_meta)
+            # download (per prompt folder)
+            p = None
+            if download_fn is not None:
+                try:
+                    p = download_fn(s, img_url, dest_dir)
+                except Exception:
+                    p = None
+            if p is None:
+                p = _download_to_fallback(img_url, dest_dir, len(saved), dbg=dbg)
 
-            if "ctx_score" in meta or "ctx_sem_score" in meta:
-                meta["ctx_confidence"] = meta.get("ctx_sem_score", meta.get("ctx_score"))
-                dbg(
-                    f"[DDG][CTX] saved {p} ctx_score={meta.get('ctx_score')} "
-                    f"ctx_sem={meta.get('ctx_sem_score')} conf={meta.get('ctx_confidence')}"
-                )
+            if p:
+                meta = {
+                    "source_kind": "ddg",
+                    "page_url": page_url,
+                    "image_url": img_url,
+                    "base_context": query,
+                    "prompt_id": pid,
+                }
+                if base_ctx_embedding is not None:
+                    meta["prompt_embedding"] = base_ctx_embedding
+                if ctx_meta:
+                    meta.update(ctx_meta)
+
+                if "ctx_score" in meta or "ctx_sem_score" in meta:
+                    meta["ctx_confidence"] = meta.get("ctx_sem_score", meta.get("ctx_score"))
+                register_meta(p, meta)
+
+                saved.append(p)
+                last_saved_path = p
+                no_save_streak = 0
             else:
-                dbg(f"[DDG][CTX] saved {p} ctx=n/a")
+                no_save_streak += 1
 
-            register_meta(p, meta)
-            saved.append(p)
-            last_saved_path = p
+        if scanned >= MIN_SCAN_BEFORE_EARLY_STOP:
+            if no_cc_streak >= NO_CC_STREAK_LIMIT:
+                dbg(f"[DDG] stopping: {no_cc_streak} consecutive pages without CC evidence")
+                break
+            if no_save_streak >= NO_SAVE_STREAK_LIMIT:
+                dbg(f"[DDG] stopping: {no_save_streak} consecutive candidates without saving an image")
+                break
 
-    dbg(f"[DDG] saved ({len(saved)}/{target_count}) {last_saved_path}")
+    dbg(f"[DDG] saved ({len(saved)}/{target_count}) last={last_saved_path} dir={dest_dir}")
     return saved

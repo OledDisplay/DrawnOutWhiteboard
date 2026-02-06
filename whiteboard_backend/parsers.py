@@ -62,33 +62,253 @@ def _download_to(u: str, dest_dir: str, idx: int) -> str | None:
 # =========================
 # Wikimedia Commons (query API) — cap 5
 # =========================
-def parse_wikimedia(src, data):
+def _strip_html_text(s: str) -> str:
+    try:
+        return BeautifulSoup(s or "", "html.parser").get_text(" ", strip=True)
+    except Exception:
+        return (s or "").strip()
+
+
+def parse_wikimedia(src, data, **kwargs):
+    """
+    Wikimedia Commons (query API) — cap 5
+    Registers ctx_text/ctx_embedding so API images participate in SigLIP ranking.
+    Applies CC/PD check from extmetadata (hard filter).
+    """
+    query = (kwargs.get("query") or "").strip()
+    prompt_id = kwargs.get("prompt_id")
+    encoder = kwargs.get("encoder")
+    base_ctx_embedding = kwargs.get("base_ctx_embedding")
+
     if not isinstance(data, dict):
         src.img_paths = []
         return []
+
     pages = (data.get("query") or {}).get("pages") or {}
-    urls = []
+    items = []
+
+    # collect up to 8 raw, we’ll hard-cap after filtering/downloading
     for _, page in pages.items():
+        title = page.get("title") or ""
+        pageid = page.get("pageid")
+        file_page_url = f"https://commons.wikimedia.org/?curid={pageid}" if pageid else ""
+
         for ii in (page.get("imageinfo") or []):
             u = ii.get("url") or ii.get("thumburl")
-            if u:
-                urls.append(u)
-            if len(urls) >= 5:
-                break
-        if len(urls) >= 5:
-            break
-    # dedupe while preserving order, then hard-cap 5
-    urls = list(dict.fromkeys(urls))[:5]
+            if not u:
+                continue
 
+            extm = (ii.get("extmetadata") or {}) if isinstance(ii, dict) else {}
+            def _m(k):
+                v = extm.get(k)
+                if isinstance(v, dict):
+                    return _strip_html_text(v.get("value") or "")
+                if isinstance(v, str):
+                    return _strip_html_text(v)
+                return ""
+
+            license_url = _m("LicenseUrl")
+            license_short = _m("LicenseShortName")
+            usage_terms = _m("UsageTerms")
+            permissions = _m("Permissions")
+            credit = _m("Credit")
+            artist = _m("Artist")
+            desc = _m("ImageDescription") or _m("ObjectName")
+
+            lic_blob = " ".join([license_url, license_short, usage_terms, permissions]).strip()
+            is_cc = False
+            for pat in CC_PATTERNS:
+                try:
+                    if re.search(pat, lic_blob, re.I):
+                        is_cc = True
+                        break
+                except Exception:
+                    continue
+
+            # hard CC/PD requirement for Commons too
+            if not is_cc:
+                continue
+
+            ctx_text = " ".join(x for x in [
+                query,
+                title.replace("File:", "").replace("_", " "),
+                desc,
+                artist,
+                credit,
+                license_short,
+            ] if x).strip()
+
+            items.append({
+                "image_url": u,
+                "page_url": file_page_url or "",
+                "ctx_text": ctx_text,
+                "license": license_short,
+                "license_url": license_url,
+            })
+
+            if len(items) >= 8:
+                break
+        if len(items) >= 8:
+            break
+
+    if not items:
+        src.img_paths = []
+        return []
+
+    session = requests.Session()
+    session.headers.update({"User-Agent": "diag-scrape/0.2 (+research/cc-check)"})
     dest_dir = os.path.join(IMAGES_PATH, src.name)
     saved = []
-    for i, u in enumerate(urls):
-        p = _download_to(u, dest_dir, i)
-        if p:
-            saved.append(p)
-            dbg(f"[wikimedia] saved {p}")
+
+    for i, it in enumerate(items):
+        if len(saved) >= 5:
+            break
+        u = it["image_url"]
+        p = download_image(session, u, dest_dir)
+        if not p:
+            continue
+        saved.append(p)
+
+        ctx_embedding = None
+        if encoder is not None and it["ctx_text"]:
+            try:
+                v = encoder.encode(it["ctx_text"])
+                ctx_embedding = v.tolist() if hasattr(v, "tolist") else list(v)
+            except Exception:
+                ctx_embedding = None
+
+        meta = {
+            "source_kind": "api",
+            "source_name": src.name,
+            "base_context": query,
+            "prompt_id": prompt_id,
+            "page_url": it.get("page_url") or "",
+            "image_url": u,
+            "ctx_text": it.get("ctx_text") or "",
+            "ctx_embedding": ctx_embedding,
+            # keep it low: API is fallback-y in your system
+            "ctx_confidence": 0.12,
+            "license": it.get("license") or "",
+            "license_url": it.get("license_url") or "",
+        }
+        if base_ctx_embedding is not None:
+            meta["prompt_embedding"] = base_ctx_embedding
+
+        _register_image_metadata(p, meta)
+        dbg(f"[wikimedia][api] saved={p}")
+
     src.img_paths = saved
     return saved
+
+
+def parse_openverse(src, data, **kwargs):
+    """
+    Openverse images API — cap 5
+    Registers ctx_text/ctx_embedding so API images participate in SigLIP ranking.
+    """
+    query = (kwargs.get("query") or "").strip()
+    prompt_id = kwargs.get("prompt_id")
+    encoder = kwargs.get("encoder")
+    base_ctx_embedding = kwargs.get("base_ctx_embedding")
+
+    if not isinstance(data, dict):
+        src.img_paths = []
+        return []
+
+    results = data.get("results", []) or []
+    items = []
+
+    for r in results:
+        u = (r.get("url") or "").strip()
+        if not u:
+            continue
+
+        title = (r.get("title") or "").strip()
+        creator = (r.get("creator") or "").strip()
+        license_ = (r.get("license") or "").strip()
+        lic_ver = (r.get("license_version") or "").strip()
+        prov = (r.get("provider") or r.get("source") or "").strip()
+        landing = (r.get("foreign_landing_url") or r.get("detail_url") or "").strip()
+
+        tags = []
+        for t in (r.get("tags") or []):
+            if isinstance(t, dict):
+                nm = (t.get("name") or "").strip()
+                if nm:
+                    tags.append(nm)
+            elif isinstance(t, str):
+                t2 = t.strip()
+                if t2:
+                    tags.append(t2)
+
+        ctx_text = " ".join(x for x in [
+            query,
+            title,
+            creator,
+            " ".join(tags[:10]),
+            f"{license_} {lic_ver}".strip(),
+            prov,
+        ] if x).strip()
+
+        items.append({
+            "image_url": u,
+            "page_url": landing,
+            "ctx_text": ctx_text,
+            "license": f"{license_} {lic_ver}".strip(),
+            "provider": prov,
+        })
+
+        if len(items) >= 8:
+            break
+
+    if not items:
+        src.img_paths = []
+        return []
+
+    session = requests.Session()
+    session.headers.update({"User-Agent": "diag-scrape/0.2 (+research/cc-check)"})
+    dest_dir = os.path.join(IMAGES_PATH, src.name)
+    saved = []
+
+    for i, it in enumerate(items):
+        if len(saved) >= 5:
+            break
+        u = it["image_url"]
+        p = download_image(session, u, dest_dir)
+        if not p:
+            continue
+        saved.append(p)
+
+        ctx_embedding = None
+        if encoder is not None and it["ctx_text"]:
+            try:
+                v = encoder.encode(it["ctx_text"])
+                ctx_embedding = v.tolist() if hasattr(v, "tolist") else list(v)
+            except Exception:
+                ctx_embedding = None
+
+        meta = {
+            "source_kind": "api",
+            "source_name": src.name,
+            "base_context": query,
+            "prompt_id": prompt_id,
+            "page_url": it.get("page_url") or "",
+            "image_url": u,
+            "ctx_text": it.get("ctx_text") or "",
+            "ctx_embedding": ctx_embedding,
+            "ctx_confidence": 0.10,
+            "license": it.get("license") or "",
+            "provider": it.get("provider") or "",
+        }
+        if base_ctx_embedding is not None:
+            meta["prompt_embedding"] = base_ctx_embedding
+
+        _register_image_metadata(p, meta)
+        dbg(f"[openverse][api] saved={p}")
+
+    src.img_paths = saved
+    return saved
+
 
 
 # =========================
@@ -235,34 +455,4 @@ def parse_plos(src, data):
 
     src.img_paths = saved_all
     return saved_all
-
-
-
-# =========================
-# Openverse images API — cap 5
-# =========================
-def parse_openverse(src, data):
-    if not isinstance(data, dict):
-        src.img_paths = []
-        return []
-
-    results = data.get("results", []) or []
-    urls = [item.get("url") for item in results if item.get("url")]
-    # dedupe + cap 5
-    urls = list(dict.fromkeys(urls))[:5]
-
-    if not urls:
-        src.img_paths = []
-        return []
-
-    dest_dir = os.path.join(IMAGES_PATH, src.name)
-    saved = []
-    for i, u in enumerate(urls):
-        p = _download_to(u, dest_dir, i)
-        if p:
-            saved.append(p)
-
-    src.img_paths = saved
-    return saved
-
 

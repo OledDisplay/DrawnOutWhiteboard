@@ -84,6 +84,73 @@ NEIGHBORS_8 = [
     ( 1, -1), ( 1, 0), ( 1, 1),
 ]
 
+# ------------------- FAST 8-NBR LUTS (bitmasks) -------------------
+
+_DIRS_8 = np.array(NEIGHBORS_8, dtype=np.int8)   # (8,2) dy,dx in the same order as NEIGHBORS_8
+_DIR_DY = _DIRS_8[:, 0]
+_DIR_DX = _DIRS_8[:, 1]
+
+_DIR_TO_IDX = {(int(dy), int(dx)): i for i, (dy, dx) in enumerate(NEIGHBORS_8)}
+_DIR_OPP = np.array([_DIR_TO_IDX[(-int(dy), -int(dx))] for dy, dx in NEIGHBORS_8], dtype=np.uint8)
+
+_DIR_VEC = np.stack([_DIR_DX.astype(np.float32), _DIR_DY.astype(np.float32)], axis=1)  # (dx,dy)
+_DIR_NRM = np.linalg.norm(_DIR_VEC, axis=1, keepdims=True)
+_DIR_UNIT = _DIR_VEC / np.maximum(_DIR_NRM, 1e-12)
+
+_DOT8 = (_DIR_UNIT @ _DIR_UNIT.T).astype(np.float32)
+_DOT8 = np.clip(_DOT8, -1.0, 1.0)
+_ANG8 = np.degrees(np.arccos(_DOT8)).astype(np.float32)
+
+_BITCOUNT_LUT = np.array([bin(i).count("1") for i in range(256)], dtype=np.uint8)
+
+
+def _build_neighbor_mask_and_deg(skel01: np.ndarray) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
+    """
+    Build:
+      sk      : contiguous uint8 0/1
+      nei_mask: uint8 bitmask per pixel (bit i => that 8-neighbor exists and is FG)
+      deg     : uint8 degree per pixel (popcount of nei_mask), 0 on background
+    """
+    sk = (skel01 > 0).astype(np.uint8)
+    if sk.size == 0:
+        return sk, np.zeros_like(sk, dtype=np.uint8), np.zeros_like(sk, dtype=np.uint8)
+
+    sk = np.ascontiguousarray(sk)
+    h, w = sk.shape
+
+    sp = np.pad(sk, ((1, 1), (1, 1)), mode="constant", constant_values=0)
+    center = sp[1:-1, 1:-1]
+
+    nei = np.zeros((h, w), dtype=np.uint8)
+    for i, (dy, dx) in enumerate(NEIGHBORS_8):
+        nb = sp[1 + dy: 1 + dy + h, 1 + dx: 1 + dx + w]
+        nei |= ((nb > 0).astype(np.uint8) << i)
+
+    nei[center == 0] = 0
+    deg = _BITCOUNT_LUT[nei]
+    return sk, nei, deg
+
+
+def _angle_between_dir_and_chord_deg(dir_idx: int, chord_dx: float, chord_dy: float) -> float:
+    """
+    Angle (deg) between a step direction (one of the 8 dirs) and a chord vector.
+    """
+    nd = math.hypot(chord_dx, chord_dy)
+    if nd < 1e-6:
+        return 0.0
+
+    dx = float(_DIR_DX[dir_idx])
+    dy = float(_DIR_DY[dir_idx])
+    nr = math.hypot(dx, dy)
+    if nr < 1e-6:
+        return 0.0
+
+    dot = dx * chord_dx + dy * chord_dy
+    c = dot / (nr * nd)
+    c = max(-1.0, min(1.0, c))
+    return math.degrees(math.acos(c))
+
+
 # ------------------- COLOR GROUP ID -------------------
 COLOR_ORDER_LIGHT_TO_DARK = [
     "white",
@@ -441,42 +508,244 @@ def _trace_strokes_graph(skel01: np.ndarray) -> List[np.ndarray]:
 
     Input: skel01 – 0/1 skeleton mask (1px wide lines).
     Output: list of polylines, each Nx2 [x,y] float32.
-    """
-    skel = (skel01 > 0).astype(np.uint8)
-    h, w = skel.shape
-    deg = _build_degree_map(skel)
 
-    visited_edges: set = set()
+    Same logic as before (degree-2 chains, junction lookahead scoring, angle gating),
+    but using per-pixel 8-neighbor bitmasks + per-pixel visited-direction bitmasks
+    instead of a Python set of edge tuples.
+    """
+    skel, nei_mask, deg = _build_neighbor_mask_and_deg(skel01)
+    h, w = skel.shape
+    if skel.size == 0:
+        return []
+
+    visited = np.zeros((h, w), dtype=np.uint8)
     strokes: List[np.ndarray] = []
 
-    ys, xs = np.where(skel > 0)
+    ys, xs = np.nonzero(skel)
+
+    def _simulate_branch_from_fast(curr_yx, first_dir_idx, prev_dir_idx, max_steps: int = LOOKAHEAD_STEPS_MAX):
+        """
+        Simulate a short walk along a branch (NO global visited usage) for scoring at junctions.
+        Mirrors _simulate_branch_from behavior but runs on masks and direction LUTs.
+        """
+        cy, cx = curr_yx
+        dy = int(_DIR_DY[first_dir_idx]); dx = int(_DIR_DX[first_dir_idx])
+        ny = cy + dy; nx = cx + dx
+        if not (0 <= ny < h and 0 <= nx < w) or skel[ny, nx] == 0:
+            return None
+
+        if prev_dir_idx is None:
+            prev_dir_idx = first_dir_idx
+
+        steps = 1
+        curv_max = 0.0
+
+        prev = (cy, cx)
+        curr2 = (ny, nx)
+        prev_step_dir = int(first_dir_idx)
+
+        local_seen = {(cy, cx), (ny, nx)}
+
+        while steps < max_steps:
+            cy2, cx2 = curr2
+
+            avail = int(nei_mask[cy2, cx2])
+            back_dir = int(_DIR_OPP[prev_step_dir])
+            avail &= ~(1 << back_dir)
+            if avail == 0:
+                break
+
+            best_dir = None
+            best_dot = -1e9
+
+            m = avail
+            while m:
+                lsb = m & -m
+                d_idx = (lsb.bit_length() - 1)
+                dot = float(_DOT8[prev_step_dir, d_idx])
+                if dot > best_dot:
+                    best_dot = dot
+                    best_dir = d_idx
+                m ^= lsb
+
+            if best_dir is None:
+                break
+
+            yy = cy2 + int(_DIR_DY[best_dir])
+            xx = cx2 + int(_DIR_DX[best_dir])
+
+            if (yy, xx) in local_seen:
+                break
+            local_seen.add((yy, xx))
+
+            turn = float(_ANG8[prev_step_dir, best_dir])
+            if turn > curv_max:
+                curv_max = turn
+
+            prev = curr2
+            curr2 = (yy, xx)
+            prev_step_dir = int(best_dir)
+            steps += 1
+
+            if int(deg[yy, xx]) != 2:
+                break
+
+        end_y, end_x = curr2
+        chord_dx = float(end_x - cx)
+        chord_dy = float(end_y - cy)
+        ang_deflect = _angle_between_dir_and_chord_deg(int(prev_dir_idx), chord_dx, chord_dy)
+
+        return {
+            "steps": steps,
+            "length": float(steps),
+            "ang_deflect": float(ang_deflect),
+            "curv_max": float(curv_max),
+        }
+
+    def _trace_one_stroke_fast(start_yx, first_dir_idx):
+        """
+        Trace one stroke starting at start_yx and taking first_dir_idx as the first edge.
+        Uses visited-direction bitmasks instead of visited edge tuple set.
+        """
+        sy, sx = start_yx
+
+        dy = int(_DIR_DY[first_dir_idx]); dx = int(_DIR_DX[first_dir_idx])
+        cy = sy + dy; cx = sx + dx
+        if not (0 <= cy < h and 0 <= cx < w) or skel[cy, cx] == 0:
+            return None
+
+        stroke = [
+            [float(sx), float(sy)],
+            [float(cx), float(cy)],
+        ]
+
+        visited[sy, sx] |= (1 << int(first_dir_idx))
+        visited[cy, cx] |= (1 << int(_DIR_OPP[int(first_dir_idx)]))
+
+        prev = (sy, sx)
+        curr = (cy, cx)
+        prev_dir_idx = int(first_dir_idx)
+
+        while True:
+            cy, cx = curr
+
+            avail = int(nei_mask[cy, cx]) & (~int(visited[cy, cx]) & 0xFF)
+            if avail == 0:
+                break
+
+            d_here = int(deg[cy, cx])
+
+            if d_here == 2:
+                best_dir = None
+                best_dot = -1e9
+                m = avail
+                while m:
+                    lsb = m & -m
+                    d_idx = (lsb.bit_length() - 1)
+                    dot = float(_DOT8[prev_dir_idx, d_idx])
+                    if dot > best_dot:
+                        best_dot = dot
+                        best_dir = d_idx
+                    m ^= lsb
+
+                if best_dir is None:
+                    break
+
+                ny = cy + int(_DIR_DY[best_dir])
+                nx = cx + int(_DIR_DX[best_dir])
+
+                visited[cy, cx] |= (1 << int(best_dir))
+                visited[ny, nx] |= (1 << int(_DIR_OPP[int(best_dir)]))
+
+                stroke.append([float(nx), float(ny)])
+
+                prev = curr
+                curr = (ny, nx)
+                prev_dir_idx = int(best_dir)
+                continue
+
+            best_dir = None
+            best_score = None
+            best_metrics = None
+
+            m = avail
+            while m:
+                lsb = m & -m
+                d_idx = (lsb.bit_length() - 1)
+                metrics = _simulate_branch_from_fast(curr, d_idx, prev_dir_idx, max_steps=LOOKAHEAD_STEPS_MAX)
+                if metrics is not None:
+                    ang_def = metrics["ang_deflect"]
+                    curv_max = metrics["curv_max"]
+                    length = metrics["length"]
+
+                    score = (BRANCH_W_ANG * ang_def +
+                             BRANCH_W_CURV * curv_max -
+                             BRANCH_W_LEN * length)
+
+                    if (best_score is None) or (score < best_score):
+                        best_score = score
+                        best_dir = d_idx
+                        best_metrics = metrics
+                m ^= lsb
+
+            if best_dir is None or best_metrics is None:
+                break
+
+            if best_metrics["ang_deflect"] > JUNC_CONTINUE_ANG_MAX:
+                break
+
+            ny = cy + int(_DIR_DY[best_dir])
+            nx = cx + int(_DIR_DX[best_dir])
+
+            visited[cy, cx] |= (1 << int(best_dir))
+            visited[ny, nx] |= (1 << int(_DIR_OPP[int(best_dir)]))
+
+            stroke.append([float(nx), float(ny)])
+
+            prev = curr
+            curr = (ny, nx)
+            prev_dir_idx = int(best_dir)
+
+        if len(stroke) < MIN_STROKE_POINTS:
+            return None
+
+        arr = np.asarray(stroke, dtype=np.float32)
+        nan_to_num_nd(arr)
+        return arr
 
     # pass 1: start from nodes that are NOT pure degree-2 (endpoints, junctions)
     for y, x in zip(ys, xs):
         d = int(deg[y, x])
         if d == 0 or d == 2:
             continue
-        for ny, nx in _neighbors_fg(y, x, skel):
-            ek = _edge_key((y, x), (ny, nx))
-            if ek in visited_edges:
-                continue
-            stroke = _trace_one_stroke((y, x), (ny, nx), skel, deg, visited_edges)
-            if stroke is not None:
-                strokes.append(stroke)
+
+        m = int(nei_mask[y, x])
+        while m:
+            lsb = m & -m
+            d_idx = (lsb.bit_length() - 1)
+            if (int(visited[y, x]) & (1 << d_idx)) == 0:
+                stroke = _trace_one_stroke_fast((int(y), int(x)), int(d_idx))
+                if stroke is not None:
+                    strokes.append(stroke)
+            m ^= lsb
 
     # pass 2: pick up loops made only of degree-2 nodes (circles etc.)
     for y, x in zip(ys, xs):
         if int(deg[y, x]) != 2:
             continue
-        for ny, nx in _neighbors_fg(y, x, skel):
-            ek = _edge_key((y, x), (ny, nx))
-            if ek in visited_edges:
-                continue
-            stroke = _trace_one_stroke((y, x), (ny, nx), skel, deg, visited_edges)
-            if stroke is not None:
-                strokes.append(stroke)
+
+        m = int(nei_mask[y, x])
+        while m:
+            lsb = m & -m
+            d_idx = (lsb.bit_length() - 1)
+            if (int(visited[y, x]) & (1 << d_idx)) == 0:
+                stroke = _trace_one_stroke_fast((int(y), int(x)), int(d_idx))
+                if stroke is not None:
+                    strokes.append(stroke)
+            m ^= lsb
 
     return strokes
+
 
 # ------------------- PER-STROKE SEGMENTATION (CORNERS) -------------------
 
@@ -491,22 +760,33 @@ def _compute_orientations(pts: np.ndarray, win_radius: int) -> np.ndarray:
     if n < 2:
         return phi
 
-    for i in range(n):
-        a = max(0, i - win_radius)
-        b = min(n - 1, i + win_radius)
-        if b == a:
+    P = pts.astype(np.float32, copy=False)
+    nan_to_num_nd(P)
+
+    idx = np.arange(n, dtype=np.int32)
+    a = np.clip(idx - int(win_radius), 0, n - 1)
+    b = np.clip(idx + int(win_radius), 0, n - 1)
+
+    v = P[b] - P[a]
+
+    eq = (a == b)
+    if np.any(eq):
+        # only really happens for win_radius==0 or n==1; match your original behavior
+        ii = np.where(eq)[0]
+        for i in ii:
             if i < n - 1:
-                v = pts[i + 1] - pts[i]
+                v[i] = P[i + 1] - P[i]
             else:
-                v = pts[i] - pts[i - 1]
-        else:
-            v = pts[b] - pts[a]
-        dx, dy = float(v[0]), float(v[1])
-        if abs(dx) < 1e-6 and abs(dy) < 1e-6:
-            phi[i] = 0.0
-        else:
-            phi[i] = math.atan2(dy, dx)
+                v[i] = P[i] - P[i - 1]
+
+    dx = v[:, 0]
+    dy = v[:, 1]
+    small = (np.abs(dx) < 1e-6) & (np.abs(dy) < 1e-6)
+
+    phi[~small] = np.arctan2(dy[~small], dx[~small]).astype(np.float32)
+    phi[small] = 0.0
     return phi
+
 
 def _segment_polyline_on_corners(poly: np.ndarray) -> List[np.ndarray]:
     """
@@ -1145,21 +1425,16 @@ def _process_single_to_polylines(path: Path) -> Tuple[int, int, List[np.ndarray]
 
     polys_raw = _trace_strokes_graph(sk)
 
-    polys_seg: List[np.ndarray] = []
+    polys_simpl: List[np.ndarray] = []
     for p in polys_raw:
         if p.shape[0] < 2:
             continue
         segments = _segment_polyline_on_corners(p)
         for seg in segments:
-            if seg.shape[0] >= CURV_MIN_SEG_POINTS:
-                polys_seg.append(seg)
-
-    polys_simpl: List[np.ndarray] = []
-    for p in polys_seg:
-        if p.shape[0] < 2:
-            continue
-        simp = _simplify_poly_conservative(p)
-        polys_simpl.append(simp if simp.shape[0] >= 2 else p)
+            if seg.shape[0] < CURV_MIN_SEG_POINTS:
+                continue
+            simp = _simplify_poly_conservative(seg)
+            polys_simpl.append(simp if simp.shape[0] >= 2 else seg)
 
     polys_merged = _merge_small_strokes(polys_simpl, diag)
 
@@ -1174,6 +1449,7 @@ def _process_single_to_polylines(path: Path) -> Tuple[int, int, List[np.ndarray]
     polys_final = _coverage_safety_pass(sk, polys_final)
 
     return W, H, polys_final
+
 
 
 
@@ -1277,11 +1553,10 @@ def _parse_color_name_from_stem(stem: str) -> str:
 
 def vectorize_images():
 
-    import shutil
-
-    if OUT_DIR.exists():
-        shutil.rmtree(OUT_DIR)
     OUT_DIR.mkdir(parents=True, exist_ok=True)
+
+    def _out_exists(stem: str) -> bool:
+        return (OUT_DIR / f"{stem}.json").exists()
 
     # bundle folders (new format)
     bundle_dirs = sorted(
@@ -1294,6 +1569,10 @@ def vectorize_images():
         p for p in IN_DIR.glob("*")
         if p.is_file() and p.suffix.lower() in (".png", ".jpg", ".jpeg", ".bmp", ".tif", ".tiff", ".webp")
     ], key=lambda p: p.name.lower())
+
+    bundle_dirs = [b for b in bundle_dirs if not _out_exists(b.name)]
+    flat_imgs = [p for p in flat_imgs if not _out_exists(p.stem)]
+
 
     print(f"[INFO] IN={IN_DIR} OUT={OUT_DIR} bundles={len(bundle_dirs)} flat={len(flat_imgs)}")
 
@@ -1346,21 +1625,16 @@ def _process_edges_mask_to_polylines(edges_u8: np.ndarray) -> Tuple[int, int, Li
 
     polys_raw = _trace_strokes_graph(m)
 
-    polys_seg: List[np.ndarray] = []
+    polys_simpl: List[np.ndarray] = []
     for p in polys_raw:
         if p.shape[0] < 2:
             continue
         segments = _segment_polyline_on_corners(p)
         for seg in segments:
-            if seg.shape[0] >= CURV_MIN_SEG_POINTS:
-                polys_seg.append(seg)
-
-    polys_simpl: List[np.ndarray] = []
-    for p in polys_seg:
-        if p.shape[0] < 2:
-            continue
-        simp = _simplify_poly_conservative(p)
-        polys_simpl.append(simp if simp.shape[0] >= 2 else p)
+            if seg.shape[0] < CURV_MIN_SEG_POINTS:
+                continue
+            simp = _simplify_poly_conservative(seg)
+            polys_simpl.append(simp if simp.shape[0] >= 2 else seg)
 
     polys_merged = _merge_small_strokes(polys_simpl, diag)
 
@@ -1375,6 +1649,7 @@ def _process_edges_mask_to_polylines(edges_u8: np.ndarray) -> Tuple[int, int, Li
     polys_final = _coverage_safety_pass(m, polys_final)
 
     return W, H, polys_final
+
 
 def _vectorize_worker_payload(payload: tuple[int, dict, bool]) -> tuple[int, dict]:
     idx, item, save_outputs = payload
@@ -1441,7 +1716,9 @@ def _vectorize_worker_payload(payload: tuple[int, dict, bool]) -> tuple[int, dic
     if save_outputs:
         OUT_DIR.mkdir(parents=True, exist_ok=True)
         p = OUT_DIR / f"processed_{idx}.json"
-        p.write_text(json.dumps(meta, ensure_ascii=False, indent=2), encoding="utf-8")
+        if not p.exists():
+            p.write_text(json.dumps(meta, ensure_ascii=False, indent=2), encoding="utf-8")
+
 
     return idx, meta
 

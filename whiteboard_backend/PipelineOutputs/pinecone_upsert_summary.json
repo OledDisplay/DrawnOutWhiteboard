@@ -1,0 +1,26 @@
+{
+  "index_plan": {
+    "prompt": [
+      "img-meta-promptctx-384",
+      "prompt"
+    ],
+    "context": [
+      "img-meta-promptctx-384",
+      "context"
+    ],
+    "clip": [
+      "img-meta-clip-768",
+      "clip"
+    ]
+  },
+  "dims": {
+    "prompt": 384,
+    "clip": 768,
+    "context": 384
+  },
+  "upserted": {
+    "prompt": 4,
+    "clip": 4,
+    "context": 4
+  }
+}

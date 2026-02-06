@@ -145,6 +145,80 @@ WHITE_PAD_PX = 2  # expand bbox slightly before filling
 SAVE_DEBUG = False
 
 # -----------------------------
+# GLOBAL processed_<n> TRACKER
+# -----------------------------
+_LATEST_IDX_PATH = OUTPUT_DIR / "latest_processed_index.json"
+_LATEST_PROCESSED_IDX = -1  # in-process cache
+
+def _discover_latest_processed_index() -> int:
+    """
+    Finds the max processed_<n> already present on disk.
+    Uses both:
+      - scanning OUTPUT_DIR for processed_<n>.(png|json)
+      - optional latest_processed_index.json
+    """
+    mx = -1
+
+    # 1) scan disk
+    try:
+        if OUTPUT_DIR.exists():
+            for p in OUTPUT_DIR.iterdir():
+                if not p.is_file():
+                    continue
+                m = re.match(r"processed_(\d+)\.(?:png|json)$", p.name, re.IGNORECASE)
+                if not m:
+                    continue
+                try:
+                    mx = max(mx, int(m.group(1)))
+                except Exception:
+                    pass
+    except Exception:
+        pass
+
+    # 2) tracker file
+    try:
+        if _LATEST_IDX_PATH.exists():
+            obj = json.loads(_LATEST_IDX_PATH.read_text(encoding="utf-8"))
+            if isinstance(obj, dict):
+                v = obj.get("latest_index")
+                if isinstance(v, int):
+                    mx = max(mx, v)
+                elif isinstance(v, str) and v.isdigit():
+                    mx = max(mx, int(v))
+    except Exception:
+        pass
+
+    return mx
+
+def _sync_latest_processed_index() -> int:
+    global _LATEST_PROCESSED_IDX
+    disk_mx = _discover_latest_processed_index()
+    if _LATEST_PROCESSED_IDX < 0:
+        _LATEST_PROCESSED_IDX = disk_mx
+    else:
+        _LATEST_PROCESSED_IDX = max(_LATEST_PROCESSED_IDX, disk_mx)
+    return _LATEST_PROCESSED_IDX
+
+def _bump_latest_processed_index(idx: int) -> None:
+    global _LATEST_PROCESSED_IDX
+    try:
+        idx = int(idx)
+    except Exception:
+        return
+
+    if idx > _LATEST_PROCESSED_IDX:
+        _LATEST_PROCESSED_IDX = idx
+        try:
+            OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
+            _LATEST_IDX_PATH.write_text(
+                json.dumps({"latest_index": int(_LATEST_PROCESSED_IDX)}, ensure_ascii=False, indent=2),
+                encoding="utf-8",
+            )
+        except Exception:
+            pass
+
+
+# -----------------------------
 # LOADING LOGIC
 # -----------------------------
 def load_image_cv_unchanged(path: str | Path) -> np.ndarray:
@@ -389,35 +463,55 @@ def _predict_kwargs(ocr) -> dict[str, Any]:
     return kw
 
 
+def _rapidocr_len(x: Any) -> int:
+    if x is None:
+        return 0
+    if isinstance(x, list):
+        return len(x)
+    # RapidOCRResult / RapidOCROutput
+    for attr in ("word_results", "boxes", "dt_boxes"):
+        if hasattr(x, attr):
+            v = getattr(x, attr, None)
+            try:
+                return 0 if v is None else len(v)
+            except Exception:
+                pass
+    return 0
+
+
 def ocr_predict(ocr, image_bgr: np.ndarray):
     """
     DROP-IN NAME kept.
-    Normalizes the different RapidOCR return formats.
-    RapidOCR (rapidocr_onnxruntime) often returns: (dets, [t_det, t_cls, t_rec])
-    Some other wrappers return: (dets, elapsed_float)
+    RapidOCR returns either:
+      - RapidOCROutput/RapidOCRResult object (common in `rapidocr`)
+      - (result, timings) tuple/list (also common)
+      - list detections (some wrappers)
     """
     kwargs = _predict_kwargs(ocr)
-    out = ocr(image_bgr, **kwargs)
-    # Normalize common formats:
-    # 1) (result, elapsed_float)
-    # 2) (result, [timings...])  <-- YOUR CASE
+
+    # make sure the array is contiguous for ORT
+    img = np.ascontiguousarray(image_bgr)
+
+    out = ocr(img, **kwargs)
+
+    # Unpack common (result, meta) formats
     if isinstance(out, (tuple, list)) and len(out) == 2:
-        dets = out[0]
-        meta = out[1]
+        out = out[0]
 
-        # elapsed as scalar
-        if isinstance(meta, (int, float)):
-            return dets
-
-        # timings list/tuple (e.g. [t_det, t_cls, t_rec])
-        if isinstance(meta, (list, tuple)) and all(isinstance(x, (int, float)) for x in meta):
-            return dets
-
-        # sometimes second element is None
-        if meta is None:
-            return dets
+    # If we got nothing, try RGB once (covers builds that expect RGB ndarray)
+    try:
+        if _rapidocr_len(out) == 0:
+            rgb = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
+            out2 = ocr(rgb, **kwargs)
+            if isinstance(out2, (tuple, list)) and len(out2) == 2:
+                out2 = out2[0]
+            if _rapidocr_len(out2) > 0:
+                return out2
+    except Exception:
+        pass
 
     return out
+
 
 
 
@@ -443,18 +537,150 @@ def _split_words_keep_basic(text: str) -> list[str]:
     return [t for t in re.split(r"\s+", (text or "").strip()) if t]
 
 
+def _iter_rapidocr_object(result: Any):
+    """
+    Normalize RapidOCR result objects into an iterator of (box, text, score).
+    RapidOCR (the `rapidocr` package) commonly returns an object with:
+      - boxes: Nx4x2
+      - txts:  N
+      - scores: N
+    Optionally:
+      - word_results (if return_word_box=True)
+    """
+    if result is None:
+        return
+
+    # If RapidOCR provides word-level results, prefer them.
+    if hasattr(result, "word_results"):
+        wr = getattr(result, "word_results", None)
+        # wr formats vary by version; try to flatten conservatively
+        if isinstance(wr, list):
+            # Possible shapes:
+            # - [ [box, (txt, score)], ... ]
+            # - [ [ [box, (txt, score)], ... ], ... ]
+            stack = list(wr)
+
+            while stack:
+                item = stack.pop(0)
+
+                if isinstance(item, list) and item and isinstance(item[0], list) and len(item[0]) >= 2:
+                    # nested list -> push children
+                    stack = item + stack
+                    continue
+
+                if isinstance(item, (list, tuple)) and len(item) >= 2:
+                    box = item[0]
+                    text_part = item[1]
+                    score = None
+                    if isinstance(text_part, (list, tuple)) and text_part:
+                        txt = str(text_part[0] or "").strip()
+                        if len(text_part) >= 2:
+                            try:
+                                score = float(text_part[1])
+                            except Exception:
+                                score = None
+                    else:
+                        txt = str(text_part or "").strip()
+                        if len(item) >= 3:
+                            try:
+                                score = float(item[2])
+                            except Exception:
+                                score = None
+
+                    if txt:
+                        yield (box, txt, score)
+            return
+
+    # Line-level results
+    if hasattr(result, "boxes") and hasattr(result, "txts"):
+        boxes = getattr(result, "boxes", None)
+        txts = getattr(result, "txts", None)
+        scores = getattr(result, "scores", None)
+
+        if boxes is None or txts is None:
+            return
+
+        # Convert to python lists safely
+        try:
+            boxes_list = list(boxes)
+        except Exception:
+            boxes_list = boxes
+
+        try:
+            txts_list = list(txts)
+        except Exception:
+            txts_list = txts
+
+        try:
+            scores_list = list(scores) if scores is not None else []
+        except Exception:
+            scores_list = []
+
+        n = min(len(boxes_list), len(txts_list))
+        for i in range(n):
+            box = boxes_list[i]
+            txt = str(txts_list[i] or "").strip()
+            if not txt:
+                continue
+            sc = None
+            if i < len(scores_list):
+                try:
+                    sc = float(scores_list[i])
+                except Exception:
+                    sc = None
+            yield (box, txt, sc)
+        return
+
+    # Some builds use dt_boxes + rec_res style
+    if hasattr(result, "dt_boxes") and hasattr(result, "rec_res"):
+        dt_boxes = getattr(result, "dt_boxes", None)
+        rec_res = getattr(result, "rec_res", None)
+        if isinstance(dt_boxes, (list, tuple)) and isinstance(rec_res, (list, tuple)):
+            n = min(len(dt_boxes), len(rec_res))
+            for i in range(n):
+                box = dt_boxes[i]
+                rr = rec_res[i]
+                txt = ""
+                sc = None
+                if isinstance(rr, (list, tuple)) and rr:
+                    txt = str(rr[0] or "").strip()
+                    if len(rr) >= 2:
+                        try:
+                            sc = float(rr[1])
+                        except Exception:
+                            sc = None
+                else:
+                    txt = str(rr or "").strip()
+                if txt:
+                    yield (box, txt, sc)
+        return
+
+
 def parse_paddle_result_to_words(result: Any) -> list[WordDet]:
     """
     DROP-IN NAME kept.
-    Now parses RapidOCR-style results into your WordDet list.
+    Parses:
+      - RapidOCR result objects (RapidOCROutput/RapidOCRResult)
+      - list detections formats
+      - dict formats
     """
     words_out: list[WordDet] = []
     if result is None:
         return words_out
 
-    # Some wrappers return dicts with keys
-    # Example-ish structures seen in the wild:
-    # - [{"box": [...], "text": "...", "score": 0.98}, ...]
+    # --- RapidOCR object path ---
+    if hasattr(result, "boxes") or hasattr(result, "word_results") or hasattr(result, "dt_boxes"):
+        for box, text, score in _iter_rapidocr_object(result):
+            quad = _as_quad(box)
+            toks = _split_words_keep_basic(text)
+            if len(toks) <= 1:
+                words_out.append(WordDet(text=text, quad=quad, score=score))
+            else:
+                for tok in toks:
+                    words_out.append(WordDet(text=tok.strip(), quad=quad, score=score))
+        return words_out
+
+    # --- Existing dict/list logic you already had ---
     if isinstance(result, list) and result and isinstance(result[0], dict):
         for it in result:
             try:
@@ -462,7 +688,6 @@ def parse_paddle_result_to_words(result: Any) -> list[WordDet]:
                 text = it.get("text") or it.get("rec_text") or it.get("rec_texts")
                 score = it.get("score")
                 if isinstance(text, list):
-                    # if somehow list of texts, join
                     text = " ".join(str(x) for x in text if x)
                 t = str(text or "").strip()
                 if not t or box is None:
@@ -473,11 +698,6 @@ def parse_paddle_result_to_words(result: Any) -> list[WordDet]:
                 continue
         return words_out
 
-    # The most common RapidOCR output is a list of detections.
-    # Typical formats:
-    #   [ [box, text, score], ... ]
-    #   [ [box, (text, score)], ... ]
-    # where box is 4 points (quad) or xyxy.
     if isinstance(result, list):
         for item in result:
             try:
@@ -488,7 +708,6 @@ def parse_paddle_result_to_words(result: Any) -> list[WordDet]:
                 score: float | None = None
 
                 if isinstance(text_part, (list, tuple)) and text_part:
-                    # (text, score) style
                     t = str(text_part[0] or "").strip()
                     if len(text_part) >= 2:
                         try:
@@ -508,7 +727,6 @@ def parse_paddle_result_to_words(result: Any) -> list[WordDet]:
 
                 quad = _as_quad(box)
 
-                # Keep your original behavior: if it's a line, split into tokens anchored to same quad.
                 toks = _split_words_keep_basic(t)
                 if len(toks) <= 1:
                     words_out.append(WordDet(text=t, quad=quad, score=score))
@@ -519,6 +737,7 @@ def parse_paddle_result_to_words(result: Any) -> list[WordDet]:
                 continue
 
     return words_out
+
 
 
 # -----------------------------
@@ -893,10 +1112,16 @@ def process_images_in_memory(
     *,
     start_index: int = 0,
     save_outputs: bool = False,
-) -> list[dict]:
+    return_path_map: bool = True,  # <-- ADDED (default True for your new pipeline)
+) -> Any:
     """
     image_items: [{"source_path": str, "img_bgr": np.ndarray, "base_context": str}]
     returns: [{"idx": int, "source_path": str, "base_context": str, "masked_bgr": np.ndarray, "payload_json": dict}]
+
+    If return_path_map=True, returns:
+      (list_of_outputs, unique_to_processed_map)
+    where unique_to_processed_map is:
+      { "<literal_unique_image_path>": "processed_<idx>" }
     """
     ocr = create_paddle_ocr()
 
@@ -904,7 +1129,14 @@ def process_images_in_memory(
         _tess_import()
 
     out: list[dict] = []
-    index = int(start_index)
+    _sync_latest_processed_index()
+    index = int(max(int(start_index), _LATEST_PROCESSED_IDX + 1))
+
+
+    # -------------------------
+    # ADDED: path -> processed map
+    # -------------------------
+    unique_to_processed: dict[str, str] = {}
 
     for it in image_items:
         try:
@@ -966,18 +1198,30 @@ def process_images_in_memory(
             masked_bgr = mask_with_white_fill(img_bgr, refined_boxes_orig)
             base_context = str(it.get("base_context", "") or "")
 
+            # -------------------------
+            # ADDED: stable processed id
+            # -------------------------
+            processed_id = f"processed_{index}"
+            _bump_latest_processed_index(index)
+            unique_to_processed[src_path] = processed_id
+
             payload = {
                 "source_path": src_path,
                 "base_context": base_context,
                 "image_size": [int(img_bgr.shape[1]), int(img_bgr.shape[0])],
                 "ocr_preprocess": {"border_pad": OCR_BORDER_PAD, "scale": OCR_SCALE},
                 "words": refined_words,
+
+                # -------------------------
+                # ADDED: embed the mapping into per-image JSON too
+                # -------------------------
+                "processed_id": processed_id,
             }
 
             if save_outputs:
                 OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
-                out_img = OUTPUT_DIR / f"processed_{index}.png"
-                out_json = OUTPUT_DIR / f"processed_{index}.json"
+                out_img = OUTPUT_DIR / f"{processed_id}.png"
+                out_json = OUTPUT_DIR / f"{processed_id}.json"
                 cv2.imwrite(str(out_img), masked_bgr)
                 out_json.write_text(json.dumps(payload, indent=2, ensure_ascii=False), encoding="utf-8")
 
@@ -987,6 +1231,11 @@ def process_images_in_memory(
                 "base_context": base_context,
                 "masked_bgr": masked_bgr,
                 "payload_json": payload,
+
+                # -------------------------
+                # ADDED: expose processed id in-memory
+                # -------------------------
+                "processed_id": processed_id,
             })
 
             index += 1
@@ -994,5 +1243,6 @@ def process_images_in_memory(
         except Exception as e:
             print(f"[SKIP][mem] {it.get('source_path')} -> {e}")
 
+    if return_path_map:
+        return out, unique_to_processed
     return out
-

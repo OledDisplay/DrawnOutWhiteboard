@@ -8,12 +8,15 @@ from typing import Dict, List, Optional, Any, Tuple
 from pathlib import Path
 from PIL import Image
 
-from duckduckgo_search import DDGS
+try:
+    from ddgs import DDGS  # new name
+except Exception:
+    from duckduckgo_search import DDGS  # old name (still works)
+
 from ddg_research import ddg_cc_image_harvest
 
 
 from smart_hits import smart_find_hits_in_soup
-from parsers import parse_wikimedia, parse_openverse, parse_plos, parse_usgs
 
 try:
     from sentence_transformers import SentenceTransformer
@@ -51,6 +54,19 @@ def dbg(*args):
         print(*args, flush=True)
 
 
+
+WMF_UA = "https://github.com/OledDisplay/DrawnOutWhiteboard"
+
+BASE_HEADERS = {
+    "User-Agent": WMF_UA,
+    "Accept": "image/avif,image/webp,image/apng,image/*,*/*;q=0.8",
+    "Accept-Language": "en-US,en;q=0.9",
+    "Cache-Control": "no-cache",
+    "Pragma": "no-cache",
+}
+
+
+
 # =========================
 # LICENSE/HOST FILTERS
 # =========================
@@ -71,11 +87,11 @@ UA = {"User-Agent": "diag-scrape/0.2 (+research/cc-check; contact: your-email@ex
 # URL BLOCKS / NORMALIZATION
 # =========================
 BLOCKED_URL_WORDS = [
-    "blog", "press", "partners", "privacy", "license", "tos",
-    "accessibility", "accounts/login", "facebook", "twitter",
-    "instagram", "youtube", "linkedin", "help.openstax.org",
-    "rice.edu", "gatesfoundation.org", "google.com", "business.safety.google",
-    "mailto:", "tel:", "pdf", "drive.google.com",
+    "/blog", "/press", "/partners", "/privacy", "/license", "/tos",
+    "/accessibility", "/accounts/login", "/facebook", "/twitter",
+    "/instagram", "/youtube", "/linkedin", "/help",
+    "/rice.edu", "/gatesfoundation.org", "google.com", "business.safety.google",
+    "/mailto:", "/tel:", "/pdf", "drive.google.com",
 ]
 
 NON_HTML_EXT = (".pdf", ".doc", ".docx", ".zip", ".rar", ".7z",
@@ -91,6 +107,237 @@ UI_IMG_SKIP_RE = re.compile(
     re.IGNORECASE,
 )
 DATA_URL_RE = re.compile(r"^\s*data:", re.IGNORECASE)
+
+def _to_list_embedding(v):
+    if v is None:
+        return None
+    try:
+        if hasattr(v, "tolist"):
+            return v.tolist()
+    except Exception:
+        pass
+    try:
+        return list(v)
+    except Exception:
+        return None
+
+def _ctx_confidence_from_embeddings(query_emb, ctx_emb) -> float:
+    try:
+        qv = _norm_vec(query_emb)
+        cv = _norm_vec(ctx_emb)
+        if qv is None or cv is None:
+            return 0.0
+        return float(_dot_sim(qv, cv))
+    except Exception:
+        return 0.0
+
+def _ccish(text: str) -> bool:
+    if not text:
+        return False
+    for pat in CC_PATTERNS:
+        try:
+            if re.search(pat, text, re.I):
+                return True
+        except Exception:
+            continue
+    return False
+
+def parse_openverse(src, data, query=None, prompt_id=None, encoder=None, query_embedding=None, base_ctx_embedding=None, **_):
+    results = []
+    try:
+        if isinstance(data, dict):
+            results = data.get("results") or []
+    except Exception:
+        results = []
+
+    prompt_id = prompt_id or _prompt_key(query or "")
+    dest_dir = os.path.join(IMAGES_PATH, "api", "openverse", prompt_id)
+    os.makedirs(dest_dir, exist_ok=True)
+
+    session = requests.Session()
+    saved = []
+
+    for r in results[:20]:
+        try:
+            img_url = (r.get("url") or r.get("thumbnail") or r.get("thumbnail_url") or "").strip()
+            if not img_url:
+                continue
+
+            title = (r.get("title") or "").strip()
+            creator = (r.get("creator") or "").strip()
+            landing = (r.get("foreign_landing_url") or r.get("detail_url") or "").strip()
+            license_url = (r.get("license_url") or "").strip()
+            license_code = (r.get("license") or "").strip()
+
+            # If you want CC-only, enforce it here. If not, remove this.
+            lic_blob = " ".join([license_code, license_url, title, creator])
+            if license_code or license_url:
+                if not _ccish(lic_blob) and "public domain" not in lic_blob.lower():
+                    continue
+
+            ctx_text = " ".join(x for x in [title, creator, license_code, query] if x).strip()
+            ctx_emb = None
+            if encoder is not None and ctx_text:
+                try:
+                    ctx_emb = encoder.encode(ctx_text)
+                except Exception:
+                    ctx_emb = None
+
+            path = download_image(session, img_url, dest_dir)
+            if not path:
+                continue
+
+            conf = _ctx_confidence_from_embeddings(query_embedding, ctx_emb)
+            meta = {
+                "source_kind": "api",
+                "source_name": "openverse",
+                "base_context": query or "",
+                "prompt_id": prompt_id,
+                "page_url": landing or "",
+                "image_url": img_url,
+                "ctx_text": ctx_text,
+                "ctx_embedding": _to_list_embedding(ctx_emb),
+                "ctx_sem_score": conf,
+                "ctx_confidence": conf,
+            }
+            if base_ctx_embedding is not None:
+                meta["prompt_embedding"] = base_ctx_embedding
+
+            _register_image_metadata(path, meta)
+            saved.append(path)
+
+            if len(saved) >= 10:
+                break
+        except Exception:
+            continue
+
+    src.img_paths = saved
+    return saved
+
+def parse_wikimedia(src, data, query=None, prompt_id=None, encoder=None, query_embedding=None, base_ctx_embedding=None, **_):
+    prompt_id = prompt_id or _prompt_key(query or "")
+    dest_dir = os.path.join(IMAGES_PATH, "api", "wikimedia", prompt_id)
+    os.makedirs(dest_dir, exist_ok=True)
+
+    session = requests.Session()
+    saved = []
+
+    pages = {}
+    try:
+        if isinstance(data, dict):
+            pages = (data.get("query") or {}).get("pages") or {}
+    except Exception:
+        pages = {}
+
+    for _, p in (pages or {}).items():
+        try:
+            infos = p.get("imageinfo") or []
+            if not infos:
+                continue
+            info = infos[0]
+            img_url = (info.get("url") or "").strip()
+            if not img_url:
+                continue
+
+            ext = info.get("extmetadata") or {}
+            # extmetadata entries are often dicts with {"value": "..."}
+            def _ext_val(k):
+                v = ext.get(k)
+                if isinstance(v, dict):
+                    return (v.get("value") or "").strip()
+                if isinstance(v, str):
+                    return v.strip()
+                return ""
+
+            lic_short = _ext_val("LicenseShortName")
+            lic_url = _ext_val("LicenseUrl")
+            desc = _ext_val("ImageDescription")
+            objname = _ext_val("ObjectName")
+            artist = _ext_val("Artist")
+            credit = _ext_val("Credit")
+            usage = _ext_val("UsageTerms")
+
+            lic_blob = " ".join([lic_short, lic_url, usage, credit, artist, objname, desc])
+            if (lic_short or lic_url or usage) and not _ccish(lic_blob) and "public domain" not in lic_blob.lower():
+                continue
+
+            ctx_text = " ".join(x for x in [objname, desc, artist, lic_short, query] if x).strip()
+            ctx_emb = None
+            if encoder is not None and ctx_text:
+                try:
+                    ctx_emb = encoder.encode(ctx_text)
+                except Exception:
+                    ctx_emb = None
+
+            path = download_image(session, img_url, dest_dir)
+            if not path:
+                continue
+
+            conf = _ctx_confidence_from_embeddings(query_embedding, ctx_emb)
+            meta = {
+                "source_kind": "api",
+                "source_name": "wikimedia",
+                "base_context": query or "",
+                "prompt_id": prompt_id,
+                "page_url": "",  # Wikimedia pages are derivable, but not required
+                "image_url": img_url,
+                "ctx_text": ctx_text,
+                "ctx_embedding": _to_list_embedding(ctx_emb),
+                "ctx_sem_score": conf,
+                "ctx_confidence": conf,
+            }
+            if base_ctx_embedding is not None:
+                meta["prompt_embedding"] = base_ctx_embedding
+
+            _register_image_metadata(path, meta)
+            saved.append(path)
+
+            if len(saved) >= 10:
+                break
+        except Exception:
+            continue
+
+    src.img_paths = saved
+    return saved
+
+def parse_plos(src, data, **_):
+    # PLOS search results do not directly expose stable figure image URLs via this endpoint.
+    # Treat as "no immediate images", but don't crash the pipeline.
+    src.img_paths = []
+    return []
+
+def parse_usgs(src, data, **_):
+    # USGS ScienceBase often returns no usable image files for general queries like math.
+    # Keep it non-fatal.
+    src.img_paths = []
+    return []
+
+# OVERRIDE the mapping to use the working local parsers
+PARSERS = {
+    "wikimedia": parse_wikimedia,
+    "openverse": parse_openverse,
+    "plos": parse_plos,
+    "usgs": parse_usgs,
+}
+
+
+
+import re
+import hashlib
+
+def _prompt_key(prompt: str) -> str:
+    """
+    Stable folder-safe key for a prompt.
+    Example: "Eukaryotic cell" -> "eukaryotic_cell_a1b2c3d4"
+    """
+    p = (prompt or "").strip().lower()
+    slug = re.sub(r"[^a-z0-9]+", "_", p).strip("_")
+    if not slug:
+        slug = "prompt"
+    slug = slug[:40]
+    h = hashlib.sha1((prompt or "").encode("utf-8")).hexdigest()[:8]
+    return f"{slug}_{h}"
+
 
 EXCLUDE_REGION_CLASS_WORDS = (
     "header", "footer", "navbar", "breadcrumb", "toolbar", "sidebar", "aside",
@@ -154,13 +401,40 @@ def same_registrable(host_a: str, host_b: str) -> bool:
 
 
 def domain_and_phrase_lock(root: str, candidate: str) -> bool:
-    """Strict dynamic lock: same registrable domain + shared path token."""
+    """
+    Dynamic lock:
+      - must be same registrable domain
+      - allows shared path tokens OR shallow cross-links (prevents OpenStax-style slugs from being dropped)
+    """
     pr = urlparse(root); pc = urlparse(candidate)
-    if not same_registrable((pr.hostname or "").lower(), (pc.hostname or "").lower()):
+    ha = (pr.hostname or "").lower()
+    hb = (pc.hostname or "").lower()
+    if not same_registrable(ha, hb):
         return False
-    rp = {s.strip().lower() for s in (pr.path or "/").split("/") if s.strip()}
-    cp = {s.strip().lower() for s in (pc.path or "/").split("/") if s.strip()}
-    return bool(rp and cp and (rp & cp))
+
+    cu = clean_url(candidate)
+    if not cu:
+        return False
+    low = cu.lower()
+    if any(bad in low for bad in BLOCKED_URL_WORDS):
+        return False
+    if any(low.endswith(ext) for ext in NON_HTML_EXT):
+        return False
+
+    # token overlap check
+    rp = [s for s in (pr.path or "/").split("/") if s.strip()]
+    cp = [s for s in (pc.path or "/").split("/") if s.strip()]
+    rset = {s.strip().lower() for s in rp}
+    cset = {s.strip().lower() for s in cp}
+    if rset & cset:
+        return True
+
+    # allow shallow links (generic) so content routed via short slugs isn't discarded
+    if len(cp) <= 2 or len(rp) <= 2:
+        return True
+
+    return False
+
 
 
 def parent_part(u: str) -> str:
@@ -184,6 +458,75 @@ def ordered_dedupe(iterable):
             seen.add(x)
             out.append(x)
     return out
+
+
+def ddg_site_seed_urls(
+    query: str,
+    domain: str,
+    max_results: int = 25,
+    region: str = "wt-wt",
+    safesearch: str = "moderate",
+    proxies: dict | None = None,
+) -> list[str]:
+    """
+    Generic prompt-driven site seeding. NO hardcoding to any topic.
+    Pulls URLs via DDG text search: site:<domain> <query> (diagram/svg/figure).
+    """
+    seeds: list[str] = []
+    if not query or not domain:
+        return seeds
+
+    q = query.strip()
+    d = domain.strip().lower()
+    ddg_queries = [
+        f'site:{d} "{q}"',
+        f"site:{d} {q} diagram",
+        f"site:{d} {q} svg",
+        f"site:{d} {q} figure",
+    ]
+
+    def _ok(u: str) -> bool:
+        if not u:
+            return False
+        low = u.lower()
+        if any(low.startswith(s) for s in SCHEME_BLOCK):
+            return False
+        if any(low.endswith(ext) for ext in NON_HTML_EXT):
+            return False
+        if any(bad in low for bad in BLOCKED_URL_WORDS):
+            return False
+        return True
+
+    try:
+        headers = {"User-Agent": UA.get("User-Agent", "diag-scrape/0.2")}
+        with DDGS(headers=headers, proxies=proxies) as ddgs:
+            for qq in ddg_queries:
+                try:
+                    # ddgs vs duckduckgo_search differ; handle both shapes
+                    gen = None
+                    if hasattr(ddgs, "text"):
+                        gen = ddgs.text(qq, max_results=max_results, region=region, safesearch=safesearch)
+                    elif hasattr(ddgs, "search"):
+                        gen = ddgs.search(qq, max_results=max_results, region=region, safesearch=safesearch)
+                    else:
+                        gen = []
+
+                    for item in gen:
+                        u = (item.get("href") or item.get("url") or item.get("link") or "").strip()
+                        u = clean_url(u)
+                        if _ok(u):
+                            seeds.append(u)
+                        if len(seeds) >= max_results:
+                            break
+                except Exception:
+                    continue
+                if len(seeds) >= max_results:
+                    break
+    except Exception:
+        return []
+
+    return ordered_dedupe(seeds)[:max_results]
+
 
 
 # =========================
@@ -876,10 +1219,16 @@ def get_limited_lemmas(word, per_synset_limit=4, pos_filter=None, debug=True):
     if isinstance(pos_filter, str):
         pos_filter = [pos_filter]
 
+    def _emit_none():
+        if debug:
+            print(f"\n[LEMMA] word='{word}'  synsets_found=0  pos_filter={pos_filter or 'all'}")
+            print(f"  [!] No synsets found for '{word}'")
+
     try:
         synsets = wn.synsets(word)
     except Exception:
         synsets = []
+
     if pos_filter:
         synsets = [s for s in synsets if s.pos() in pos_filter]
 
@@ -895,10 +1244,53 @@ def get_limited_lemmas(word, per_synset_limit=4, pos_filter=None, debug=True):
             print(f"  [{i}] synset='{syn.name()}' ({syn.pos()}) → def='{syn.definition()[:70]}...'")
             print(f"      lemmas: {', '.join(limited)}")
 
-    if debug and not synsets:
-        print(f"  [!] No synsets found for '{word}'")
+    # Fallback: if WordNet has nothing for a phrase, build a generic lemma set
+    if not results:
+        _emit_none()
+
+        phrase = (word or "").strip()
+        toks = [t for t in re.split(r"[\s\-_\/]+", phrase) if t]
+        toks_norm = []
+        for t in toks:
+            t2 = t.strip()
+            if t2:
+                toks_norm.append(t2)
+
+        # Try synsets per token (generic; not hardcoding)
+        collected = []
+        for t in toks_norm:
+            try:
+                ss = wn.synsets(t)
+            except Exception:
+                ss = []
+            for s in ss[:2]:
+                for lm in (s.lemmas() or [])[:per_synset_limit]:
+                    nm = lm.name().replace("_", " ").strip()
+                    if nm:
+                        collected.append(nm)
+
+        # Always include the phrase and tokens
+        base = []
+        if phrase:
+            base.append(phrase)
+        base.extend(toks_norm)
+        base.extend(collected)
+
+        # Dedupe while preserving order
+        seen = set()
+        lemmas = []
+        for x in base:
+            k = x.strip().lower()
+            if not k or k in seen:
+                continue
+            seen.add(k)
+            lemmas.append(x)
+
+        if lemmas:
+            results["fallback.phrase"] = {"definition": "", "lemmas": lemmas}
 
     return results
+
 
 
 # =========================
@@ -1170,9 +1562,18 @@ def _is_diagram_like(data: bytes,
 
 
 # === REPLACE: download_image (runs filter & logs decision) ===================
-def download_image(session: requests.Session, img_url: str, dest_dir: str) -> Optional[str]:
+def download_image(
+    session: requests.Session,
+    img_url: str,
+    dest_dir: str,
+    referer: str | None = None
+) -> Optional[str]:
     """
     Robust downloader with diagram filter.
+    Fixes Wikimedia 403 issues by:
+      - using a correct Referer (page url), never the file url
+      - retrying 403 without referer and with commons referer
+      - adding sane Accept headers
     """
     import base64
 
@@ -1182,6 +1583,7 @@ def download_image(session: requests.Session, img_url: str, dest_dir: str) -> Op
             as_text = raw.decode("utf-8", errors="ignore")
         except Exception:
             pass
+
         ext = _sniff_image_type(raw[:64], ctype_hint, as_text) or ext_hint or "img"
 
         if ext != "svg" and len(raw) < 6 * 1024:
@@ -1201,6 +1603,7 @@ def download_image(session: requests.Session, img_url: str, dest_dir: str) -> Op
         return out
 
     try:
+        # ---- data URL handling ----
         if img_url.startswith("data:image/"):
             m = re.match(r"^data:(image/[\w\+\-\.]+);base64,(.+)$", img_url, re.I | re.S)
             if not m:
@@ -1210,13 +1613,60 @@ def download_image(session: requests.Session, img_url: str, dest_dir: str) -> Op
             raw = base64.b64decode(payload, validate=True)
             return _save_bytes(raw, ext_hint="", ctype_hint=ctype, source_label="data-url")
 
-        headers = {"Referer": img_url, **UA}
-        with session.get(img_url, headers=headers, stream=True, timeout=30, allow_redirects=True) as r:
+        # ---- request headers ----
+        hdr = dict(BASE_HEADERS)
+        if referer:
+            hdr["Referer"] = referer
+
+        hdr.update({
+            "Accept": "image/avif,image/webp,image/apng,image/*,*/*;q=0.8",
+            "Accept-Language": "en-US,en;q=0.9",
+            "Cache-Control": "no-cache",
+            "Pragma": "no-cache",
+        })
+
+        # IMPORTANT: never use the file url as referer.
+        if referer:
+            hdr["Referer"] = referer
+
+        def _attempt(headers: dict):
+            return session.get(img_url, headers=headers, stream=True, timeout=30, allow_redirects=True)
+
+        r = _attempt(hdr)
+
+        # ---- 403 retry strategy (common with upload.wikimedia.org) ----
+        if r.status_code == 403:
+            try:
+                r.close()
+            except Exception:
+                pass
+            hdr2 = dict(hdr)
+            hdr2.pop("Referer", None)
+            r = _attempt(hdr2)
+
+        if r.status_code == 403:
+            try:
+                r.close()
+            except Exception:
+                pass
+            hdr3 = dict(hdr)
+            hdr3["Referer"] = "https://commons.wikimedia.org/"
+            r = _attempt(hdr3)
+
+        if r.status_code == 403:
+            try:
+                dbg(f"[IMG_SAVE][403 body] {r.text[:300]}")
+            except Exception:
+                pass
+
+
+        with r:
             r.raise_for_status()
 
             ctype = r.headers.get("Content-Type", "")
             buf = bytearray()
             max_peek = 4096
+
             for chunk in r.iter_content(4096):
                 if not chunk:
                     break
@@ -1242,13 +1692,16 @@ def download_image(session: requests.Session, img_url: str, dest_dir: str) -> Op
                 data += chunk
 
             path_ext = os.path.splitext(urlparse(img_url).path)[1].lower().lstrip(".")
-            ext_hint = "jpg" if path_ext == "jpeg" else (path_ext if path_ext in {"png","jpg","jpeg","gif","webp","svg","tiff","bmp"} else "")
+            ext_hint = "jpg" if path_ext == "jpeg" else (
+                path_ext if path_ext in {"png", "jpg", "jpeg", "gif", "webp", "svg", "tiff", "bmp"} else ""
+            )
 
             return _save_bytes(data, ext_hint=ext_hint, ctype_hint=ctype, source_label=img_url)
 
     except Exception as e:
         dbg(f"[IMG_SAVE][err] {img_url} -> {e}")
         return None
+
 
 
 def save_image_candidate(
@@ -1281,7 +1734,7 @@ def _extract_img_candidates_near_hit(node, soup, page_url, *, per_hit_cap: Optio
     cand = []
     seen = set()
 
-    def _add(u, why):
+    def _add_url(u, why):
         if not u:
             return
         try:
@@ -1295,6 +1748,17 @@ def _extract_img_candidates_near_hit(node, soup, page_url, *, per_hit_cap: Optio
             return
         seen.add(key)
         cand.append((u_abs, why))
+
+    def _add_svg(svg_tag, why):
+        if not svg_tag:
+            return
+        key = (id(svg_tag), why)
+        if key in seen:
+            return
+        if per_hit_cap is not None and len(cand) >= per_hit_cap:
+            return
+        seen.add(key)
+        cand.append((svg_tag, why))
 
     def _img_url_from_tag(img):
         srcset = (img.get("srcset") or img.get("data-srcset") or "").strip()
@@ -1327,6 +1791,31 @@ def _extract_img_candidates_near_hit(node, soup, page_url, *, per_hit_cap: Optio
                 return v
         return None
 
+    def _svg_is_probably_ui(svg: Tag) -> bool:
+        try:
+            if not isinstance(svg, Tag) or svg.name != "svg":
+                return True
+            cls = " ".join(svg.get("class") or []).lower()
+            if any(x in cls for x in ("icon", "sprite", "logo", "wordmark", "btn", "button")):
+                return True
+            aria_hidden = (svg.get("aria-hidden") or "").strip().lower()
+            if aria_hidden == "true":
+                w = svg.get("width")
+                h = svg.get("height")
+                try:
+                    wi = float(str(w).replace("px", "")) if w else 0.0
+                    hi = float(str(h).replace("px", "")) if h else 0.0
+                    if wi and hi and (wi * hi) < 6000:
+                        return True
+                except Exception:
+                    pass
+            # If it's inside obvious nav/header/footer, treat as UI.
+            if _is_excluded_region(svg) or _is_excluded_region(svg.parent if isinstance(svg.parent, Tag) else svg):
+                return True
+            return False
+        except Exception:
+            return True
+
     cur = node
     steps_up = 5
     hit_container = None
@@ -1346,33 +1835,46 @@ def _extract_img_candidates_near_hit(node, soup, page_url, *, per_hit_cap: Optio
     scopes.append(soup)
 
     for sc in scopes:
+        # NEW: inline svg diagrams (OpenStax loves these)
+        try:
+            for svg in sc.find_all("svg"):
+                if _svg_is_probably_ui(svg):
+                    continue
+                # Prefer svgs in figures/diagrams
+                if svg.find_parent("figure") is not None or svg.find_parent("main") is not None:
+                    _add_svg(svg, "inline-svg")
+                    if per_hit_cap is not None and len(cand) >= per_hit_cap:
+                        return cand
+        except Exception:
+            pass
+
         for pic in sc.find_all("picture"):
             for src in pic.find_all("source"):
                 srcset = (src.get("srcset") or "").strip()
                 if srcset:
                     url = srcset.split(",")[-1].strip().split()[0]
-                    _add(url, "picture/srcset")
+                    _add_url(url, "picture/srcset")
                     if per_hit_cap is not None and len(cand) >= per_hit_cap:
                         return cand
             img = pic.find("img")
             if img:
                 url = _img_url_from_tag(img)
                 if url:
-                    _add(url, "picture/img")
+                    _add_url(url, "picture/img")
                     if per_hit_cap is not None and len(cand) >= per_hit_cap:
                         return cand
 
         for img in sc.find_all("img"):
             url = _img_url_from_tag(img)
             if url:
-                _add(url, "img")
+                _add_url(url, "img")
                 if per_hit_cap is not None and len(cand) >= per_hit_cap:
                     return cand
 
         for a in sc.find_all("a", href=True):
             href = (a.get("href") or "").strip()
             if href and re.search(r"\.(png|jpe?g|gif|webp|svg|tiff?)($|\?)", href, re.I):
-                _add(href, "a->image")
+                _add_url(href, "a->image")
                 if per_hit_cap is not None and len(cand) >= per_hit_cap:
                     return cand
 
@@ -1382,6 +1884,7 @@ def _extract_img_candidates_near_hit(node, soup, page_url, *, per_hit_cap: Optio
     if per_hit_cap is not None:
         return cand[:per_hit_cap]
     return cand
+
 
 
 def partition_anchors(cur: str, anchors: list[str], allowed_fn):
@@ -1529,6 +2032,8 @@ def stage2_drill_search_and_images(
     global_image_cap: int | None = None,
     per_hit_cap: Optional[int] = None,
     fatigue_limit: int = 25,
+    # root exhaustion on terminal no-accept streak
+    terminal_no_accept_limit: int = 15,
     encoder: Optional[Any] = None,
     query_embedding: Optional[Any] = None,
     prompt_embedding: Optional[Any] = None,
@@ -1557,8 +2062,16 @@ def stage2_drill_search_and_images(
             compat_kwargs.pop("prompt_vec", None)
         )
 
+    # Enforce your requirement: max 5 images per anchor(root)
+    try:
+        hard_image_cap = int(hard_image_cap)
+    except Exception:
+        hard_image_cap = 5
+    hard_image_cap = max(1, min(hard_image_cap, 5))
+
     class _NextRoot(BaseException): pass
     class _StopAll(BaseException): pass
+    class _SkipTerminals(BaseException): pass  # NEW: don't kill root; just stop terminal loop & continue BFS
 
     saved_paths: list[str] = []
 
@@ -1587,18 +2100,28 @@ def stage2_drill_search_and_images(
         except Exception as e:
             dbg(f"[S2][URL_EMBED][ERR] batch={len(missing)} -> {e}")
 
+    # NEW: dedupe on clean_url BEFORE scoring so you don't hammer the same page 8 times
     def _score_and_sort_urls(urls: list[str], *, k: int) -> list[str]:
-        urls = ordered_dedupe([u for u in urls if u])
-        if not urls:
+        # normalize & dedupe first
+        normed = []
+        seen = set()
+        for u in (urls or []):
+            cu = clean_url(u)
+            if not cu or cu in seen:
+                continue
+            seen.add(cu)
+            normed.append(cu)
+
+        if not normed:
             return []
         if encoder is None or prompt_vec is None:
-            return urls[:k] if k and len(urls) > k else urls
+            return normed[:k] if k and len(normed) > k else normed
 
-        keys = [_url_key_for_embed(u) for u in urls]
+        keys = [_url_key_for_embed(u) for u in normed]
         _embed_keys_batch([kk for kk in keys if kk])
 
         scored = []
-        for u, kk in zip(urls, keys):
+        for u, kk in zip(normed, keys):
             e = key_emb_cache.get(kk)
             s = float(np.dot(prompt_vec, e)) if e is not None else 0.0
             scored.append((s, u, kk))
@@ -1611,12 +2134,78 @@ def stage2_drill_search_and_images(
 
         top = scored[:k] if k and len(scored) > k else scored
         return [u for _, u, _ in top]
+    def _path_depth(u: str) -> int:
+        try:
+            p = urlparse(clean_url(u))
+            return len([s for s in (p.path or "").split("/") if s])
+        except Exception:
+            return 0
+
+    def _url_sim_to_prompt(u: str) -> float:
+        if encoder is None or prompt_vec is None:
+            return 0.0
+        kk = _url_key_for_embed(u)
+        if not kk:
+            return 0.0
+        if kk not in key_emb_cache:
+            _embed_keys_batch([kk])
+        e = key_emb_cache.get(kk)
+        return float(np.dot(prompt_vec, e)) if e is not None else 0.0
+
+
+    # gate knobs (tune once; default values work well to stop /math /science style hops)
+    MIN_SIM_NORMAL = 0.20        # normal pages
+    MIN_SIM_SHALLOW = 0.50       # very shallow pages like /math
+    MIN_SIM_UPWARD = 0.65        # "going up" from the chosen root depth
+    SHALLOW_DEPTH_MAX = 2        # <=2 path segments is considered "site nav shallow"
+
+    root_depth_cache: dict[str, int] = {}
 
     def _allowed(root: str, child_url: str) -> bool:
+        cu = clean_url(child_url)
+        if not cu:
+            return False
+
+        low = cu.lower()
+        if any(bad in low for bad in BLOCKED_URL_WORDS):
+            return False
+        if any(low.endswith(ext) for ext in NON_HTML_EXT):
+            return False
+
+        pr = urlparse(clean_url(root))
+        pc = urlparse(cu)
+
+        ha = (pr.hostname or "").lower()
+        hb = (pc.hostname or "").lower()
+        if not same_registrable(ha, hb):
+            return False
+
+        rd = root_depth_cache.get(root)
+        if rd is None:
+            rd = _path_depth(root)
+            root_depth_cache[root] = rd
+
+        cd = _path_depth(cu)
+        sim = _url_sim_to_prompt(cu)
+
+        # 1) Hard stop: don't climb "up" (shorter paths) unless it's extremely on-prompt
+        if cd < rd:
+            return sim >= MIN_SIM_UPWARD
+
+        # 2) Shallow nav pages (/, /math, /science, /faq) need high similarity
+        if cd <= SHALLOW_DEPTH_MAX:
+            return sim >= MIN_SIM_SHALLOW
+
+        # 3) Normal pages: allow if prompt similarity is decent OR your token overlap lock passes
+        if sim >= MIN_SIM_NORMAL:
+            return True
+
+        # fallback: keep your original path-token overlap behavior for “weird routing”
         try:
-            return domain_and_phrase_lock(root, child_url)
+            return domain_and_phrase_lock(root, cu)
         except Exception:
             return False
+
 
     def _subsample_terminals(urls: list[str], cap: int) -> list[str]:
         if not urls:
@@ -1787,22 +2376,18 @@ def stage2_drill_search_and_images(
             ctx_sem = details.get("ctx_sem_score", details.get("sem_score"))
             ctx_text = details.get("ctx_text") or details.get("snippet") or details.get("heading_text") or ""
 
-            # Try to grab embedding if smart_find_hits_in_soup provided it
             ctx_emb = None
             for k in ("ctx_embedding", "embedding", "sem_embedding", "context_embedding"):
                 if k in details and details[k] is not None:
                     ctx_emb = details[k]
                     break
 
-            # Make JSON-safe if it's a numpy array / tensor-like
             if ctx_emb is not None and hasattr(ctx_emb, "tolist"):
                 try:
                     ctx_emb = ctx_emb.tolist()
                 except Exception:
                     pass
 
-
-            # If it didn't, generate it here (so Stage2 ALWAYS stores ctx_embedding)
             if ctx_emb is None and encoder is not None and ctx_text:
                 try:
                     v = encoder.encode(ctx_text)
@@ -1816,7 +2401,7 @@ def stage2_drill_search_and_images(
 
             hit_meta = _normalize_ctx_meta({
                 "ctx_text": ctx_text,
-                "ctx_embedding": ctx_emb,  # <<< THIS is what your ranking needs
+                "ctx_embedding": ctx_emb,
                 "ctx_score": ctx_score,
                 "ctx_sem_score": ctx_sem,
                 "ctx_confidence": ctx_sem if ctx_sem is not None else ctx_score,
@@ -1835,15 +2420,15 @@ def stage2_drill_search_and_images(
                     if per_root_counter[0] >= hard_image_cap:
                         raise _NextRoot()
 
-    def _process_terminal_url(tu: str, *, per_root_counter: list[int], fatigue_counter: list[int], idx: int, total: int):
+    def _process_terminal_url(tu: str, *, per_root_counter: list[int], fatigue_counter: list[int], idx: int, total: int) -> int:
         before = per_root_counter[0]
 
         tsoup, _, _ = render(tu, expand=False)
         if not tsoup:
             if per_root_counter[0] > 0:
                 fatigue_counter[0] += 1
-            dbg(f"[TERM {idx:02d}/{total:02d}] ❌ {_short_url(tu)}  soup=None  fatigue={fatigue_counter[0]}")
-            return
+            dbg(f"[TERM {idx:02d}/{total:02d}]  {_short_url(tu)}  soup=None  fatigue={fatigue_counter[0]}")
+            return 0
 
         ranked = smart_find_hits_in_soup(
             tsoup,
@@ -1860,10 +2445,10 @@ def stage2_drill_search_and_images(
         if not ranked:
             if per_root_counter[0] > 0:
                 fatigue_counter[0] += 1
-            dbg(f"[TERM {idx:02d}/{total:02d}] ❌ {_short_url(tu)}  hits=0  fatigue={fatigue_counter[0]}")
-            return
+            dbg(f"[TERM {idx:02d}/{total:02d}]  {_short_url(tu)}  hits=0  fatigue={fatigue_counter[0]}")
+            return 0
 
-        dbg(f"[TERM {idx:02d}/{total:02d}] ✅ {_short_url(tu)}  hits={len(ranked)}  imgs={per_root_counter[0]}")
+        dbg(f"[TERM {idx:02d}/{total:02d}]{_short_url(tu)}  hits={len(ranked)}  imgs={per_root_counter[0]}")
 
         any_cand = False
         for n, _, _ in ranked[:3]:
@@ -1883,6 +2468,8 @@ def stage2_drill_search_and_images(
         if per_root_counter[0] > 0 and fatigue_counter[0] >= fatigue_limit:
             dbg(f"[S2] FATIGUE LIMIT ({fatigue_limit}) after first success → next root")
             raise _NextRoot()
+
+        return max(0, per_root_counter[0] - before)
 
     chosen_index = None
     chosen_sim = 0.0
@@ -1904,6 +2491,7 @@ def stage2_drill_search_and_images(
 
             per_root_saved = [0]
             fatigue_counter = [0]
+            no_accept_streak = [0]
 
             try:
                 if chosen_index:
@@ -1914,15 +2502,27 @@ def stage2_drill_search_and_images(
 
                     dbg(f"[IDX][RUN] ⭐ processing terminals={len(terms)} from entry={_short_url(chosen_index.get('entry_url'))}")
 
-                    for i, tu in enumerate(terms, start=1):
-                        if _global_cap_hit():
-                            raise _StopAll()
-                        if per_root_saved[0] >= hard_image_cap:
-                            raise _NextRoot()
-                        if tu in seen_urls:
-                            continue
-                        seen_urls.add(tu)
-                        _process_terminal_url(tu, per_root_counter=per_root_saved, fatigue_counter=fatigue_counter, idx=i, total=len(terms))
+                    try:
+                        for i, tu in enumerate(terms, start=1):
+                            if _global_cap_hit():
+                                raise _StopAll()
+                            if per_root_saved[0] >= hard_image_cap:
+                                raise _NextRoot()
+                            if tu in seen_urls:
+                                continue
+                            seen_urls.add(tu)
+
+                            gained = _process_terminal_url(tu, per_root_counter=per_root_saved, fatigue_counter=fatigue_counter, idx=i, total=len(terms))
+                            if gained <= 0:
+                                no_accept_streak[0] += 1
+                            else:
+                                no_accept_streak[0] = 0
+
+                            if no_accept_streak[0] >= terminal_no_accept_limit:
+                                dbg(f"[S2] TERMINAL STREAK {no_accept_streak[0]} with 0 accepts → SKIP TERMINALS, CONTINUE BFS")
+                                raise _SkipTerminals()
+                    except _SkipTerminals:
+                        no_accept_streak[0] = 0
 
                     chosen_index = None
 
@@ -1939,15 +2539,27 @@ def stage2_drill_search_and_images(
                 term0 = _score_and_sort_urls(term0_full, k=url_sort_k)
                 deeper0 = _score_and_sort_urls(deeper0_full, k=url_sort_k)
 
-                for i, tu in enumerate(term0, start=1):
-                    if _global_cap_hit():
-                        raise _StopAll()
-                    if per_root_saved[0] >= hard_image_cap:
-                        raise _NextRoot()
-                    if tu in seen_urls:
-                        continue
-                    seen_urls.add(tu)
-                    _process_terminal_url(tu, per_root_counter=per_root_saved, fatigue_counter=fatigue_counter, idx=i, total=len(term0))
+                try:
+                    for i, tu in enumerate(term0, start=1):
+                        if _global_cap_hit():
+                            raise _StopAll()
+                        if per_root_saved[0] >= hard_image_cap:
+                            raise _NextRoot()
+                        if tu in seen_urls:
+                            continue
+                        seen_urls.add(tu)
+
+                        gained = _process_terminal_url(tu, per_root_counter=per_root_saved, fatigue_counter=fatigue_counter, idx=i, total=len(term0))
+                        if gained <= 0:
+                            no_accept_streak[0] += 1
+                        else:
+                            no_accept_streak[0] = 0
+
+                        if no_accept_streak[0] >= terminal_no_accept_limit:
+                            dbg(f"[S2] TERMINAL STREAK {no_accept_streak[0]} with 0 accepts → SKIP TERMINALS, CONTINUE BFS")
+                            raise _SkipTerminals()
+                except _SkipTerminals:
+                    no_accept_streak[0] = 0
 
                 queue = deque(deeper0)
                 while queue:
@@ -1963,10 +2575,6 @@ def stage2_drill_search_and_images(
 
                     csoup, canchors, _ = render(cur, expand=True)
                     if not canchors:
-                        if per_root_saved[0] > 0:
-                            fatigue_counter[0] += 1
-                            if fatigue_counter[0] >= fatigue_limit:
-                                raise _NextRoot()
                         continue
 
                     term_full, deeper_full = partition_anchors(cur, canchors, lambda u: _allowed(root, u))
@@ -1977,15 +2585,27 @@ def stage2_drill_search_and_images(
                     term = _score_and_sort_urls(term_full, k=url_sort_k)
                     deeper = _score_and_sort_urls(deeper_full, k=url_sort_k)
 
-                    for i, tu in enumerate(term, start=1):
-                        if _global_cap_hit():
-                            raise _StopAll()
-                        if per_root_saved[0] >= hard_image_cap:
-                            raise _NextRoot()
-                        if tu in seen_urls:
-                            continue
-                        seen_urls.add(tu)
-                        _process_terminal_url(tu, per_root_counter=per_root_saved, fatigue_counter=fatigue_counter, idx=i, total=len(term))
+                    try:
+                        for i, tu in enumerate(term, start=1):
+                            if _global_cap_hit():
+                                raise _StopAll()
+                            if per_root_saved[0] >= hard_image_cap:
+                                raise _NextRoot()
+                            if tu in seen_urls:
+                                continue
+                            seen_urls.add(tu)
+
+                            gained = _process_terminal_url(tu, per_root_counter=per_root_saved, fatigue_counter=fatigue_counter, idx=i, total=len(term))
+                            if gained <= 0:
+                                no_accept_streak[0] += 1
+                            else:
+                                no_accept_streak[0] = 0
+
+                            if no_accept_streak[0] >= terminal_no_accept_limit:
+                                dbg(f"[S2] TERMINAL STREAK {no_accept_streak[0]} with 0 accepts → SKIP TERMINALS, CONTINUE BFS")
+                                raise _SkipTerminals()
+                    except _SkipTerminals:
+                        no_accept_streak[0] = 0
 
                     for du in deeper:
                         if du not in seen_urls:
@@ -2008,6 +2628,9 @@ def stage2_drill_search_and_images(
     return saved_paths
 
 
+
+
+
 # =========================
 # STAGE 1: Valid roots finder
 # =========================
@@ -2019,6 +2642,9 @@ def find_valid_roots(
     timeout: int = 8,
     known_roots: list[str] | None = None,
     js_mode: str = "light",
+    # NEW (non-breaking): prompt-based rerank + cap
+    prompt_text: str | None = None,
+    max_roots: int = 2,
 ):
     """
     Stage 1: BFS discovery using MiniLM semantic scoring.
@@ -2135,12 +2761,44 @@ def find_valid_roots(
     t = tldextract.extract(host)
     base_reg = ".".join([t.domain, t.suffix]) if t.suffix else t.domain
 
+    # ----------------------------
+    # If known_roots provided: keep collection behavior, but apply prompt rerank+cap at the end.
+    # ----------------------------
     if known_roots:
         roots0 = [_clean_url_s1(r) for r in known_roots if r]
         roots0 = [r for r in roots0 if r and same_reg(r, base_reg) and not any(r.lower().endswith(ext) for ext in NON_HTML_EXT)]
         roots0 = prefer_shortest_by_bucket(roots0)
         print(f"[S1] known_roots supplied; skipping discovery. roots={len(roots0)}")
-        return {r: {"parent": None, "depth": 0, "prompt": None, "menu": None} for r in roots0}
+
+        out = {r: {"parent": None, "depth": 0, "prompt": None, "menu": None} for r in roots0}
+
+        # NEW: prompt rerank + keep top-N
+        if prompt_text and encoder is not None and out:
+            try:
+                pvec = encoder.encode(str(prompt_text), normalize_embeddings=True)
+                urls = list(out.keys())
+                keys = [prompt_key(u) for u in urls]
+                embs = encoder.encode(keys, normalize_embeddings=True)
+                scored = []
+                for u, k, e in zip(urls, keys, embs):
+                    s = _dot(pvec, e)
+                    scored.append((s, u, k))
+                scored.sort(key=lambda x: x[0], reverse=True)
+                keep = scored[: max_roots] if max_roots else scored
+                out2 = {}
+                for s, u, k in keep:
+                    meta = dict(out[u])
+                    meta["prompt_rank_score"] = float(s)
+                    meta["prompt_rank_key"] = k
+                    out2[u] = meta
+                return out2
+            except Exception:
+                pass
+
+        # cap anyway if requested
+        if max_roots and len(out) > max_roots:
+            out = {k: out[k] for k in list(out.keys())[:max_roots]}
+        return out
 
     visited = {base_clean}
     frontier = deque([base_clean])
@@ -2356,6 +3014,7 @@ def find_valid_roots(
 
         tree_frontier = next_frontier
 
+    # Original behavior: return depth>=1 nodes when available, else seed only.
     depth1_plus = [u for u, meta in tree_nodes.items() if meta.get("depth", 0) >= 1]
     depth1_plus = prefer_shortest_by_bucket(depth1_plus)
 
@@ -2370,9 +3029,47 @@ def find_valid_roots(
     print(f"[S1] Discovery complete. Found {len(keys)} candidate roots:")
     for r in keys[:12]:
         m = out[r]
-        print(f"  → {r}  (depth={m.get('depth')} prompt={m.get('prompt'):.3f})")
+        try:
+            pp = float(m.get("prompt") or 0.0)
+        except Exception:
+            pp = 0.0
+        print(f"  → {r}  (depth={m.get('depth')} prompt={pp:.3f})")
 
+    # ----------------------------
+    # NEW: Prompt rerank on FINAL URLs only (collection untouched), keep top 2.
+    # ----------------------------
+    if prompt_text and encoder is not None and out:
+        try:
+            pvec = encoder.encode(str(prompt_text), normalize_embeddings=True)
+            urls = list(out.keys())
+            keys2 = [prompt_key(u) for u in urls]
+            embs2 = encoder.encode(keys2, normalize_embeddings=True)
+
+            scored2 = []
+            for u, k, e in zip(urls, keys2, embs2):
+                s = _dot(pvec, e)
+                scored2.append((s, u, k))
+
+            scored2.sort(key=lambda x: x[0], reverse=True)
+            keep2 = scored2[:max_roots] if max_roots else scored2
+
+            out2 = {}
+            for s, u, k in keep2:
+                meta = dict(out[u])
+                meta["prompt_rank_score"] = float(s)
+                meta["prompt_rank_key"] = k
+                out2[u] = meta
+
+            print(f"[S1] Prompt rerank applied: returning top={len(out2)}")
+            return out2
+        except Exception as e:
+            print(f"[S1] Prompt rerank failed (falling back): {e}")
+
+    if max_roots and len(out) > max_roots:
+        out = {k: out[k] for k in list(out.keys())[:max_roots]}
     return out
+
+
 
 
 # =========================
@@ -2471,10 +3168,9 @@ def send_request(source: Source, settings: dict):
     built = build_params_from_settings(source, settings)
     if source.type != "API":
         return None, None, built
-    headers = {"User-Agent": "diag-scrape/0.1"}
     try:
         dbg(f"[API][{source.name}] GET {source.url} params={built}")
-        resp = requests.get(source.url, params=built, headers=headers, timeout=20)
+        resp = requests.get(source.url, params=built, headers=BASE_HEADERS, timeout=20)
         ct = resp.headers.get("Content-Type", "")
         dbg(f"[API][{source.name}] status={resp.status_code} len={len(resp.content)} ct={ct}")
         try:
@@ -2485,6 +3181,7 @@ def send_request(source: Source, settings: dict):
     except requests.RequestException as e:
         dbg(f"[API][{source.name}] REQUEST_ERROR: {e}")
         return None, f"REQUEST_ERROR: {e}", built
+
 
 
 PARSERS = {
@@ -2510,6 +3207,7 @@ def handle_result_no_api(source: Source, query: str, subj: str, hard_image_cap: 
                 seen.add(x); out.append(x)
         return out
 
+    # Keep subject-driven Stage 1 discovery (you said it's intentional)
     lemma_obj_subj = get_limited_lemmas(subj, 4)
     lemma_obj_query = get_limited_lemmas(query, 5)
 
@@ -2539,10 +3237,23 @@ def handle_result_no_api(source: Source, query: str, subj: str, hard_image_cap: 
 
     if valid_endpoints:
         dbg(f"[NOAPI] using known endpoints count={len(valid_endpoints)} for subj={subj}")
-        roots = find_valid_roots(base_url=source.url, lemma_obj=lemma_obj_subj, known_roots=valid_endpoints)
+        roots = find_valid_roots(
+            base_url=source.url,
+            lemma_obj=lemma_obj_subj,      # subject-driven discovery stays
+            known_roots=valid_endpoints,
+            js_mode="light",
+            prompt_text=query,             # NEW: prompt rerank on final roots only
+            max_roots=2,                   # NEW: max 2 roots
+        )
     else:
         dbg("[NOAPI] no valid endpoints; starting Stage 1 discovery")
-        roots = find_valid_roots(base_url=source.url, lemma_obj=lemma_obj_subj)
+        roots = find_valid_roots(
+            base_url=source.url,
+            lemma_obj=lemma_obj_subj,      # subject-driven discovery stays
+            js_mode="light",
+            prompt_text=query,             # NEW: prompt rerank on final roots only
+            max_roots=2,                   # NEW: max 2 roots
+        )
 
     if not roots:
         dbg(f"[NOAPI] no roots after Stage 1 for {source.name}")
@@ -2589,6 +3300,13 @@ def handle_result_no_api(source: Source, query: str, subj: str, hard_image_cap: 
     html_cache = {}
     anchors_cache = {}
 
+    # Enforce your requirement here too (caller safety)
+    try:
+        hard_image_cap = int(hard_image_cap)
+    except Exception:
+        hard_image_cap = 5
+    hard_image_cap = max(1, min(hard_image_cap, 5))
+
     dbg(f"[NOAPI] Stage 2 starting roots={len(roots)} hard_image_cap={hard_image_cap}")
     loaded_idxs = load_terminal_indexes_for_subject(source.name, subj)
 
@@ -2615,10 +3333,13 @@ def handle_result_no_api(source: Source, query: str, subj: str, hard_image_cap: 
         subject=subj,
         source_name=source.name,
         on_terminal_index_promoted=lambda idx: persist_terminal_index_for_subject(source.name, subj, idx),
+
+        terminal_no_accept_limit=15,  # NEW: your exhaustion rule
     )
 
     source.img_paths = saved
     return saved
+
 
 
 # =========================
@@ -2671,14 +3392,26 @@ def _json_safe(obj):
     return obj
 
 
-def collect_unique_images(images_root: str, base_ctx_embedding=None, prompt_text: str | None = None, dbg=print):
+def collect_unique_images(
+    images_root: str,
+    base_ctx_embedding=None,
+    prompt_text: str | None = None,
+    prompt_filter_text: str | None = None,
+    unique_subdir: str | None = None,
+    dbg=print
+):
     """
     Walks `images_root`, dedupes images, ranks them with SigLIP + context,
-    and keeps ONLY the top 10 in <images_root>/UniqueImages.
+    and keeps ONLY the top 10 in <images_root>/UniqueImages/<unique_subdir>.
+    Only considers images whose metadata base_context matches prompt_filter_text (if provided).
     """
     unique_dir = os.path.join(images_root, "UniqueImages")
+    if unique_subdir:
+        unique_dir = os.path.join(unique_dir, unique_subdir)
+
     os.makedirs(unique_dir, exist_ok=True)
 
+    # cleanup only THIS prompt folder
     for fname in os.listdir(unique_dir):
         fpath = os.path.join(unique_dir, fname)
         if os.path.isfile(fpath):
@@ -2690,6 +3423,10 @@ def collect_unique_images(images_root: str, base_ctx_embedding=None, prompt_text
     sha1_to_canonical: Dict[str, str] = {}
     ahash_to_canonical: Dict[str, str] = {}
     canonical_metas: Dict[str, List[dict]] = {}
+
+    pf_norm = None
+    if prompt_filter_text:
+        pf_norm = str(prompt_filter_text).strip().casefold()
 
     for dirpath, _, filenames in os.walk(images_root):
         if os.path.abspath(dirpath) == os.path.abspath(unique_dir):
@@ -2719,6 +3456,13 @@ def collect_unique_images(images_root: str, base_ctx_embedding=None, prompt_text
                         ahash_to_canonical[ah] = canonical
 
             metas = IMAGE_METADATA.get(path)
+
+            if metas and pf_norm is not None:
+                metas = [
+                    m for m in metas
+                    if str(m.get("base_context", "") or "").strip().casefold() == pf_norm
+                ]
+
             if metas:
                 lst = canonical_metas.get(canonical)
                 if lst is None:
@@ -2759,6 +3503,19 @@ def collect_unique_images(images_root: str, base_ctx_embedding=None, prompt_text
         if best_ctx is None:
             continue
 
+        # pick best available source tags (don’t assume metas[0])
+        sk = None
+        sn = None
+        for m in metas:
+            if sk is None and m.get("source_kind"):
+                sk = m.get("source_kind")
+            if sn is None and m.get("source_name"):
+                sn = m.get("source_name")
+            if sk is not None and sn is not None:
+                break
+        sk = sk or "unknown"
+        sn = sn or ""
+
         candidates.append(
             {
                 "image_path": img_path,
@@ -2768,8 +3525,11 @@ def collect_unique_images(images_root: str, base_ctx_embedding=None, prompt_text
                 "ctx_score": best_ctx["ctx_score"],
                 "ctx_sem_score": best_ctx["ctx_sem_score"],
                 "ctx_text": best_ctx["ctx_text"] or "",
+                "source_kind": sk,
+                "source_name": sn,
             }
         )
+
 
     if not candidates:
         dbg("[collect] no candidates with ctx_embedding; skipping SigLIP ranking")
@@ -2777,13 +3537,47 @@ def collect_unique_images(images_root: str, base_ctx_embedding=None, prompt_text
 
     prompt_text = prompt_text or ""
     backend = SiglipBackend()
-    ranked = rerank_image_candidates_siglip(
+    # Pull more, then apply your “API should lose if anything else exists” rule.
+    desired_final_k = 5
+    raw = rerank_image_candidates_siglip(
         candidates=candidates,
         prompt_text=prompt_text,
         backend=backend,
-        top_n=30,
-        final_k=10,
+        top_n=60,
+        final_k=max(25, desired_final_k * 6),
     )
+
+    if not raw:
+        dbg("[collect] SigLIP ranking returned no winners")
+        return []
+
+    cand_by_path = {c["image_path"]: c for c in candidates}
+
+    has_non_api = any((c.get("source_kind") or "") != "api" for c in candidates)
+
+    SOURCE_KIND_WEIGHT = {
+        # “verified” in your system: content-found pages with context + strict filtering
+        "domain_search": 1.0,
+        "noapi": 1.0,
+        # DDG is weaker verification than your site-harvest
+        "ddg": 0.70,
+        "ddg_cc": 0.70,
+        # APIs are kept as fallback: they should lose when non-api exists
+        "api": 0.35 if has_non_api else 1.0,
+        "generated": 1.0,
+        "unknown": 0.85,
+    }
+
+    for w in raw:
+        c = cand_by_path.get(w.get("image_path") or "", {})
+        sk = (c.get("source_kind") or "unknown").lower()
+        base = float(w.get("final_score") or 0.0)
+        weight = float(SOURCE_KIND_WEIGHT.get(sk, 0.85))
+        w["weighted_score"] = base * weight
+
+    raw.sort(key=lambda x: float(x.get("weighted_score") or 0.0), reverse=True)
+    ranked = raw[:desired_final_k]
+
 
     if not ranked:
         dbg("[collect] SigLIP ranking returned no winners")
@@ -2871,7 +3665,18 @@ def collect_unique_images(images_root: str, base_ctx_embedding=None, prompt_text
         if core_list:
             core_meta[dest_path] = core_list
 
+        base_ctx_text = ""
+        for m in metas:
+            bc = m.get("base_context")
+            if isinstance(bc, str) and bc.strip():
+                base_ctx_text = bc.strip()
+                break
+        if not base_ctx_text:
+            base_ctx_text = (prompt_filter_text or prompt_text or "").strip()
+
         ctx_meta[dest_path] = {
+            "base_context": base_ctx_text,
+            "prompt_id": str(unique_subdir or ""),
             "prompt_embedding": img_prompt_emb,
             "clip_embedding": winner.get("clip_embedding"),
             "clip_score": winner.get("clip_score"),
@@ -2890,11 +3695,32 @@ def collect_unique_images(images_root: str, base_ctx_embedding=None, prompt_text
         with open(ctx_path, "w", encoding="utf-8") as f:
             json.dump(_json_safe(ctx_meta), f, indent=2, ensure_ascii=False)
         dbg(f"[collect] context metadata saved to {ctx_path}")
+
+        # ALSO maintain global metadata files at <images_root>/UniqueImages/
+        global_unique = os.path.join(images_root, "UniqueImages")
+        os.makedirs(global_unique, exist_ok=True)
+
+        def _merge_json(path: str, new_obj: dict):
+            old = {}
+            try:
+                if os.path.exists(path):
+                    with open(path, "r", encoding="utf-8") as ff:
+                        old = json.load(ff) or {}
+            except Exception:
+                old = {}
+            old.update(new_obj)
+            with open(path, "w", encoding="utf-8") as ff:
+                json.dump(_json_safe(old), ff, indent=2, ensure_ascii=False)
+
+        _merge_json(os.path.join(global_unique, "image_metadata_core.json"), core_meta)
+        _merge_json(os.path.join(global_unique, "image_metadata_context.json"), ctx_meta)
+
     except Exception as e:
         dbg(f"[collect][err][meta] {e}")
 
     dbg(f"[collect] winners={len(unique_paths)} saved to {unique_dir}")
     return unique_paths
+
 
 
 def _embed_prompt_to_list(text: str):
@@ -2908,19 +3734,31 @@ def _embed_prompt_to_list(text: str):
     return v
 
 
+def research_many(prompt_to_topic: Dict[str, str]) -> Dict[str, List[str]]:
+    """
+    prompt_to_topic: { "Prompt text": "Topic/Subject", ... }
+    Returns: { prompt: [unique_image_paths...] }
+    """
+    out: Dict[str, List[str]] = {}
+    for prompt, topic in (prompt_to_topic or {}).items():
+        if not isinstance(prompt, str) or not prompt.strip():
+            continue
+        if not isinstance(topic, str) or not topic.strip():
+            continue
+        pid = _prompt_key(prompt)
+        dbg(f"[MULTI] prompt='{prompt}' topic='{topic}' prompt_id={pid}")
+        out[prompt] = research(prompt, topic, prompt_id=pid)
+    return out
+
+
+
 # =========================
 # MAIN
 # =========================
-def research(query: str, subj: str):
+def research(query: str, subj: str, prompt_id: str | None = None):
 
+    prompt_id = prompt_id or _prompt_key(query)
     base_ctx_embedding = _embed_prompt_to_list(query)
-
-    settings = {
-        "query_field": query,
-        "limit_field": 10,
-        "pagination_field": 1,
-        "format_field": "json",
-    }
 
     encoder = _EMBED_MODEL
     query_embedding = None
@@ -2934,30 +3772,66 @@ def research(query: str, subj: str):
 
     lemma_obj_query = get_limited_lemmas(query, 5)
 
+       
+
+
     sources = read_sources()
     web_sources = []
     for src in sources:
         if src.type == "API":
             dbg(f"opened source {src.name} as api (parser='{src.name}'), sending request..")
+
+            parser = PARSERS.get((src.name or "").lower())
+            if not parser:
+                dbg(f"[API][{src.name}] no parser registered; skipping")
+                continue
+
+            # minimal universal settings
+            settings = {
+                "query_field": query,
+                "limit_field": 5,
+                "pagination_field": 1,  # Openverse uses page=1; Wikimedia ignores unless you implement continue
+            }
+
+            status, data, built = send_request(src, settings)
+            if not status or int(status) != 200:
+                dbg(f"[API][{src.name}] failed status={status}")
+                src.img_paths = []
+                continue
+
+            try:
+                parser(
+                    src,
+                    data,
+                    query=query,
+                    prompt_id=prompt_id,
+                    encoder=encoder,
+                    query_embedding=query_embedding,
+                    base_ctx_embedding=base_ctx_embedding,
+                )
+            except Exception as e:
+                dbg(f"[API][{src.name}] parse failed: {e}")
+                src.img_paths = []
         else:
             web_sources.append(src)
 
     # DDG: CC-backed images with per-image context
-    #ddg_cc_image_harvest(
-    #    query=query,
-    #    target_count=20,
-    #    lemma_obj=lemma_obj_query,
-    #    encoder=encoder,
-    #    query_embedding=query_embedding,
-    #    base_ctx_embedding=base_ctx_embedding,
-    #)
+    ddg_cc_image_harvest(
+        query=query,
+        target_count=5,
+        lemma_obj=lemma_obj_query,
+        encoder=encoder,
+        query_embedding=query_embedding,
+        base_ctx_embedding=base_ctx_embedding,
+    )
 
     for src in web_sources:
         dbg(f"opened source {src.name}, has no api, starting process..")
-        handle_result_no_api(src, query, subj, hard_image_cap=25,
-                             encoder=encoder,
-                             query_embedding=query_embedding,
-                             base_ctx_embedding=base_ctx_embedding)
+        handle_result_no_api(src, query, subj, hard_image_cap=5,
+                     encoder=encoder,
+                     query_embedding=query_embedding,
+                     base_ctx_embedding=base_ctx_embedding)
+
 
     for src in sources:
         if not getattr(src, "img_paths", None):
@@ -2969,12 +3843,22 @@ def research(query: str, subj: str):
                 "source_kind": "api" if src.type == "API" else "noapi",
                 "source_name": src.name,
                 "base_context": query,
+                "prompt_id": prompt_id,
             }
+
             if base_ctx_embedding is not None:
                 meta["prompt_embedding"] = base_ctx_embedding
             _register_image_metadata(p, meta)
 
-    unique = collect_unique_images(IMAGES_PATH, base_ctx_embedding, prompt_text=query, dbg=dbg)
+    unique = collect_unique_images(
+        IMAGES_PATH,
+        base_ctx_embedding,
+        prompt_text=query,
+        prompt_filter_text=query,
+        unique_subdir=prompt_id,
+        dbg=dbg
+    )
+
     dbg(f"Unique images:{unique}")
     return unique
 

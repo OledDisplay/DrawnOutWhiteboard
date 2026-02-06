@@ -40,6 +40,9 @@ CACHE_DIR.mkdir(parents=True, exist_ok=True)
 IMG_CACHE_PATH = CACHE_DIR / "processed_png_index.json"
 JSON_CACHE_PATH = CACHE_DIR / "processed_json_index.json"
 
+SKIP_EXISTING_LABELS = True
+
+
 
 # ============================
 # MODEL CONFIG 
@@ -401,10 +404,11 @@ def build_label_refine_prompt(base_context: str, raw_candidates: List[str]) -> s
         "- eukaryotic cell -> all organels\n"
         "- car -> wheel, tire, rim, door...n\n"
         f"RAW CANDIDATES: {cand_text}\n\n"
+        "Include a very consise description of how each object is represented and differentiated VISUALLY"
         "RULES:\n"
         "- Output ONLY JSON\n"
         "- Example JSON in format:{"
-        "{\"labels\": [\"...\", \"...\"]}\n"
+        "{\"labels\": [{label : description, label : description}]}\n"
         "- labels must be short strings (1-4 words max)\n"
         "- no duplicates\n"
     )
@@ -976,7 +980,21 @@ def label_clusters_transformers(
 
     results_by_idx: Dict[int, Dict[str, Any]] = {}
 
+    
+
     for idx in sorted(clusters_state.keys()):
+
+        if save_outputs and SKIP_EXISTING_LABELS:
+            folder = out_dir / f"processed_{idx}"
+            labels_path = folder / "labels.json"
+            if labels_path.exists():
+                try:
+                    results_by_idx[idx] = json.loads(labels_path.read_text(encoding="utf-8"))
+                    print(f"[skip] idx={idx}: existing labels.json loaded")
+                    continue
+                except Exception:
+                    pass
+
         pack = clusters_state[idx]
         t0 = time.time()
 
@@ -1197,14 +1215,478 @@ def label_clusters_transformers(
                     "parsed": parsed,
                 })
 
-        if save_outputs:
+        if save_outputs and SKIP_EXISTING_LABELS:
             folder = out_dir / f"processed_{idx}"
-            folder.mkdir(parents=True, exist_ok=True)
-            (folder / "labels.json").write_text(json.dumps(results, ensure_ascii=False, indent=2), encoding="utf-8")
+            labels_path = folder / "labels.json"
+            if labels_path.exists():
+                try:
+                    results_by_idx[idx] = json.loads(labels_path.read_text(encoding="utf-8"))
+                    print(f"[skip] idx={idx}: existing labels.json loaded")
+                    continue
+                except Exception:
+                    pass
+
 
         print(f"[ok] idx={idx}: clusters={len(tasks)} dt={time.time()-t0:.2f}s")
 
     return results_by_idx
+
+# ============================
+# NEW: Processed-image selection (ImageText -> processed_n)
+# ============================
+
+def _resize_longest_side(img: Image.Image, max_side: int) -> Image.Image:
+    img = img.convert("RGB")
+    w, h = img.size
+    if w <= 0 or h <= 0:
+        return Image.new("RGB", (max_side, max_side), (0, 0, 0))
+    longest = max(w, h)
+    if longest <= max_side:
+        return img
+    scale = float(max_side) / float(longest)
+    nw = max(1, int(round(w * scale)))
+    nh = max(1, int(round(h * scale)))
+    return img.resize((nw, nh), resample=Image.BICUBIC)
+
+
+def _clean_short_label(s: str) -> Optional[str]:
+    if not isinstance(s, str):
+        return None
+    t = re.sub(r"\s+", " ", s.strip())
+    if not t:
+        return None
+
+    # Keep labels short (couple words)
+    parts = t.split(" ")
+    if len(parts) > 4:
+        t = " ".join(parts[:4]).strip()
+
+    # Drop absurdly long strings anyway
+    if len(t) > 60:
+        t = t[:60].strip()
+
+    return t or None
+
+
+def build_stage1_visual_probe_prompt() -> str:
+    # Token-efficient, hard “no guessing” instruction.
+    return (
+        "Make a full VISUAL characteristic of the image with WITH NO regard to semantic meaning\n"
+        "You have to describe all the shapes and objects spread out through it from an analytical standpoint"
+        "Talk  figures, clusters, membranes, blobs, ex."
+        "Do NOT infer meaning or identity.\n"
+        "Output JSON ONLY with:\n"
+        "{"
+        "\"labels\":[\"1-4 words\", ...],"
+        "\"dominant\":\"1-4 words\","
+        "\"simplicity\":1"
+        "}\n"
+        "Rules:\n"
+        "- labels: 3-8 items, each 1-4 words\n"
+        "- dominant: the most visually dominant element (1-4 words)\n"
+        "- simplicity: integer 1..5 (1=simplest, 5=very complex)\n"
+        "- no extra keys, no prose\n"
+    )
+
+
+def _parse_stage1_visual_probe(text_out: str) -> Dict[str, Any]:
+    obj = extract_json_object(text_out or "")
+    if not isinstance(obj, dict):
+        return {"labels": [], "dominant": "", "simplicity": 5}
+
+    labels = obj.get("labels")
+    dominant = obj.get("dominant")
+    simplicity = obj.get("simplicity")
+
+    out_labels: List[str] = []
+    if isinstance(labels, list):
+        seen = set()
+        for it in labels:
+            if not isinstance(it, str):
+                continue
+            c = _clean_short_label(it)
+            if not c:
+                continue
+            k = c.lower()
+            if k in seen:
+                continue
+            seen.add(k)
+            out_labels.append(c)
+            if len(out_labels) >= 8:
+                break
+
+    dom = ""
+    if isinstance(dominant, str):
+        dom = _clean_short_label(dominant) or ""
+
+    simp = 5
+    try:
+        simp = int(simplicity)
+    except Exception:
+        simp = 5
+    simp = max(1, min(5, simp))
+
+    # Ensure minimum label count
+    if len(out_labels) < 3:
+        # fallback: try to salvage from raw text (comma/newline split)
+        for part in re.split(r"[,;\n]+", (text_out or "").strip()):
+            c = _clean_short_label(part)
+            if not c:
+                continue
+            out_labels.append(c)
+            if len(out_labels) >= 3:
+                break
+
+    return {"labels": out_labels[:8], "dominant": dom, "simplicity": simp}
+
+
+def probe_processed_images_stage1(
+    *,
+    model,
+    processor,
+    device: torch.device,
+    items: List[Dict[str, Any]],
+    batch_size: int = 8,
+    longest_side: int = 600,
+) -> Dict[str, Dict[str, Any]]:
+    """
+    items: [
+      {
+        "processed_id": "processed_12",
+        "image_pil": PIL.Image (already processed/whited-out),
+        "base_context": "..."
+      }, ...
+    ]
+    Returns: { processed_id: {"labels":[...],"dominant":"...","simplicity":1..5}, ... }
+    """
+    SYSTEM_MSG = (
+        "You are a visual transcription engine.\n"
+        "You must describe only visible shapes/layout.\n"
+        "No guessing. Output JSON only.\n"
+    )
+
+    prompt_text = build_stage1_visual_probe_prompt()
+    conv = [
+        {"role": "system", "content": [{"type": "text", "text": SYSTEM_MSG}]},
+        {"role": "user", "content": [{"type": "image"}, {"type": "text", "text": prompt_text}]},
+    ]
+    prompt_str = processor.apply_chat_template(conv, tokenize=False, add_generation_prompt=True)
+
+    gen_kwargs = dict(
+        max_new_tokens=120,
+        do_sample=False,
+        num_beams=1,
+        use_cache=True,
+    )
+
+    img_dtype = _img_tensor_dtype(device)
+    out: Dict[str, Dict[str, Any]] = {}
+
+    bs = max(1, int(batch_size))
+    for start in range(0, len(items), bs):
+        chunk = items[start:start + bs]
+        if not chunk:
+            continue
+
+        texts_batch: List[str] = []
+        images_batch: List[Image.Image] = []
+        ids_batch: List[str] = []
+
+        for it in chunk:
+            pid = str(it.get("processed_id", "") or "").strip()
+            img = it.get("image_pil")
+            if not pid or not isinstance(img, Image.Image):
+                continue
+            img2 = _resize_longest_side(img, int(longest_side))
+
+            texts_batch.append(prompt_str)
+            images_batch.append(img2)
+            ids_batch.append(pid)
+
+        if not texts_batch:
+            continue
+
+        try:
+            inputs = processor(
+                text=texts_batch,
+                images=images_batch,
+                return_tensors="pt",
+                padding=True,
+                truncation=True,
+            )
+
+            for k, v in list(inputs.items()):
+                if torch.is_tensor(v):
+                    if k == "pixel_values":
+                        inputs[k] = v.to(device=device, dtype=img_dtype, non_blocking=True)
+                    else:
+                        inputs[k] = v.to(device=device, non_blocking=True)
+
+            with torch.inference_mode():
+                out_ids = model.generate(**inputs, **gen_kwargs)
+
+            if "input_ids" in inputs and torch.is_tensor(inputs["input_ids"]):
+                prompt_len = int(inputs["input_ids"].shape[1])
+                gen_only_ids = out_ids[:, prompt_len:]
+            else:
+                gen_only_ids = out_ids
+
+            texts_out = processor.batch_decode(gen_only_ids, skip_special_tokens=True)
+
+        except Exception as e:
+            for pid in ids_batch:
+                out[pid] = {"labels": [], "dominant": "", "simplicity": 5, "error": f"stage1_failed: {e}"}
+            if torch.cuda.is_available() and device.type == "cuda":
+                torch.cuda.empty_cache()
+            continue
+
+        n_out = min(len(texts_out), len(ids_batch))
+        for j in range(n_out):
+            pid = ids_batch[j]
+            parsed = _parse_stage1_visual_probe(texts_out[j])
+            out[pid] = parsed
+
+    return out
+
+
+def build_stage2_pick_prompt(
+    base_context: str,
+    stage1_map: Dict[str, Dict[str, Any]],
+    processed_to_unique: Optional[Dict[str, str]] = None,
+) -> str:
+    bc = (base_context or "").strip() or "unknown"
+
+    # Token-efficient flat list
+    lines: List[str] = []
+    for pid, info in stage1_map.items():
+        labels = info.get("labels") or []
+        dominant = info.get("dominant") or ""
+        simplicity = info.get("simplicity", 5)
+
+        try:
+            simp_i = int(simplicity)
+        except Exception:
+            simp_i = 5
+        simp_i = max(1, min(5, simp_i))
+
+        # keep labels short
+        if isinstance(labels, list):
+            lbl = ",".join(str(x) for x in labels[:8])
+        else:
+            lbl = ""
+
+        # include unique path only if provided (lets the model return it, but we still verify)
+        up = ""
+        if processed_to_unique and pid in processed_to_unique:
+            up = processed_to_unique[pid]
+
+        if up:
+            lines.append(f"{pid} | simp={simp_i} | dom={dominant} | labels={lbl} | path={up}")
+        else:
+            lines.append(f"{pid} | simp={simp_i} | dom={dominant} | labels={lbl}")
+
+    joined = "\n".join(lines)
+
+    return (
+        f"DESIRED IMAGE CONTENT: {bc}\n\n"
+        "You must pick EXACTLY 2 best images to keep.\n"
+        "Goal: a SIMPLE visual OBJECT - one full thing identifiable in the center of the screen.\n"
+        "You are looking for images with a strong single colour background away from the center"
+        "A more complex compact central object is better. Example : Eukaryotic cell > nucleus + organells"
+        "REJECT:\n"
+        "- Images filled with many bits of detail spread out\n"
+        "- flowcharts, clusters linked with arrouws, any dense text\n"
+        "Candidates:\n"
+        f"{joined}\n\n"
+        "Return JSON ONLY with this exact schema:\n"
+        "{"
+        "\"candidates\":["
+        "{\"processed_id\":\"...\",\"reason\":\"...\",\"main_object\":\"...\",\"simplicity\":1}"
+        ","
+        "{\"processed_id\":\"...\",\"reason\":\"...\",\"main_object\":\"...\",\"simplicity\":1}"
+        "]"
+        "}\n"
+        "Rules:\n"
+        "- exactly 2 candidates\n"
+        "- processed_id must match one of the listed ids\n"
+        "- reason and main_object must be 1-8 words (short)\n"
+        "- simplicity integer 1..5\n"
+        "- no extra keys\n"
+    )
+
+
+def _parse_stage2_candidates(text_out: str) -> List[Dict[str, Any]]:
+    obj = extract_json_object(text_out or "")
+    if not isinstance(obj, dict):
+        return []
+    cands = obj.get("candidates")
+    if not isinstance(cands, list):
+        return []
+
+    out: List[Dict[str, Any]] = []
+    for it in cands:
+        if not isinstance(it, dict):
+            continue
+        pid = it.get("processed_id")
+        if not isinstance(pid, str) or not pid.strip():
+            continue
+        pid = pid.strip()
+
+        reason = it.get("reason")
+        if not isinstance(reason, str):
+            reason = ""
+
+        main_obj = it.get("main_object")
+        if not isinstance(main_obj, str):
+            main_obj = ""
+
+        simp = it.get("simplicity", 5)
+        try:
+            simp_i = int(simp)
+        except Exception:
+            simp_i = 5
+        simp_i = max(1, min(5, simp_i))
+
+        out.append({
+            "processed_id": pid,
+            "reason": _clean_short_label(reason) or "",
+            "main_object": _clean_short_label(main_obj) or "",
+            "simplicity": simp_i,
+        })
+
+        if len(out) >= 2:
+            break
+
+    return out
+
+
+def pick_two_processed_candidates_transformers(
+    *,
+    model,
+    processor,
+    device: torch.device,
+    processed_items: List[Dict[str, Any]],
+    processed_to_unique: Dict[str, str],
+    base_context: str,
+    batch_size: int = 8,
+    longest_side: int = 600,
+) -> Dict[str, Any]:
+    """
+    processed_items expected fields:
+      - processed_id: "processed_12"
+      - image_pil: PIL image (processed/whited-out)
+      - base_context: optional (not required here; selection uses global base_context)
+    Returns strict JSON-able dict:
+      {
+        "base_context": "...",
+        "stage1": { processed_id: {...}, ... },
+        "candidates": [
+          {"processed_id":"...","unique_path":"...","reason":"...","main_object":"...","simplicity":1},
+          {"processed_id":"...","unique_path":"...","reason":"...","main_object":"...","simplicity":1}
+        ]
+      }
+    """
+    # Stage 1
+    stage1 = probe_processed_images_stage1(
+        model=model,
+        processor=processor,
+        device=device,
+        items=processed_items,
+        batch_size=batch_size,
+        longest_side=longest_side,
+    )
+
+    # Stage 2 (text-only)
+    SYSTEM_MSG = (
+        "You are a strict JSON decision engine.\n"
+        "Pick exactly 2 candidates.\n"
+        "Bias heavily toward simple single-object visuals.\n"
+        "Output JSON only.\n"
+    )
+    prompt_text = build_stage2_pick_prompt(base_context, stage1, processed_to_unique)
+
+    conv = [
+        {"role": "system", "content": [{"type": "text", "text": SYSTEM_MSG}]},
+        {"role": "user", "content": [{"type": "text", "text": prompt_text}]},
+    ]
+    prompt_str = processor.apply_chat_template(conv, tokenize=False, add_generation_prompt=True)
+
+    gen_kwargs = dict(
+        max_new_tokens=220,
+        do_sample=False,
+        num_beams=1,
+        use_cache=True,
+    )
+
+    chosen: List[Dict[str, Any]] = []
+    try:
+        inputs = processor(
+            text=[prompt_str],
+            return_tensors="pt",
+            padding=True,
+            truncation=True,
+        )
+        for k, v in list(inputs.items()):
+            if torch.is_tensor(v):
+                inputs[k] = v.to(device=device, non_blocking=True)
+
+        with torch.inference_mode():
+            out_ids = model.generate(**inputs, **gen_kwargs)
+
+        if "input_ids" in inputs and torch.is_tensor(inputs["input_ids"]):
+            prompt_len = int(inputs["input_ids"].shape[1])
+            gen_only_ids = out_ids[:, prompt_len:]
+        else:
+            gen_only_ids = out_ids
+
+        text_out = processor.batch_decode(gen_only_ids, skip_special_tokens=True)[0]
+        chosen = _parse_stage2_candidates(text_out)
+
+    except Exception as e:
+        print(f"[warn] stage2 selection failed: {e}")
+        chosen = []
+
+    # Validate + fallback
+    valid_ids = set(stage1.keys())
+    chosen = [c for c in chosen if c.get("processed_id") in valid_ids]
+
+    if len(chosen) < 2:
+        # fallback: deterministic pick by simplicity then label count
+        ranked = []
+        for pid, info in stage1.items():
+            simp = info.get("simplicity", 5)
+            try:
+                simp_i = int(simp)
+            except Exception:
+                simp_i = 5
+            labs = info.get("labels") or []
+            nlab = len(labs) if isinstance(labs, list) else 999
+            ranked.append((simp_i, nlab, pid))
+        ranked.sort()
+        fallback_ids = [pid for _, _, pid in ranked[:2]]
+
+        chosen = []
+        for pid in fallback_ids:
+            chosen.append({"processed_id": pid, "reason": "fallback simple", "main_object": "", "simplicity": int(stage1.get(pid, {}).get("simplicity", 5))})
+
+    # Attach unique paths (authoritative)
+    final_candidates: List[Dict[str, Any]] = []
+    for c in chosen[:2]:
+        pid = c["processed_id"]
+        final_candidates.append({
+            "processed_id": pid,
+            "unique_path": str(processed_to_unique.get(pid, "")),
+            "reason": str(c.get("reason", "")),
+            "main_object": str(c.get("main_object", "")),
+            "simplicity": int(c.get("simplicity", 5)),
+        })
+
+    return {
+        "base_context": (base_context or "").strip(),
+        "stage1": stage1,
+        "candidates": final_candidates,
+    }
+
 
 
 # ============================
@@ -1299,6 +1781,11 @@ def main() -> None:
         out_folder = OUT_DIR / f"processed_{idx}"
         out_folder.mkdir(parents=True, exist_ok=True)
         out_json_path = out_folder / "labels.json"
+
+        if SKIP_EXISTING_LABELS and out_json_path.exists():
+            print(f"[skip] processed_{idx}: labels already exist: {out_json_path}")
+            continue
+
 
         results: Dict[str, Any] = {
             "image_index": idx,
