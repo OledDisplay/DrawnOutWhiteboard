@@ -61,7 +61,64 @@ _pc: Optional[Pinecone] = None
 _opened_indexes: Dict[str, Any] = {}
 _plan_cache: Dict[Tuple[int, int, int], Dict[str, Tuple[str, str]]] = {}
 
+import threading
 
+# ... keep your existing caches ...
+
+# Optional externally-provided (hot) models from ImagePipeline.py
+_minilm_tok: Optional[Any] = None
+_minilm_trf_model: Optional[Any] = None
+_minilm_device: Optional[torch.device] = None
+
+_EMBED_MINILM_LOCK = threading.Lock()
+_EMBED_SIGLIP_LOCK = threading.Lock()
+
+def configure_hot_models(*, siglip_bundle: Any = None, minilm_bundle: Any = None) -> None:
+    """
+    Allows ImagePipeline.py (same process) to inject already-loaded models here,
+    so PineconeFetch does NOT reload them.
+
+    Expected bundle shapes:
+      - SigLIP bundle: has .model, .processor, .device
+      - MiniLM bundle: either sentence-transformers (.model has encode)
+        OR transformers (.model + .tokenizer)
+    """
+    global _siglip_processor, _siglip_model, _siglip_device
+    global _minilm_model, _minilm_tok, _minilm_trf_model, _minilm_device
+
+    if siglip_bundle is not None:
+        try:
+            _siglip_model = siglip_bundle.model
+            _siglip_processor = siglip_bundle.processor
+            dev = getattr(siglip_bundle, "device", None)
+            if isinstance(dev, torch.device):
+                _siglip_device = dev
+            else:
+                _siglip_device = torch.device(str(dev) if dev else ("cuda" if torch.cuda.is_available() else "cpu"))
+        except Exception:
+            # If injection fails, just keep local lazy-loading behavior
+            pass
+
+    if minilm_bundle is not None:
+        try:
+            # sentence-transformers path
+            if getattr(minilm_bundle, "use_sentence_transformers", False) and hasattr(minilm_bundle.model, "encode"):
+                _minilm_model = minilm_bundle.model
+                _minilm_tok = None
+                _minilm_trf_model = None
+                _minilm_device = None
+            else:
+                # transformers path
+                _minilm_model = None
+                _minilm_trf_model = minilm_bundle.model
+                _minilm_tok = minilm_bundle.tokenizer
+                dev = getattr(minilm_bundle, "device", None)
+                if isinstance(dev, torch.device):
+                    _minilm_device = dev
+                else:
+                    _minilm_device = torch.device(str(dev) if dev else ("cuda" if torch.cuda.is_available() else "cpu"))
+        except Exception:
+            pass
 
 # ------------------------------------------------------------
 # SMALL UTILS
@@ -183,19 +240,49 @@ def load_plan_or_build(prompt_dim: int, clip_dim: int, context_dim: int) -> Dict
 # ------------------------------------------------------------
 # EMBEDDERS
 # ------------------------------------------------------------
+def _mean_pool(last_hidden: torch.Tensor, attention_mask: torch.Tensor) -> torch.Tensor:
+    mask = attention_mask.unsqueeze(-1).type_as(last_hidden)
+    summed = (last_hidden * mask).sum(dim=1)
+    denom = mask.sum(dim=1).clamp(min=1e-9)
+    return summed / denom
+
+
 def embed_minilm(text: str) -> List[float]:
-    global _minilm_model
+    global _minilm_model, _minilm_tok, _minilm_trf_model, _minilm_device
+
+    # If ImagePipeline injected a hot sentence-transformers model, use it.
+    if _minilm_model is not None:
+        with _EMBED_MINILM_LOCK:
+            vec = _minilm_model.encode([text], normalize_embeddings=True)
+        v = np.asarray(vec[0], dtype=np.float32)
+        return v.tolist()
+
+    # If ImagePipeline injected a hot transformers model+tokenizer, use it.
+    if _minilm_trf_model is not None and _minilm_tok is not None and _minilm_device is not None:
+        with _EMBED_MINILM_LOCK, torch.inference_mode():
+            inputs = _minilm_tok([text], return_tensors="pt", padding=True, truncation=True)
+            inputs = {k: v.to(_minilm_device) for k, v in inputs.items()}
+            out = _minilm_trf_model(**inputs)
+            pooled = _mean_pool(out.last_hidden_state, inputs["attention_mask"])
+            pooled = torch.nn.functional.normalize(pooled, p=2, dim=1)
+            feats = pooled[0].detach().cpu().float().numpy().astype(np.float32)
+        return feats.tolist()
+
+    # Fallback: local lazy-load (old behavior)
     if _minilm_model is None:
         _minilm_model = SentenceTransformer(MINILM_NAME)
 
-    # normalize_embeddings=True makes cosine comparisons behave nicely
-    vec = _minilm_model.encode([text], normalize_embeddings=True)
+    with _EMBED_MINILM_LOCK:
+        vec = _minilm_model.encode([text], normalize_embeddings=True)
     v = np.asarray(vec[0], dtype=np.float32)
     return v.tolist()
 
 
+
 def embed_siglip_text(text: str) -> List[float]:
     global _siglip_processor, _siglip_model, _siglip_device
+
+    # If ImagePipeline injected hot SigLIP, use it; otherwise lazy-load locally.
     if _siglip_processor is None or _siglip_model is None or _siglip_device is None:
         _siglip_processor = AutoProcessor.from_pretrained(SIGLIP_NAME)
         _siglip_model = SiglipModel.from_pretrained(SIGLIP_NAME)
@@ -203,21 +290,25 @@ def embed_siglip_text(text: str) -> List[float]:
         _siglip_model.to(_siglip_device)
         _siglip_model.eval()
 
-    inputs = _siglip_processor(
-        text=[text],
-        return_tensors="pt",
-        padding=True,
-        truncation=True,
-    )
-    inputs = {k: v.to(_siglip_device) for k, v in inputs.items()}
+    with _EMBED_SIGLIP_LOCK, torch.inference_mode():
+        inputs = _siglip_processor(
+            text=[text],
+            return_tensors="pt",
+            padding=True,
+            truncation=True,
+        )
+        # works for BatchEncoding or dict-like
+        try:
+            inputs = inputs.to(_siglip_device)
+        except Exception:
+            inputs = {k: v.to(_siglip_device) for k, v in inputs.items()}
 
-    with torch.no_grad():
-        # Transformers SigLIP exposes get_text_features
         feats = _siglip_model.get_text_features(**inputs)
 
     feats = feats[0].detach().cpu().float().numpy()
     feats = _l2_normalize(feats)
     return feats.astype(np.float32).tolist()
+
 
 
 # ------------------------------------------------------------

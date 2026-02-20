@@ -1,0 +1,862 @@
+{
+  "id": "77d6b4bbc0",
+  "subject": "Biology",
+  "registrable": "openstax.org",
+  "entry_url": "https://openstax.org/details/books/concepts-biology",
+  "created_at": "2026-02-20T08:43:30.177152Z",
+  "terminal_count": 213,
+  "terminals": [
+    {
+      "url": "https://openstax.org/books/concepts-biology/pages/1-1-themes-and-concepts-of-biology",
+      "key": "1 1 themes and concepts of biology"
+    },
+    {
+      "url": "https://openstax.org/books/concepts-biology/pages/1-2-the-process-of-science",
+      "key": "1 2 the process of science"
+    },
+    {
+      "url": "https://openstax.org/books/concepts-biology/pages/1-chapter-summary",
+      "key": "1 chapter summary"
+    },
+    {
+      "url": "https://openstax.org/books/concepts-biology/pages/1-critical-thinking-questions",
+      "key": "1 critical thinking questions"
+    },
+    {
+      "url": "https://openstax.org/books/concepts-biology/pages/1-introduction",
+      "key": "1 introduction"
+    },
+    {
+      "url": "https://openstax.org/books/concepts-biology/pages/1-key-terms",
+      "key": "1 key terms"
+    },
+    {
+      "url": "https://openstax.org/books/concepts-biology/pages/1-review-questions",
+      "key": "1 review questions"
+    },
+    {
+      "url": "https://openstax.org/books/concepts-biology/pages/1-visual-connection-questions",
+      "key": "1 visual connection questions"
+    },
+    {
+      "url": "https://openstax.org/books/concepts-biology/pages/10-1-cloning-and-genetic-engineering",
+      "key": "10 1 cloning and genetic engineering"
+    },
+    {
+      "url": "https://openstax.org/books/concepts-biology/pages/10-2-biotechnology-in-medicine-and-agriculture",
+      "key": "10 2 biotechnology in medicine and agriculture"
+    },
+    {
+      "url": "https://openstax.org/books/concepts-biology/pages/10-3-genomics-and-proteomics",
+      "key": "10 3 genomics and proteomics"
+    },
+    {
+      "url": "https://openstax.org/books/concepts-biology/pages/10-chapter-summary",
+      "key": "10 chapter summary"
+    },
+    {
+      "url": "https://openstax.org/books/concepts-biology/pages/10-critical-thinking-questions",
+      "key": "10 critical thinking questions"
+    },
+    {
+      "url": "https://openstax.org/books/concepts-biology/pages/10-introduction",
+      "key": "10 introduction"
+    },
+    {
+      "url": "https://openstax.org/books/concepts-biology/pages/10-key-terms",
+      "key": "10 key terms"
+    },
+    {
+      "url": "https://openstax.org/books/concepts-biology/pages/10-review-questions",
+      "key": "10 review questions"
+    },
+    {
+      "url": "https://openstax.org/books/concepts-biology/pages/10-visual-connection-questions",
+      "key": "10 visual connection questions"
+    },
+    {
+      "url": "https://openstax.org/books/concepts-biology/pages/11-1-discovering-how-populations-change",
+      "key": "11 1 discovering how populations change"
+    },
+    {
+      "url": "https://openstax.org/books/concepts-biology/pages/11-2-mechanisms-of-evolution",
+      "key": "11 2 mechanisms of evolution"
+    },
+    {
+      "url": "https://openstax.org/books/concepts-biology/pages/11-3-evidence-of-evolution",
+      "key": "11 3 evidence of evolution"
+    },
+    {
+      "url": "https://openstax.org/books/concepts-biology/pages/11-4-speciation",
+      "key": "11 4 speciation"
+    },
+    {
+      "url": "https://openstax.org/books/concepts-biology/pages/11-5-common-misconceptions-about-evolution",
+      "key": "11 5 common misconceptions about evolution"
+    },
+    {
+      "url": "https://openstax.org/books/concepts-biology/pages/11-chapter-summary",
+      "key": "11 chapter summary"
+    },
+    {
+      "url": "https://openstax.org/books/concepts-biology/pages/11-critical-thinking-questions",
+      "key": "11 critical thinking questions"
+    },
+    {
+      "url": "https://openstax.org/books/concepts-biology/pages/11-introduction",
+      "key": "11 introduction"
+    },
+    {
+      "url": "https://openstax.org/books/concepts-biology/pages/11-key-terms",
+      "key": "11 key terms"
+    },
+    {
+      "url": "https://openstax.org/books/concepts-biology/pages/11-review-questions",
+      "key": "11 review questions"
+    },
+    {
+      "url": "https://openstax.org/books/concepts-biology/pages/11-visual-connection-questions",
+      "key": "11 visual connection questions"
+    },
+    {
+      "url": "https://openstax.org/books/concepts-biology/pages/12-1-organizing-life-on-earth",
+      "key": "12 1 organizing life on earth"
+    },
+    {
+      "url": "https://openstax.org/books/concepts-biology/pages/12-2-determining-evolutionary-relationships",
+      "key": "12 2 determining evolutionary relationships"
+    },
+    {
+      "url": "https://openstax.org/books/concepts-biology/pages/12-chapter-summary",
+      "key": "12 chapter summary"
+    },
+    {
+      "url": "https://openstax.org/books/concepts-biology/pages/12-critical-thinking-questions",
+      "key": "12 critical thinking questions"
+    },
+    {
+      "url": "https://openstax.org/books/concepts-biology/pages/12-introduction",
+      "key": "12 introduction"
+    },
+    {
+      "url": "https://openstax.org/books/concepts-biology/pages/12-key-terms",
+      "key": "12 key terms"
+    },
+    {
+      "url": "https://openstax.org/books/concepts-biology/pages/12-review-questions",
+      "key": "12 review questions"
+    },
+    {
+      "url": "https://openstax.org/books/concepts-biology/pages/12-visual-connection-questions",
+      "key": "12 visual connection questions"
+    },
+    {
+      "url": "https://openstax.org/books/concepts-biology/pages/13-1-prokaryotic-diversity",
+      "key": "13 1 prokaryotic diversity"
+    },
+    {
+      "url": "https://openstax.org/books/concepts-biology/pages/13-2-eukaryotic-origins",
+      "key": "13 2 eukaryotic origins"
+    },
+    {
+      "url": "https://openstax.org/books/concepts-biology/pages/13-3-protists",
+      "key": "13 3 protists"
+    },
+    {
+      "url": "https://openstax.org/books/concepts-biology/pages/13-4-fungi",
+      "key": "13 4 fungi"
+    },
+    {
+      "url": "https://openstax.org/books/concepts-biology/pages/13-chapter-summary",
+      "key": "13 chapter summary"
+    },
+    {
+      "url": "https://openstax.org/books/concepts-biology/pages/13-critical-thinking-questions",
+      "key": "13 critical thinking questions"
+    },
+    {
+      "url": "https://openstax.org/books/concepts-biology/pages/13-introduction",
+      "key": "13 introduction"
+    },
+    {
+      "url": "https://openstax.org/books/concepts-biology/pages/13-key-terms",
+      "key": "13 key terms"
+    },
+    {
+      "url": "https://openstax.org/books/concepts-biology/pages/13-review-questions",
+      "key": "13 review questions"
+    },
+    {
+      "url": "https://openstax.org/books/concepts-biology/pages/13-visual-connection-questions",
+      "key": "13 visual connection questions"
+    },
+    {
+      "url": "https://openstax.org/books/concepts-biology/pages/14-1-the-plant-kingdom",
+      "key": "14 1 the plant kingdom"
+    },
+    {
+      "url": "https://openstax.org/books/concepts-biology/pages/14-2-seedless-plants",
+      "key": "14 2 seedless plants"
+    },
+    {
+      "url": "https://openstax.org/books/concepts-biology/pages/14-3-seed-plants-gymnosperms",
+      "key": "14 3 seed plants gymnosperms"
+    },
+    {
+      "url": "https://openstax.org/books/concepts-biology/pages/14-4-seed-plants-angiosperms",
+      "key": "14 4 seed plants angiosperms"
+    },
+    {
+      "url": "https://openstax.org/books/concepts-biology/pages/14-chapter-summary",
+      "key": "14 chapter summary"
+    },
+    {
+      "url": "https://openstax.org/books/concepts-biology/pages/14-critical-thinking-questions",
+      "key": "14 critical thinking questions"
+    },
+    {
+      "url": "https://openstax.org/books/concepts-biology/pages/14-introduction",
+      "key": "14 introduction"
+    },
+    {
+      "url": "https://openstax.org/books/concepts-biology/pages/14-key-terms",
+      "key": "14 key terms"
+    },
+    {
+      "url": "https://openstax.org/books/concepts-biology/pages/14-review-questions",
+      "key": "14 review questions"
+    },
+    {
+      "url": "https://openstax.org/books/concepts-biology/pages/14-visual-connection-questions",
+      "key": "14 visual connection questions"
+    },
+    {
+      "url": "https://openstax.org/books/concepts-biology/pages/15-1-features-of-the-animal-kingdom",
+      "key": "15 1 features of the animal kingdom"
+    },
+    {
+      "url": "https://openstax.org/books/concepts-biology/pages/15-2-sponges-and-cnidarians",
+      "key": "15 2 sponges and cnidarians"
+    },
+    {
+      "url": "https://openstax.org/books/concepts-biology/pages/15-3-flatworms-nematodes-and-arthropods",
+      "key": "15 3 flatworms nematodes and arthropods"
+    },
+    {
+      "url": "https://openstax.org/books/concepts-biology/pages/15-4-mollusks-and-annelids",
+      "key": "15 4 mollusks and annelids"
+    },
+    {
+      "url": "https://openstax.org/books/concepts-biology/pages/15-5-echinoderms-and-chordates",
+      "key": "15 5 echinoderms and chordates"
+    },
+    {
+      "url": "https://openstax.org/books/concepts-biology/pages/15-6-vertebrates",
+      "key": "15 6 vertebrates"
+    },
+    {
+      "url": "https://openstax.org/books/concepts-biology/pages/15-chapter-summary",
+      "key": "15 chapter summary"
+    },
+    {
+      "url": "https://openstax.org/books/concepts-biology/pages/15-critical-thinking-questions",
+      "key": "15 critical thinking questions"
+    },
+    {
+      "url": "https://openstax.org/books/concepts-biology/pages/15-introduction",
+      "key": "15 introduction"
+    },
+    {
+      "url": "https://openstax.org/books/concepts-biology/pages/15-key-terms",
+      "key": "15 key terms"
+    },
+    {
+      "url": "https://openstax.org/books/concepts-biology/pages/15-review-questions",
+      "key": "15 review questions"
+    },
+    {
+      "url": "https://openstax.org/books/concepts-biology/pages/15-visual-connection-questions",
+      "key": "15 visual connection questions"
+    },
+    {
+      "url": "https://openstax.org/books/concepts-biology/pages/16-1-homeostasis-and-osmoregulation",
+      "key": "16 1 homeostasis and osmoregulation"
+    },
+    {
+      "url": "https://openstax.org/books/concepts-biology/pages/16-2-digestive-system",
+      "key": "16 2 digestive system"
+    },
+    {
+      "url": "https://openstax.org/books/concepts-biology/pages/16-3-circulatory-and-respiratory-systems",
+      "key": "16 3 circulatory and respiratory systems"
+    },
+    {
+      "url": "https://openstax.org/books/concepts-biology/pages/16-4-endocrine-system",
+      "key": "16 4 endocrine system"
+    },
+    {
+      "url": "https://openstax.org/books/concepts-biology/pages/16-5-musculoskeletal-system",
+      "key": "16 5 musculoskeletal system"
+    },
+    {
+      "url": "https://openstax.org/books/concepts-biology/pages/16-6-nervous-system",
+      "key": "16 6 nervous system"
+    },
+    {
+      "url": "https://openstax.org/books/concepts-biology/pages/16-chapter-summary",
+      "key": "16 chapter summary"
+    },
+    {
+      "url": "https://openstax.org/books/concepts-biology/pages/16-critical-thinking-questions",
+      "key": "16 critical thinking questions"
+    },
+    {
+      "url": "https://openstax.org/books/concepts-biology/pages/16-introduction",
+      "key": "16 introduction"
+    },
+    {
+      "url": "https://openstax.org/books/concepts-biology/pages/16-key-terms",
+      "key": "16 key terms"
+    },
+    {
+      "url": "https://openstax.org/books/concepts-biology/pages/16-review-questions",
+      "key": "16 review questions"
+    },
+    {
+      "url": "https://openstax.org/books/concepts-biology/pages/16-visual-connection-questions",
+      "key": "16 visual connection questions"
+    },
+    {
+      "url": "https://openstax.org/books/concepts-biology/pages/17-1-viruses",
+      "key": "17 1 viruses"
+    },
+    {
+      "url": "https://openstax.org/books/concepts-biology/pages/17-2-innate-immunity",
+      "key": "17 2 innate immunity"
+    },
+    {
+      "url": "https://openstax.org/books/concepts-biology/pages/17-3-adaptive-immunity",
+      "key": "17 3 adaptive immunity"
+    },
+    {
+      "url": "https://openstax.org/books/concepts-biology/pages/17-4-disruptions-in-the-immune-system",
+      "key": "17 4 disruptions in the immune system"
+    },
+    {
+      "url": "https://openstax.org/books/concepts-biology/pages/17-chapter-summary",
+      "key": "17 chapter summary"
+    },
+    {
+      "url": "https://openstax.org/books/concepts-biology/pages/17-critical-thinking-questions",
+      "key": "17 critical thinking questions"
+    },
+    {
+      "url": "https://openstax.org/books/concepts-biology/pages/17-introduction",
+      "key": "17 introduction"
+    },
+    {
+      "url": "https://openstax.org/books/concepts-biology/pages/17-key-terms",
+      "key": "17 key terms"
+    },
+    {
+      "url": "https://openstax.org/books/concepts-biology/pages/17-review-questions",
+      "key": "17 review questions"
+    },
+    {
+      "url": "https://openstax.org/books/concepts-biology/pages/17-visual-connection-questions",
+      "key": "17 visual connection questions"
+    },
+    {
+      "url": "https://openstax.org/books/concepts-biology/pages/18-1-how-animals-reproduce",
+      "key": "18 1 how animals reproduce"
+    },
+    {
+      "url": "https://openstax.org/books/concepts-biology/pages/18-2-development-and-organogenesis",
+      "key": "18 2 development and organogenesis"
+    },
+    {
+      "url": "https://openstax.org/books/concepts-biology/pages/18-3-human-reproduction",
+      "key": "18 3 human reproduction"
+    },
+    {
+      "url": "https://openstax.org/books/concepts-biology/pages/18-chapter-summary",
+      "key": "18 chapter summary"
+    },
+    {
+      "url": "https://openstax.org/books/concepts-biology/pages/18-critical-thinking-questions",
+      "key": "18 critical thinking questions"
+    },
+    {
+      "url": "https://openstax.org/books/concepts-biology/pages/18-introduction",
+      "key": "18 introduction"
+    },
+    {
+      "url": "https://openstax.org/books/concepts-biology/pages/18-key-terms",
+      "key": "18 key terms"
+    },
+    {
+      "url": "https://openstax.org/books/concepts-biology/pages/18-review-questions",
+      "key": "18 review questions"
+    },
+    {
+      "url": "https://openstax.org/books/concepts-biology/pages/18-visual-connection-questions",
+      "key": "18 visual connection questions"
+    },
+    {
+      "url": "https://openstax.org/books/concepts-biology/pages/19-1-population-demographics-and-dynamics",
+      "key": "19 1 population demographics and dynamics"
+    },
+    {
+      "url": "https://openstax.org/books/concepts-biology/pages/19-2-population-growth-and-regulation",
+      "key": "19 2 population growth and regulation"
+    },
+    {
+      "url": "https://openstax.org/books/concepts-biology/pages/19-3-the-human-population",
+      "key": "19 3 the human population"
+    },
+    {
+      "url": "https://openstax.org/books/concepts-biology/pages/19-4-community-ecology",
+      "key": "19 4 community ecology"
+    },
+    {
+      "url": "https://openstax.org/books/concepts-biology/pages/19-chapter-summary",
+      "key": "19 chapter summary"
+    },
+    {
+      "url": "https://openstax.org/books/concepts-biology/pages/19-critical-thinking-questions",
+      "key": "19 critical thinking questions"
+    },
+    {
+      "url": "https://openstax.org/books/concepts-biology/pages/19-introduction",
+      "key": "19 introduction"
+    },
+    {
+      "url": "https://openstax.org/books/concepts-biology/pages/19-key-terms",
+      "key": "19 key terms"
+    },
+    {
+      "url": "https://openstax.org/books/concepts-biology/pages/19-review-questions",
+      "key": "19 review questions"
+    },
+    {
+      "url": "https://openstax.org/books/concepts-biology/pages/19-visual-connection-questions",
+      "key": "19 visual connection questions"
+    },
+    {
+      "url": "https://openstax.org/books/concepts-biology/pages/2-1-the-building-blocks-of-molecules",
+      "key": "2 1 the building blocks of molecules"
+    },
+    {
+      "url": "https://openstax.org/books/concepts-biology/pages/2-2-water",
+      "key": "2 2 water"
+    },
+    {
+      "url": "https://openstax.org/books/concepts-biology/pages/2-3-biological-molecules",
+      "key": "2 3 biological molecules"
+    },
+    {
+      "url": "https://openstax.org/books/concepts-biology/pages/2-chapter-summary",
+      "key": "2 chapter summary"
+    },
+    {
+      "url": "https://openstax.org/books/concepts-biology/pages/2-critical-thinking-questions",
+      "key": "2 critical thinking questions"
+    },
+    {
+      "url": "https://openstax.org/books/concepts-biology/pages/2-introduction",
+      "key": "2 introduction"
+    },
+    {
+      "url": "https://openstax.org/books/concepts-biology/pages/2-key-terms",
+      "key": "2 key terms"
+    },
+    {
+      "url": "https://openstax.org/books/concepts-biology/pages/2-review-questions",
+      "key": "2 review questions"
+    },
+    {
+      "url": "https://openstax.org/books/concepts-biology/pages/2-visual-connection-questions",
+      "key": "2 visual connection questions"
+    },
+    {
+      "url": "https://openstax.org/books/concepts-biology/pages/20-1-energy-flow-through-ecosystems",
+      "key": "20 1 energy flow through ecosystems"
+    },
+    {
+      "url": "https://openstax.org/books/concepts-biology/pages/20-2-biogeochemical-cycles",
+      "key": "20 2 biogeochemical cycles"
+    },
+    {
+      "url": "https://openstax.org/books/concepts-biology/pages/20-3-terrestrial-biomes",
+      "key": "20 3 terrestrial biomes"
+    },
+    {
+      "url": "https://openstax.org/books/concepts-biology/pages/20-4-aquatic-and-marine-biomes",
+      "key": "20 4 aquatic and marine biomes"
+    },
+    {
+      "url": "https://openstax.org/books/concepts-biology/pages/20-chapter-summary",
+      "key": "20 chapter summary"
+    },
+    {
+      "url": "https://openstax.org/books/concepts-biology/pages/20-critical-thinking-questions",
+      "key": "20 critical thinking questions"
+    },
+    {
+      "url": "https://openstax.org/books/concepts-biology/pages/20-introduction",
+      "key": "20 introduction"
+    },
+    {
+      "url": "https://openstax.org/books/concepts-biology/pages/20-key-terms",
+      "key": "20 key terms"
+    },
+    {
+      "url": "https://openstax.org/books/concepts-biology/pages/20-review-questions",
+      "key": "20 review questions"
+    },
+    {
+      "url": "https://openstax.org/books/concepts-biology/pages/20-visual-connection-questions",
+      "key": "20 visual connection questions"
+    },
+    {
+      "url": "https://openstax.org/books/concepts-biology/pages/21-1-importance-of-biodiversity",
+      "key": "21 1 importance of biodiversity"
+    },
+    {
+      "url": "https://openstax.org/books/concepts-biology/pages/21-2-threats-to-biodiversity",
+      "key": "21 2 threats to biodiversity"
+    },
+    {
+      "url": "https://openstax.org/books/concepts-biology/pages/21-3-preserving-biodiversity",
+      "key": "21 3 preserving biodiversity"
+    },
+    {
+      "url": "https://openstax.org/books/concepts-biology/pages/21-chapter-summary",
+      "key": "21 chapter summary"
+    },
+    {
+      "url": "https://openstax.org/books/concepts-biology/pages/21-critical-thinking-questions",
+      "key": "21 critical thinking questions"
+    },
+    {
+      "url": "https://openstax.org/books/concepts-biology/pages/21-introduction",
+      "key": "21 introduction"
+    },
+    {
+      "url": "https://openstax.org/books/concepts-biology/pages/21-key-terms",
+      "key": "21 key terms"
+    },
+    {
+      "url": "https://openstax.org/books/concepts-biology/pages/21-review-questions",
+      "key": "21 review questions"
+    },
+    {
+      "url": "https://openstax.org/books/concepts-biology/pages/21-visual-connection-questions",
+      "key": "21 visual connection questions"
+    },
+    {
+      "url": "https://openstax.org/books/concepts-biology/pages/3-1-how-cells-are-studied",
+      "key": "3 1 how cells are studied"
+    },
+    {
+      "url": "https://openstax.org/books/concepts-biology/pages/3-2-comparing-prokaryotic-and-eukaryotic-cells",
+      "key": "3 2 comparing prokaryotic and eukaryotic cells"
+    },
+    {
+      "url": "https://openstax.org/books/concepts-biology/pages/3-3-eukaryotic-cells",
+      "key": "3 3 eukaryotic cells"
+    },
+    {
+      "url": "https://openstax.org/books/concepts-biology/pages/3-4-the-cell-membrane",
+      "key": "3 4 the cell membrane"
+    },
+    {
+      "url": "https://openstax.org/books/concepts-biology/pages/3-5-passive-transport",
+      "key": "3 5 passive transport"
+    },
+    {
+      "url": "https://openstax.org/books/concepts-biology/pages/3-6-active-transport",
+      "key": "3 6 active transport"
+    },
+    {
+      "url": "https://openstax.org/books/concepts-biology/pages/3-chapter-summary",
+      "key": "3 chapter summary"
+    },
+    {
+      "url": "https://openstax.org/books/concepts-biology/pages/3-critical-thinking-questions",
+      "key": "3 critical thinking questions"
+    },
+    {
+      "url": "https://openstax.org/books/concepts-biology/pages/3-introduction",
+      "key": "3 introduction"
+    },
+    {
+      "url": "https://openstax.org/books/concepts-biology/pages/3-key-terms",
+      "key": "3 key terms"
+    },
+    {
+      "url": "https://openstax.org/books/concepts-biology/pages/3-review-questions",
+      "key": "3 review questions"
+    },
+    {
+      "url": "https://openstax.org/books/concepts-biology/pages/3-visual-connection-questions",
+      "key": "3 visual connection questions"
+    },
+    {
+      "url": "https://openstax.org/books/concepts-biology/pages/4-1-energy-and-metabolism",
+      "key": "4 1 energy and metabolism"
+    },
+    {
+      "url": "https://openstax.org/books/concepts-biology/pages/4-2-glycolysis",
+      "key": "4 2 glycolysis"
+    },
+    {
+      "url": "https://openstax.org/books/concepts-biology/pages/4-3-citric-acid-cycle-and-oxidative-phosphorylation",
+      "key": "4 3 citric acid cycle and oxidative phosphorylation"
+    },
+    {
+      "url": "https://openstax.org/books/concepts-biology/pages/4-4-fermentation",
+      "key": "4 4 fermentation"
+    },
+    {
+      "url": "https://openstax.org/books/concepts-biology/pages/4-5-connections-to-other-metabolic-pathways",
+      "key": "4 5 connections to other metabolic pathways"
+    },
+    {
+      "url": "https://openstax.org/books/concepts-biology/pages/4-chapter-summary",
+      "key": "4 chapter summary"
+    },
+    {
+      "url": "https://openstax.org/books/concepts-biology/pages/4-critical-thinking-questions",
+      "key": "4 critical thinking questions"
+    },
+    {
+      "url": "https://openstax.org/books/concepts-biology/pages/4-introduction",
+      "key": "4 introduction"
+    },
+    {
+      "url": "https://openstax.org/books/concepts-biology/pages/4-key-terms",
+      "key": "4 key terms"
+    },
+    {
+      "url": "https://openstax.org/books/concepts-biology/pages/4-review-questions",
+      "key": "4 review questions"
+    },
+    {
+      "url": "https://openstax.org/books/concepts-biology/pages/4-visual-connection-questions",
+      "key": "4 visual connection questions"
+    },
+    {
+      "url": "https://openstax.org/books/concepts-biology/pages/5-1-overview-of-photosynthesis",
+      "key": "5 1 overview of photosynthesis"
+    },
+    {
+      "url": "https://openstax.org/books/concepts-biology/pages/5-2-the-light-dependent-reactions-of-photosynthesis",
+      "key": "5 2 the light dependent reactions of photosynthesis"
+    },
+    {
+      "url": "https://openstax.org/books/concepts-biology/pages/5-3-the-calvin-cycle",
+      "key": "5 3 the calvin cycle"
+    },
+    {
+      "url": "https://openstax.org/books/concepts-biology/pages/5-chapter-summary",
+      "key": "5 chapter summary"
+    },
+    {
+      "url": "https://openstax.org/books/concepts-biology/pages/5-critical-thinking-questions",
+      "key": "5 critical thinking questions"
+    },
+    {
+      "url": "https://openstax.org/books/concepts-biology/pages/5-introduction",
+      "key": "5 introduction"
+    },
+    {
+      "url": "https://openstax.org/books/concepts-biology/pages/5-key-terms",
+      "key": "5 key terms"
+    },
+    {
+      "url": "https://openstax.org/books/concepts-biology/pages/5-review-questions",
+      "key": "5 review questions"
+    },
+    {
+      "url": "https://openstax.org/books/concepts-biology/pages/5-visual-connection-questions",
+      "key": "5 visual connection questions"
+    },
+    {
+      "url": "https://openstax.org/books/concepts-biology/pages/6-1-the-genome",
+      "key": "6 1 the genome"
+    },
+    {
+      "url": "https://openstax.org/books/concepts-biology/pages/6-2-the-cell-cycle",
+      "key": "6 2 the cell cycle"
+    },
+    {
+      "url": "https://openstax.org/books/concepts-biology/pages/6-3-cancer-and-the-cell-cycle",
+      "key": "6 3 cancer and the cell cycle"
+    },
+    {
+      "url": "https://openstax.org/books/concepts-biology/pages/6-4-prokaryotic-cell-division",
+      "key": "6 4 prokaryotic cell division"
+    },
+    {
+      "url": "https://openstax.org/books/concepts-biology/pages/6-chapter-summary",
+      "key": "6 chapter summary"
+    },
+    {
+      "url": "https://openstax.org/books/concepts-biology/pages/6-critical-thinking-questions",
+      "key": "6 critical thinking questions"
+    },
+    {
+      "url": "https://openstax.org/books/concepts-biology/pages/6-introduction",
+      "key": "6 introduction"
+    },
+    {
+      "url": "https://openstax.org/books/concepts-biology/pages/6-key-terms",
+      "key": "6 key terms"
+    },
+    {
+      "url": "https://openstax.org/books/concepts-biology/pages/6-review-questions",
+      "key": "6 review questions"
+    },
+    {
+      "url": "https://openstax.org/books/concepts-biology/pages/6-visual-connection-questions",
+      "key": "6 visual connection questions"
+    },
+    {
+      "url": "https://openstax.org/books/concepts-biology/pages/7-1-sexual-reproduction",
+      "key": "7 1 sexual reproduction"
+    },
+    {
+      "url": "https://openstax.org/books/concepts-biology/pages/7-2-meiosis",
+      "key": "7 2 meiosis"
+    },
+    {
+      "url": "https://openstax.org/books/concepts-biology/pages/7-3-variations-in-meiosis",
+      "key": "7 3 variations in meiosis"
+    },
+    {
+      "url": "https://openstax.org/books/concepts-biology/pages/7-chapter-summary",
+      "key": "7 chapter summary"
+    },
+    {
+      "url": "https://openstax.org/books/concepts-biology/pages/7-critical-thinking-questions",
+      "key": "7 critical thinking questions"
+    },
+    {
+      "url": "https://openstax.org/books/concepts-biology/pages/7-introduction",
+      "key": "7 introduction"
+    },
+    {
+      "url": "https://openstax.org/books/concepts-biology/pages/7-key-terms",
+      "key": "7 key terms"
+    },
+    {
+      "url": "https://openstax.org/books/concepts-biology/pages/7-review-questions",
+      "key": "7 review questions"
+    },
+    {
+      "url": "https://openstax.org/books/concepts-biology/pages/7-visual-connection-questions",
+      "key": "7 visual connection questions"
+    },
+    {
+      "url": "https://openstax.org/books/concepts-biology/pages/8-1-mendels-experiments",
+      "key": "8 1 mendels experiments"
+    },
+    {
+      "url": "https://openstax.org/books/concepts-biology/pages/8-2-laws-of-inheritance",
+      "key": "8 2 laws of inheritance"
+    },
+    {
+      "url": "https://openstax.org/books/concepts-biology/pages/8-3-extensions-of-the-laws-of-inheritance",
+      "key": "8 3 extensions of the laws of inheritance"
+    },
+    {
+      "url": "https://openstax.org/books/concepts-biology/pages/8-chapter-summary",
+      "key": "8 chapter summary"
+    },
+    {
+      "url": "https://openstax.org/books/concepts-biology/pages/8-critical-thinking-questions",
+      "key": "8 critical thinking questions"
+    },
+    {
+      "url": "https://openstax.org/books/concepts-biology/pages/8-introduction",
+      "key": "8 introduction"
+    },
+    {
+      "url": "https://openstax.org/books/concepts-biology/pages/8-key-terms",
+      "key": "8 key terms"
+    },
+    {
+      "url": "https://openstax.org/books/concepts-biology/pages/8-review-questions",
+      "key": "8 review questions"
+    },
+    {
+      "url": "https://openstax.org/books/concepts-biology/pages/8-visual-connection-questions",
+      "key": "8 visual connection questions"
+    },
+    {
+      "url": "https://openstax.org/books/concepts-biology/pages/9-1-the-structure-of-dna",
+      "key": "9 1 the structure of dna"
+    },
+    {
+      "url": "https://openstax.org/books/concepts-biology/pages/9-2-dna-replication",
+      "key": "9 2 dna replication"
+    },
+    {
+      "url": "https://openstax.org/books/concepts-biology/pages/9-3-transcription",
+      "key": "9 3 transcription"
+    },
+    {
+      "url": "https://openstax.org/books/concepts-biology/pages/9-4-translation",
+      "key": "9 4 translation"
+    },
+    {
+      "url": "https://openstax.org/books/concepts-biology/pages/9-5-how-genes-are-regulated",
+      "key": "9 5 how genes are regulated"
+    },
+    {
+      "url": "https://openstax.org/books/concepts-biology/pages/9-chapter-summary",
+      "key": "9 chapter summary"
+    },
+    {
+      "url": "https://openstax.org/books/concepts-biology/pages/9-critical-thinking-questions",
+      "key": "9 critical thinking questions"
+    },
+    {
+      "url": "https://openstax.org/books/concepts-biology/pages/9-introduction",
+      "key": "9 introduction"
+    },
+    {
+      "url": "https://openstax.org/books/concepts-biology/pages/9-key-terms",
+      "key": "9 key terms"
+    },
+    {
+      "url": "https://openstax.org/books/concepts-biology/pages/9-review-questions",
+      "key": "9 review questions"
+    },
+    {
+      "url": "https://openstax.org/books/concepts-biology/pages/9-visual-connection-questions",
+      "key": "9 visual connection questions"
+    },
+    {
+      "url": "https://openstax.org/books/concepts-biology/pages/a-the-periodic-table-of-elements",
+      "key": "a the periodic table of elements"
+    },
+    {
+      "url": "https://openstax.org/books/concepts-biology/pages/b-geological-time",
+      "key": "b geological time"
+    },
+    {
+      "url": "https://openstax.org/books/concepts-biology/pages/c-measurements-and-the-metric-system",
+      "key": "c measurements and the metric system"
+    },
+    {
+      "url": "https://openstax.org/books/concepts-biology/pages/index",
+      "key": "index"
+    },
+    {
+      "url": "https://openstax.org/books/concepts-biology/pages/preface",
+      "key": "preface"
+    }
+  ]
+}

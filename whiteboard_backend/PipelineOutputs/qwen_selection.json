@@ -1,120 +1,162 @@
 {
   "selected_processed_ids": [
-    "processed_3",
-    "processed_0",
-    "processed_5",
-    "processed_6"
+    "processed_12",
+    "processed_14",
+    "processed_16",
+    "processed_18"
   ],
   "selected_ids_by_base_context": {
     "Eukaryotic cell": [
-      "processed_3",
-      "processed_0"
+      "processed_12",
+      "processed_14"
     ],
     "Pythagorean theorem": [
-      "processed_5",
-      "processed_6"
+      "processed_16",
+      "processed_18"
     ]
   },
   "selection_payload_by_base_context": {
     "Eukaryotic cell": {
       "base_context": "Eukaryotic cell",
       "stage1": {
-        "processed_0": {
-          "labels": [],
+        "processed_10": {
+          "objects": [],
+          "structure": "",
           "dominant": "",
-          "simplicity": 5
+          "simplicity": 5,
+          "score": 0.37343567848205567
         },
-        "processed_1": {
-          "labels": [],
+        "processed_11": {
+          "objects": [],
+          "structure": "",
           "dominant": "",
-          "simplicity": 5
+          "simplicity": 5,
+          "score": 0.30855488076806065
         },
-        "processed_2": {
-          "labels": [],
+        "processed_12": {
+          "objects": [],
+          "structure": "",
           "dominant": "",
-          "simplicity": 5
+          "simplicity": 5,
+          "score": 0.4668887835741043
         },
-        "processed_3": {
-          "labels": [
-            "nucleus",
-            "mitochondria",
-            "ribosomes",
-            "endoplasmic reticulum",
-            "lysosome",
-            "cell membrane",
-            "cytoplasm",
-            "golgi apparatus"
+        "processed_13": {
+          "objects": [
+            "elliptical shape",
+            "long tube",
+            "spikes",
+            "curved tail",
+            "internal structure",
+            "layered structure",
+            "brown mass",
+            "white lines"
           ],
-          "dominant": "nucleus",
-          "simplicity": 4
+          "structure": "centered",
+          "dominant": "elliptical shape",
+          "simplicity": 4,
+          "score": 0.3956157714128493
         },
-        "processed_4": {
-          "labels": [],
+        "processed_14": {
+          "objects": [],
+          "structure": "",
           "dominant": "",
-          "simplicity": 5
+          "simplicity": 5,
+          "score": 0.48785560250282284
         }
       },
       "candidates": [
         {
-          "processed_id": "processed_3",
-          "unique_path": "ResearchImages\\UniqueImages\\eukaryotic_cell_a2f4d971\\8b5b1e5ecd14b16968cb80c4a72d85faf14020b2.webp",
-          "reason": "Clear nucleus with strong",
-          "main_object": "nucleus",
-          "simplicity": 4
+          "processed_id": "processed_12",
+          "unique_path": "ResearchImages\\UniqueImages\\eukaryotic_cell_a2f4d971\\59e8c90582ac092790f71b32f1ca8727bc3af025.webp",
+          "reason": "Clear eukaryotic cell with",
+          "main_object": "eukaryotic cell",
+          "simplicity": 5,
+          "score": 0.4668887835741043
         },
         {
-          "processed_id": "processed_0",
-          "unique_path": "ResearchImages\\UniqueImages\\eukaryotic_cell_a2f4d971\\38e45a1feef9d5d6e3b2d430a86e76c5e842ef39.webp",
-          "reason": "Simple eukaryotic cell with",
+          "processed_id": "processed_14",
+          "unique_path": "ResearchImages\\UniqueImages\\eukaryotic_cell_a2f4d971\\8b5b1e5ecd14b16968cb80c4a72d85faf14020b2.webp",
+          "reason": "High clarity of eukaryotic",
           "main_object": "eukaryotic cell",
-          "simplicity": 5
+          "simplicity": 5,
+          "score": 0.48785560250282284
         }
       ]
     },
     "Pythagorean theorem": {
       "base_context": "Pythagorean theorem",
       "stage1": {
-        "processed_5": {
-          "labels": [
-            "grid",
+        "processed_15": {
+          "objects": [
             "triangle",
-            "rectangle",
-            "square",
-            "Y",
-            "color",
-            "shadow"
+            "right angle",
+            "gray fill",
+            "black outline"
           ],
-          "dominant": "grid",
-          "simplicity": 3
-        },
-        "processed_6": {
-          "labels": [
-            "triangle",
-            "rectangle",
-            "line",
-            "angle",
-            "point",
-            "color",
-            "shape"
-          ],
+          "structure": "right-angled",
           "dominant": "triangle",
-          "simplicity": 3
+          "simplicity": 3,
+          "score": 0.5582330504059791
+        },
+        "processed_16": {
+          "objects": [
+            "triangle",
+            "right angle",
+            "```json"
+          ],
+          "structure": "right triangle",
+          "dominant": "triangle",
+          "simplicity": 1,
+          "score": 0.5826039582490921
+        },
+        "processed_17": {
+          "objects": [
+            "box",
+            "open",
+            "two panels",
+            "white rectangles",
+            "triangle"
+          ],
+          "structure": "open",
+          "dominant": "box",
+          "simplicity": 3,
+          "score": 0.472274596914649
+        },
+        "processed_18": {
+          "objects": [
+            "triangle",
+            "right angle",
+            "line"
+          ],
+          "structure": "horizontal base",
+          "dominant": "triangle",
+          "simplicity": 2,
+          "score": 0.4766927622258662
+        },
+        "processed_19": {
+          "objects": [],
+          "structure": "",
+          "dominant": "",
+          "simplicity": 5,
+          "score": 0.37710920155048366
         }
       },
       "candidates": [
         {
-          "processed_id": "processed_5",
-          "unique_path": "ResearchImages\\UniqueImages\\pythagorean_theorem_82cb0124\\2bb0dacdff988d2d700908d80baa19da59917af0.jpg",
-          "reason": "Simple geometric shape with",
-          "main_object": "Pythagorean triangle",
-          "simplicity": 5
+          "processed_id": "processed_16",
+          "unique_path": "ResearchImages\\UniqueImages\\pythagorean_theorem_82cb0124\\219377b7cdb9e0d2ba4e5047cb5bf33c54eefb7e.webp",
+          "reason": "Simple single triangle with",
+          "main_object": "triangle",
+          "simplicity": 1,
+          "score": 0.5826039582490921
         },
         {
-          "processed_id": "processed_6",
-          "unique_path": "ResearchImages\\UniqueImages\\pythagorean_theorem_82cb0124\\5579b0cb0c374fbca233701115345864e43d5b2a.png",
-          "reason": "Clear triangle with labeled",
-          "main_object": "Right triangle",
-          "simplicity": 4
+          "processed_id": "processed_18",
+          "unique_path": "ResearchImages\\UniqueImages\\pythagorean_theorem_82cb0124\\68c255112152e03547cb6a14e72a0997949e3bd2.webp",
+          "reason": "Compact triangle with right",
+          "main_object": "triangle",
+          "simplicity": 2,
+          "score": 0.4766927622258662
         }
       ]
     }

@@ -162,17 +162,6 @@ def parse_colour_hint_from_filename(name: str) -> Optional[str]:
             return c
     return None
 
-def _load_cache(path: Path) -> Dict[str, str]:
-    if not path.exists():
-        return {}
-    try:
-        obj = json.loads(path.read_text(encoding="utf-8"))
-        if isinstance(obj, dict) and isinstance(obj.get("map"), dict):
-            return {str(k): str(v) for k, v in obj["map"].items()}
-    except Exception:
-        pass
-    return {}
-
 def _save_cache(path: Path, mapping: Dict[str, str]) -> None:
     payload = {"created_utc": time.time(), "root": str(PROCESSED_DIR), "map": mapping}
     path.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
@@ -879,6 +868,40 @@ def warmup_qwen_once(model, processor, device: torch.device) -> None:
     if device.type == "cuda":
         torch.cuda.synchronize(device)
 
+def _clean_short_label(s: str) -> Optional[str]:
+    if not isinstance(s, str):
+        return None
+    t = re.sub(r"\s+", " ", s.strip())
+    if not t:
+        return None
+
+    # keep short
+    parts = t.split(" ")
+    if len(parts) > 4:
+        t = " ".join(parts[:4]).strip()
+
+    if len(t) > 60:
+        t = t[:60].strip()
+
+    return t or None
+
+
+def _resize_longest_side(img: Image.Image, max_side: int) -> Image.Image:
+    img = img.convert("RGB")
+    w, h = img.size
+    if w <= 0 or h <= 0:
+        return Image.new("RGB", (max_side, max_side), (0, 0, 0))
+
+    longest = max(w, h)
+    if longest <= max_side:
+        return img
+
+    scale = float(max_side) / float(longest)
+    nw = max(1, int(round(w * scale)))
+    nh = max(1, int(round(h * scale)))
+    return img.resize((nw, nh), resample=Image.BICUBIC)
+
+
 
 
 def preload_qwen_cpu_only(
@@ -1231,77 +1254,80 @@ def label_clusters_transformers(
 
     return results_by_idx
 
-# ============================
-# NEW: Processed-image selection (ImageText -> processed_n)
-# ============================
-
-def _resize_longest_side(img: Image.Image, max_side: int) -> Image.Image:
-    img = img.convert("RGB")
-    w, h = img.size
-    if w <= 0 or h <= 0:
-        return Image.new("RGB", (max_side, max_side), (0, 0, 0))
-    longest = max(w, h)
-    if longest <= max_side:
-        return img
-    scale = float(max_side) / float(longest)
-    nw = max(1, int(round(w * scale)))
-    nh = max(1, int(round(h * scale)))
-    return img.resize((nw, nh), resample=Image.BICUBIC)
-
-
-def _clean_short_label(s: str) -> Optional[str]:
-    if not isinstance(s, str):
-        return None
-    t = re.sub(r"\s+", " ", s.strip())
-    if not t:
-        return None
-
-    # Keep labels short (couple words)
-    parts = t.split(" ")
-    if len(parts) > 4:
-        t = " ".join(parts[:4]).strip()
-
-    # Drop absurdly long strings anyway
-    if len(t) > 60:
-        t = t[:60].strip()
-
-    return t or None
-
-
 def build_stage1_visual_probe_prompt() -> str:
-    # Token-efficient, hard “no guessing” instruction.
+    # Strict schema; no semantic inference; small + consistent keys for stage2.
     return (
-        "Make a full VISUAL characteristic of the image with WITH NO regard to semantic meaning\n"
-        "You have to describe all the shapes and objects spread out through it from an analytical standpoint"
-        "Talk  figures, clusters, membranes, blobs, ex."
-        "Do NOT infer meaning or identity.\n"
-        "Output JSON ONLY with:\n"
+        "Describe ONLY what is visually present (shapes/layout), NOT meaning/identity.\n"
+        "No guessing.\n"
+        "Output JSON ONLY with EXACT keys:\n"
         "{"
-        "\"labels\":[\"1-4 words\", ...],"
-        "\"dominant\":\"1-4 words\","
+        "\"objects\":[\"...\"],"
+        "\"structure\":\"...\","
+        "\"dominant\":\"...\","
         "\"simplicity\":1"
         "}\n"
         "Rules:\n"
-        "- labels: 3-8 items, each 1-4 words\n"
-        "- dominant: the most visually dominant element (1-4 words)\n"
-        "- simplicity: integer 1..5 (1=simplest, 5=very complex)\n"
+        "- objects: 3-8 items, each 1-4 words, purely visual (e.g. 'round blob', 'thin line', 'cluster of dots')\n"
+        "- structure: 1-4 words about placement (e.g. 'centered', 'spread out', 'two panels')\n"
+        "- dominant: 1-4 words, most visually dominant thing\n"
+        "- simplicity: integer 1..5 (1 = very simple single-object, 5 = very busy/complex)\n"
         "- no extra keys, no prose\n"
     )
 
 
+def _as_meta_score(v: Any) -> Optional[float]:
+    """
+    Normalize external score (final_score) into a float if possible.
+    Keep it as-is (0..1 expected), clamp to sane bounds.
+    """
+    if v is None:
+        return None
+    try:
+        s = float(v)
+    except Exception:
+        return None
+    # clamp to avoid prompt garbage if something went wrong upstream
+    if s != s:  # NaN
+        return None
+    return max(0.0, min(1.0, s))
+
+
 def _parse_stage1_visual_probe(text_out: str) -> Dict[str, Any]:
+    """
+    New stage-1 structure:
+      { "objects":[...], "structure":"...", "dominant":"...", "simplicity":1..5 }
+
+    Parser is tolerant to minor key drift (labels->objects, layout->structure, etc).
+    """
     obj = extract_json_object(text_out or "")
     if not isinstance(obj, dict):
-        return {"labels": [], "dominant": "", "simplicity": 5}
+        return {"objects": [], "structure": "", "dominant": "", "simplicity": 5}
 
-    labels = obj.get("labels")
-    dominant = obj.get("dominant")
-    simplicity = obj.get("simplicity")
+    raw_objects = (
+        obj.get("objects")
+        if obj.get("objects") is not None else
+        obj.get("labels")  # tolerate old key
+    )
+    raw_structure = (
+        obj.get("structure")
+        if obj.get("structure") is not None else
+        obj.get("layout")  # tolerate variants
+    )
+    raw_dominant = (
+        obj.get("dominant")
+        if obj.get("dominant") is not None else
+        obj.get("main_object")
+    )
+    raw_simplicity = (
+        obj.get("simplicity")
+        if obj.get("simplicity") is not None else
+        obj.get("complexity")
+    )
 
-    out_labels: List[str] = []
-    if isinstance(labels, list):
+    out_objects: List[str] = []
+    if isinstance(raw_objects, list):
         seen = set()
-        for it in labels:
+        for it in raw_objects:
             if not isinstance(it, str):
                 continue
             c = _clean_short_label(it)
@@ -1311,33 +1337,42 @@ def _parse_stage1_visual_probe(text_out: str) -> Dict[str, Any]:
             if k in seen:
                 continue
             seen.add(k)
-            out_labels.append(c)
-            if len(out_labels) >= 8:
+            out_objects.append(c)
+            if len(out_objects) >= 8:
                 break
 
-    dom = ""
-    if isinstance(dominant, str):
-        dom = _clean_short_label(dominant) or ""
+    structure = ""
+    if isinstance(raw_structure, str):
+        structure = _clean_short_label(raw_structure) or ""
 
-    simp = 5
+    dominant = ""
+    if isinstance(raw_dominant, str):
+        dominant = _clean_short_label(raw_dominant) or ""
+
+    simp_i = 5
     try:
-        simp = int(simplicity)
+        simp_i = int(raw_simplicity)
     except Exception:
-        simp = 5
-    simp = max(1, min(5, simp))
+        simp_i = 5
+    simp_i = max(1, min(5, simp_i))
 
-    # Ensure minimum label count
-    if len(out_labels) < 3:
-        # fallback: try to salvage from raw text (comma/newline split)
+    # Ensure minimum objects count
+    if len(out_objects) < 3:
+        # salvage from raw text (comma/newline split) if model didn't follow schema
         for part in re.split(r"[,;\n]+", (text_out or "").strip()):
             c = _clean_short_label(part)
             if not c:
                 continue
-            out_labels.append(c)
-            if len(out_labels) >= 3:
+            out_objects.append(c)
+            if len(out_objects) >= 3:
                 break
 
-    return {"labels": out_labels[:8], "dominant": dom, "simplicity": simp}
+    return {
+        "objects": out_objects[:8],
+        "structure": structure,
+        "dominant": dominant,
+        "simplicity": simp_i,
+    }
 
 
 def probe_processed_images_stage1(
@@ -1353,15 +1388,27 @@ def probe_processed_images_stage1(
     items: [
       {
         "processed_id": "processed_12",
-        "image_pil": PIL.Image (already processed/whited-out),
-        "base_context": "..."
+        "image_pil": PIL.Image,
+        "base_context": "...",
+        # NEW (optional): "final_score": 0.83  (or "score": 0.83)
       }, ...
     ]
-    Returns: { processed_id: {"labels":[...],"dominant":"...","simplicity":1..5}, ... }
+
+    Returns:
+      {
+        processed_id: {
+          "objects":[...],
+          "structure":"...",
+          "dominant":"...",
+          "simplicity":1..5,
+          "score": Optional[float]   # passthrough external meta score
+        },
+        ...
+      }
     """
     SYSTEM_MSG = (
         "You are a visual transcription engine.\n"
-        "You must describe only visible shapes/layout.\n"
+        "Describe only visible shapes/layout.\n"
         "No guessing. Output JSON only.\n"
     )
 
@@ -1373,7 +1420,7 @@ def probe_processed_images_stage1(
     prompt_str = processor.apply_chat_template(conv, tokenize=False, add_generation_prompt=True)
 
     gen_kwargs = dict(
-        max_new_tokens=120,
+        max_new_tokens=160,
         do_sample=False,
         num_beams=1,
         use_cache=True,
@@ -1391,17 +1438,25 @@ def probe_processed_images_stage1(
         texts_batch: List[str] = []
         images_batch: List[Image.Image] = []
         ids_batch: List[str] = []
+        scores_batch: List[Optional[float]] = []
 
         for it in chunk:
             pid = str(it.get("processed_id", "") or "").strip()
             img = it.get("image_pil")
             if not pid or not isinstance(img, Image.Image):
                 continue
+
+            # NEW: passthrough meta score (final_score) so stage2 can use it
+            score = _as_meta_score(it.get("final_score", None))
+            if score is None:
+                score = _as_meta_score(it.get("score", None))
+
             img2 = _resize_longest_side(img, int(longest_side))
 
             texts_batch.append(prompt_str)
             images_batch.append(img2)
             ids_batch.append(pid)
+            scores_batch.append(score)
 
         if not texts_batch:
             continue
@@ -1434,8 +1489,15 @@ def probe_processed_images_stage1(
             texts_out = processor.batch_decode(gen_only_ids, skip_special_tokens=True)
 
         except Exception as e:
-            for pid in ids_batch:
-                out[pid] = {"labels": [], "dominant": "", "simplicity": 5, "error": f"stage1_failed: {e}"}
+            for pid, sc in zip(ids_batch, scores_batch):
+                out[pid] = {
+                    "objects": [],
+                    "structure": "",
+                    "dominant": "",
+                    "simplicity": 5,
+                    "score": sc,
+                    "error": f"stage1_failed: {e}",
+                }
             if torch.cuda.is_available() and device.type == "cuda":
                 torch.cuda.empty_cache()
             continue
@@ -1444,6 +1506,7 @@ def probe_processed_images_stage1(
         for j in range(n_out):
             pid = ids_batch[j]
             parsed = _parse_stage1_visual_probe(texts_out[j])
+            parsed["score"] = scores_batch[j]  # NEW: attach external meta score
             out[pid] = parsed
 
     return out
@@ -1456,12 +1519,13 @@ def build_stage2_pick_prompt(
 ) -> str:
     bc = (base_context or "").strip() or "unknown"
 
-    # Token-efficient flat list
     lines: List[str] = []
     for pid, info in stage1_map.items():
-        labels = info.get("labels") or []
+        objects = info.get("objects") or []
+        structure = info.get("structure") or ""
         dominant = info.get("dominant") or ""
         simplicity = info.get("simplicity", 5)
+        score = info.get("score", None)
 
         try:
             simp_i = int(simplicity)
@@ -1469,40 +1533,51 @@ def build_stage2_pick_prompt(
             simp_i = 5
         simp_i = max(1, min(5, simp_i))
 
-        # keep labels short
-        if isinstance(labels, list):
-            lbl = ",".join(str(x) for x in labels[:8])
+        # keep objects short
+        if isinstance(objects, list):
+            obj_s = ",".join(str(x) for x in objects[:8])
         else:
-            lbl = ""
+            obj_s = ""
 
-        # include unique path only if provided (lets the model return it, but we still verify)
+        # format score compactly
+        sc_s = "NA"
+        try:
+            if isinstance(score, (int, float)):
+                sc_s = f"{float(score):.3f}"
+        except Exception:
+            sc_s = "NA"
+
         up = ""
         if processed_to_unique and pid in processed_to_unique:
             up = processed_to_unique[pid]
 
         if up:
-            lines.append(f"{pid} | simp={simp_i} | dom={dominant} | labels={lbl} | path={up}")
+            lines.append(
+                f"{pid} | score={sc_s} | simp={simp_i} | struct={structure} | dom={dominant} | objs={obj_s} | path={up}"
+            )
         else:
-            lines.append(f"{pid} | simp={simp_i} | dom={dominant} | labels={lbl}")
+            lines.append(
+                f"{pid} | score={sc_s} | simp={simp_i} | struct={structure} | dom={dominant} | objs={obj_s}"
+            )
 
     joined = "\n".join(lines)
 
     return (
         f"DESIRED IMAGE CONTENT: {bc}\n\n"
-        "You must pick EXACTLY 2 best images to keep.\n"
-        "Goal: a SIMPLE visual OBJECT - one full thing identifiable in the center of the screen.\n"
-        "You are looking for images with a strong single colour background away from the center"
-        "A more complex compact central object is better. Example : Eukaryotic cell > nucleus + organells"
-        "REJECT:\n"
-        "- Images filled with many bits of detail spread out\n"
-        "- flowcharts, clusters linked with arrouws, any dense text\n"
+        "Pick EXACTLY 2 best images to keep.\n"
+        "Primary goal: a SIMPLE, single dominant object (ideally centered).\n"
+        "Secondary goal: compact detail is OK if it is one object (e.g. 'cell with organelles').\n"
+        "Reject:\n"
+        "- many separate things spread out\n"
+        "- flowcharts/arrows/dense text\n\n"
+        "Each candidate has an external meta score (score=...). Higher score is better.\n"
+        "If 2 candidates are similarly good visually, prefer the higher score.\n\n"
         "Candidates:\n"
         f"{joined}\n\n"
         "Return JSON ONLY with this exact schema:\n"
         "{"
         "\"candidates\":["
-        "{\"processed_id\":\"...\",\"reason\":\"...\",\"main_object\":\"...\",\"simplicity\":1}"
-        ","
+        "{\"processed_id\":\"...\",\"reason\":\"...\",\"main_object\":\"...\",\"simplicity\":1},"
         "{\"processed_id\":\"...\",\"reason\":\"...\",\"main_object\":\"...\",\"simplicity\":1}"
         "]"
         "}\n"
@@ -1519,18 +1594,28 @@ def _parse_stage2_candidates(text_out: str) -> List[Dict[str, Any]]:
     obj = extract_json_object(text_out or "")
     if not isinstance(obj, dict):
         return []
+
+    # tolerate old key too
     cands = obj.get("candidates")
+    if not isinstance(cands, list):
+        cands = obj.get("candidate")
     if not isinstance(cands, list):
         return []
 
     out: List[Dict[str, Any]] = []
+    seen = set()
+
     for it in cands:
         if not isinstance(it, dict):
             continue
+
         pid = it.get("processed_id")
         if not isinstance(pid, str) or not pid.strip():
             continue
         pid = pid.strip()
+        if pid in seen:
+            continue
+        seen.add(pid)
 
         reason = it.get("reason")
         if not isinstance(reason, str):
@@ -1575,18 +1660,20 @@ def pick_two_processed_candidates_transformers(
     processed_items expected fields:
       - processed_id: "processed_12"
       - image_pil: PIL image (processed/whited-out)
-      - base_context: optional (not required here; selection uses global base_context)
-    Returns strict JSON-able dict:
+      - base_context: optional
+      - NEW optional: final_score (float 0..1)
+
+    Returns:
       {
         "base_context": "...",
         "stage1": { processed_id: {...}, ... },
         "candidates": [
-          {"processed_id":"...","unique_path":"...","reason":"...","main_object":"...","simplicity":1},
-          {"processed_id":"...","unique_path":"...","reason":"...","main_object":"...","simplicity":1}
+          {"processed_id":"...","unique_path":"...","reason":"...","main_object":"...","simplicity":1,"score":0.83},
+          {"processed_id":"...","unique_path":"...","reason":"...","main_object":"...","simplicity":1,"score":0.79}
         ]
       }
     """
-    # Stage 1
+    # Stage 1 (vision)
     stage1 = probe_processed_images_stage1(
         model=model,
         processor=processor,
@@ -1596,11 +1683,12 @@ def pick_two_processed_candidates_transformers(
         longest_side=longest_side,
     )
 
-    # Stage 2 (text-only)
+    # Stage 2 (text-only decision)
     SYSTEM_MSG = (
         "You are a strict JSON decision engine.\n"
         "Pick exactly 2 candidates.\n"
         "Bias heavily toward simple single-object visuals.\n"
+        "Use score to break ties.\n"
         "Output JSON only.\n"
     )
     prompt_text = build_stage2_pick_prompt(base_context, stage1, processed_to_unique)
@@ -1612,7 +1700,7 @@ def pick_two_processed_candidates_transformers(
     prompt_str = processor.apply_chat_template(conv, tokenize=False, add_generation_prompt=True)
 
     gen_kwargs = dict(
-        max_new_tokens=220,
+        max_new_tokens=260,
         do_sample=False,
         num_beams=1,
         use_cache=True,
@@ -1646,12 +1734,12 @@ def pick_two_processed_candidates_transformers(
         print(f"[warn] stage2 selection failed: {e}")
         chosen = []
 
-    # Validate + fallback
+    # Validate
     valid_ids = set(stage1.keys())
     chosen = [c for c in chosen if c.get("processed_id") in valid_ids]
 
+    # Fallback if model didn't return 2
     if len(chosen) < 2:
-        # fallback: deterministic pick by simplicity then label count
         ranked = []
         for pid, info in stage1.items():
             simp = info.get("simplicity", 5)
@@ -1659,33 +1747,67 @@ def pick_two_processed_candidates_transformers(
                 simp_i = int(simp)
             except Exception:
                 simp_i = 5
-            labs = info.get("labels") or []
-            nlab = len(labs) if isinstance(labs, list) else 999
-            ranked.append((simp_i, nlab, pid))
+            simp_i = max(1, min(5, simp_i))
+
+            objs = info.get("objects") or []
+            nobj = len(objs) if isinstance(objs, list) else 999
+
+            sc = info.get("score", None)
+            try:
+                sc_f = float(sc) if isinstance(sc, (int, float)) else -1.0
+            except Exception:
+                sc_f = -1.0
+
+            # lower simplicity is better, higher score is better, fewer objects is better
+            ranked.append((simp_i, -sc_f, nobj, pid))
+
         ranked.sort()
-        fallback_ids = [pid for _, _, pid in ranked[:2]]
+        fallback_ids = [pid for _, _, _, pid in ranked[:2]]
 
         chosen = []
         for pid in fallback_ids:
-            chosen.append({"processed_id": pid, "reason": "fallback simple", "main_object": "", "simplicity": int(stage1.get(pid, {}).get("simplicity", 5))})
+            chosen.append({
+                "processed_id": pid,
+                "reason": "fallback rank",
+                "main_object": stage1.get(pid, {}).get("dominant", "") or "",
+                "simplicity": int(stage1.get(pid, {}).get("simplicity", 5)),
+            })
 
-    # Attach unique paths (authoritative)
+    # Attach unique paths + scores (authoritative)
     final_candidates: List[Dict[str, Any]] = []
-    for c in chosen[:2]:
-        pid = c["processed_id"]
+    used = set()
+    for c in chosen:
+        pid = c.get("processed_id")
+        if not pid or pid in used:
+            continue
+        used.add(pid)
+
+        info = stage1.get(pid, {}) if isinstance(stage1.get(pid, {}), dict) else {}
+        sc = info.get("score", None)
+        sc_out = None
+        try:
+            if isinstance(sc, (int, float)):
+                sc_out = float(sc)
+        except Exception:
+            sc_out = None
+
         final_candidates.append({
             "processed_id": pid,
             "unique_path": str(processed_to_unique.get(pid, "")),
             "reason": str(c.get("reason", "")),
             "main_object": str(c.get("main_object", "")),
             "simplicity": int(c.get("simplicity", 5)),
+            "score": sc_out,
         })
+        if len(final_candidates) >= 2:
+            break
 
     return {
         "base_context": (base_context or "").strip(),
         "stage1": stage1,
         "candidates": final_candidates,
     }
+
 
 
 
