@@ -786,7 +786,7 @@ def _pipeline_worker(
                             tmp.append(pid)
                         if len(tmp) >= 2:
                             break
-                    picked = tmp[:2]
+                    picked = tmp[:1]
 
                 # store
                 selection_payload_by_ctx[bc] = payload
@@ -1375,7 +1375,8 @@ def _hardcoded_get_images_test() -> int:
     prompts = {
         "Eukaryotic cell": "Biology",
         "Pythagorean theorem": "Math",
-        # "Human heart anatomy": "Biology",
+        "Glucose" : "Biology",
+        "Human heart": "Biology",
     }
 
     print("[TEST] get_images hardcoded run")

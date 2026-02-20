@@ -2762,6 +2762,134 @@ class TerminalFatigue:
     def hit_limit(self) -> bool:
         return self.fatigue >= self.limit
 
+# =========================
+# Per-root prompt blocklist (stored WITH the root entry in <source>.json)
+# =========================
+
+def _roots_key_candidates():
+    # tolerate existing schemas
+    return ("Roots", "roots", "root_urls", "RootUrls")
+
+def _get_roots_container(data: dict) -> tuple[str, list]:
+    """
+    Returns (key, list_obj). If none exist, creates data["Roots"] = [].
+    """
+    for k in _roots_key_candidates():
+        v = data.get(k)
+        if isinstance(v, list):
+            return k, v
+    data["Roots"] = []
+    return "Roots", data["Roots"]
+
+def _root_url_from_entry(entry):
+    if isinstance(entry, str):
+        return entry
+    if isinstance(entry, dict):
+        return entry.get("root") or entry.get("url") or entry.get("entry_url") or entry.get("Root") or ""
+    return ""
+
+def _ensure_root_dict(entry):
+    """
+    If roots are stored as strings, we must convert to dict so we can attach NoImagePromptBlocklist to it.
+    """
+    if isinstance(entry, dict):
+        return entry
+    if isinstance(entry, str) and entry.strip():
+        return {"root": entry.strip()}
+    return None
+
+def _find_root_entry_index(data: dict, root_url: str) -> int:
+    """
+    Find the root entry index by comparing clean_url(root).
+    Returns -1 if not found.
+    """
+    if not root_url:
+        return -1
+    root_cu = clean_url(root_url)
+    k, roots_list = _get_roots_container(data)
+    for i, e in enumerate(roots_list):
+        ru = _root_url_from_entry(e)
+        if ru and clean_url(ru) == root_cu:
+            return i
+    return -1
+
+def _is_prompt_blocklisted_for_root(source_name: str, root_url: str, prompt_id: str) -> bool:
+    """
+    READ PATH: checks <source>.json -> Roots[*].NoImagePromptBlocklist[prompt_id]
+    """
+    if not source_name or not root_url or not prompt_id:
+        return False
+
+    path = _source_json_path(source_name)
+    data = _load_json(path)
+
+    idx = _find_root_entry_index(data, root_url)
+    if idx < 0:
+        return False
+
+    k, roots_list = _get_roots_container(data)
+    entry = roots_list[idx]
+
+    # tolerate old string roots that haven't been converted yet
+    if not isinstance(entry, dict):
+        return False
+
+    bl = (entry.get("NoImagePromptBlocklist") or {})
+    return bool(str(prompt_id) in bl)
+
+def _blocklist_prompt_for_root(source_name: str, root_url: str, prompt_id: str, query: str, reason: str) -> None:
+    """
+    WRITE PATH: stores record under the specific root object in <source>.json
+      Roots: [
+        {"root":"https://...", "NoImagePromptBlocklist": { "<prompt_id>": {...} } }
+      ]
+    If roots were strings, converts that element to dict to attach the blocklist.
+    """
+    if not source_name or not root_url or not prompt_id:
+        return
+
+    path = _source_json_path(source_name)
+    lock = _json_lock_for(path)
+
+    with lock:
+        data = _load_json(path)
+        k, roots_list = _get_roots_container(data)
+
+        idx = _find_root_entry_index(data, root_url)
+        if idx < 0:
+            # root not present -> append a dict entry
+            roots_list.append({"root": clean_url(root_url)})
+            idx = len(roots_list) - 1
+
+        # ensure dict entry (convert from string if necessary)
+        cur_entry = roots_list[idx]
+        root_obj = _ensure_root_dict(cur_entry)
+        if root_obj is None:
+            return
+
+        # if we converted, write it back
+        roots_list[idx] = root_obj
+        root_obj["root"] = clean_url(_root_url_from_entry(root_obj) or root_url)
+
+        root_obj.setdefault("NoImagePromptBlocklist", {})
+        bl = root_obj["NoImagePromptBlocklist"]
+
+        old = bl.get(str(prompt_id)) or {}
+        try:
+            cnt = int(old.get("count") or 0) + 1
+        except Exception:
+            cnt = 1
+
+        bl[str(prompt_id)] = {
+            "query": str(query or old.get("query") or ""),
+            "count": cnt,
+            "reason": str(reason or old.get("reason") or "no_images"),
+            "last_seen": datetime.datetime.utcnow().isoformat() + "Z",
+        }
+
+        _save_json_atomic(path, data)
+        dbg(f"[BL][ROOT] blocklisted prompt_id={prompt_id} root={_short_url(root_url)} source={source_name} count={cnt} reason={reason}")
+
 
 # =========================
 # STAGE 2: Drill-by-parent with inline text search + image pick
@@ -2865,6 +2993,8 @@ def stage2_drill_search_and_images(
         roots_list = list(roots.keys())
     else:
         roots_list = list(roots or [])
+
+    prompt_id = _prompt_key(base_query or "")
 
     pw = _PlaywrightReuse(headless=True)
     prompt_vec = _norm_vec(prompt_embedding if prompt_embedding is not None else query_embedding)
@@ -3039,16 +3169,14 @@ def stage2_drill_search_and_images(
     pending_indexes: dict[str, dict] = {}
 
     def _index_terminals_for_entry(term_full: list[str], deeper_full: list[str]) -> list[str]:
-        # If we have a real terminal set, index it
+        # if term_full alone is large enough, use it
         if term_full and len(term_full) >= terminal_index_min_terminals:
             return term_full
 
-        # Hub pages: deeper_full is the real “terminal universe”
+        # hub page: deeper is the universe, but KEEP term_full too
         if deeper_full and len(deeper_full) >= terminal_index_min_terminals:
-            # CRITICAL: include term_full too, otherwise promotion can miss
             return ordered_dedupe((term_full or []) + (deeper_full or []))
 
-        # Otherwise combine
         return ordered_dedupe((term_full or []) + (deeper_full or []))
 
 
@@ -3459,11 +3587,20 @@ def stage2_drill_search_and_images(
                 raise _NextRoot()
 
 
-    index_routed_once = False
     try:
         for rdx, root in enumerate(roots_list, start=1):
+            index_routed_once = False
             if _global_cap_hit():
                 raise _StopAll()
+
+            # --- ROOT prompt blocklist (READ) ---
+            if source_name and prompt_id and root:
+                try:
+                    if _is_prompt_blocklisted_for_root(source_name, root, prompt_id):
+                        dbg(f"[S2][ROOT][SKIP][BL] prompt_id={prompt_id} root={_short_url(root)} source={source_name}")
+                        continue
+                except Exception:
+                    pass
 
             dbg(f"\n[S2] ROOT[{rdx}/{len(roots_list)}] {root}")
 
@@ -3573,6 +3710,17 @@ def stage2_drill_search_and_images(
 
 
             dbg(f"[S2] ROOT DONE {_short_url(root)} images_for_root={per_root_saved[0]} total_images={len(saved_paths)}")
+            if source_name and prompt_id and root and per_root_saved[0] == 0:
+                try:
+                    _blocklist_prompt_for_root(
+                        source_name=source_name,
+                        root_url=root,
+                        prompt_id=prompt_id,
+                        query=base_query,
+                        reason="no_images",
+                    )
+                except Exception:
+                    pass
 
     except _StopAll:
         dbg(f"[S2] GLOBAL STOP total_images={len(saved_paths)} (global_cap={global_image_cap})")

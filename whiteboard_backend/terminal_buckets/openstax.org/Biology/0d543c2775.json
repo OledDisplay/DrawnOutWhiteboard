@@ -1,0 +1,1994 @@
+{
+  "id": "0d543c2775",
+  "subject": "Biology",
+  "registrable": "openstax.org",
+  "entry_url": "https://openstax.org/details/books/biology-2e",
+  "created_at": "2026-02-20T13:28:20.960796Z",
+  "terminal_count": 496,
+  "terminals": [
+    {
+      "url": "https://openstax.org/books/biology-2e/pages/1-1-the-science-of-biology",
+      "key": "1 1 the science of biology"
+    },
+    {
+      "url": "https://openstax.org/books/biology-2e/pages/1-2-themes-and-concepts-of-biology",
+      "key": "1 2 themes and concepts of biology"
+    },
+    {
+      "url": "https://openstax.org/books/biology-2e/pages/1-chapter-summary",
+      "key": "1 chapter summary"
+    },
+    {
+      "url": "https://openstax.org/books/biology-2e/pages/1-critical-thinking-questions",
+      "key": "1 critical thinking questions"
+    },
+    {
+      "url": "https://openstax.org/books/biology-2e/pages/1-introduction",
+      "key": "1 introduction"
+    },
+    {
+      "url": "https://openstax.org/books/biology-2e/pages/1-key-terms",
+      "key": "1 key terms"
+    },
+    {
+      "url": "https://openstax.org/books/biology-2e/pages/1-review-questions",
+      "key": "1 review questions"
+    },
+    {
+      "url": "https://openstax.org/books/biology-2e/pages/1-visual-connection-questions",
+      "key": "1 visual connection questions"
+    },
+    {
+      "url": "https://openstax.org/books/biology-2e/pages/10-1-cell-division",
+      "key": "10 1 cell division"
+    },
+    {
+      "url": "https://openstax.org/books/biology-2e/pages/10-2-the-cell-cycle",
+      "key": "10 2 the cell cycle"
+    },
+    {
+      "url": "https://openstax.org/books/biology-2e/pages/10-3-control-of-the-cell-cycle",
+      "key": "10 3 control of the cell cycle"
+    },
+    {
+      "url": "https://openstax.org/books/biology-2e/pages/10-4-cancer-and-the-cell-cycle",
+      "key": "10 4 cancer and the cell cycle"
+    },
+    {
+      "url": "https://openstax.org/books/biology-2e/pages/10-5-prokaryotic-cell-division",
+      "key": "10 5 prokaryotic cell division"
+    },
+    {
+      "url": "https://openstax.org/books/biology-2e/pages/10-chapter-summary",
+      "key": "10 chapter summary"
+    },
+    {
+      "url": "https://openstax.org/books/biology-2e/pages/10-critical-thinking-questions",
+      "key": "10 critical thinking questions"
+    },
+    {
+      "url": "https://openstax.org/books/biology-2e/pages/10-introduction",
+      "key": "10 introduction"
+    },
+    {
+      "url": "https://openstax.org/books/biology-2e/pages/10-key-terms",
+      "key": "10 key terms"
+    },
+    {
+      "url": "https://openstax.org/books/biology-2e/pages/10-review-questions",
+      "key": "10 review questions"
+    },
+    {
+      "url": "https://openstax.org/books/biology-2e/pages/10-visual-connection-questions",
+      "key": "10 visual connection questions"
+    },
+    {
+      "url": "https://openstax.org/books/biology-2e/pages/11-1-the-process-of-meiosis",
+      "key": "11 1 the process of meiosis"
+    },
+    {
+      "url": "https://openstax.org/books/biology-2e/pages/11-2-sexual-reproduction",
+      "key": "11 2 sexual reproduction"
+    },
+    {
+      "url": "https://openstax.org/books/biology-2e/pages/11-chapter-summary",
+      "key": "11 chapter summary"
+    },
+    {
+      "url": "https://openstax.org/books/biology-2e/pages/11-critical-thinking-questions",
+      "key": "11 critical thinking questions"
+    },
+    {
+      "url": "https://openstax.org/books/biology-2e/pages/11-introduction",
+      "key": "11 introduction"
+    },
+    {
+      "url": "https://openstax.org/books/biology-2e/pages/11-key-terms",
+      "key": "11 key terms"
+    },
+    {
+      "url": "https://openstax.org/books/biology-2e/pages/11-review-questions",
+      "key": "11 review questions"
+    },
+    {
+      "url": "https://openstax.org/books/biology-2e/pages/11-visual-connection-questions",
+      "key": "11 visual connection questions"
+    },
+    {
+      "url": "https://openstax.org/books/biology-2e/pages/12-1-mendels-experiments-and-the-laws-of-probability",
+      "key": "12 1 mendels experiments and the laws of probability"
+    },
+    {
+      "url": "https://openstax.org/books/biology-2e/pages/12-2-characteristics-and-traits",
+      "key": "12 2 characteristics and traits"
+    },
+    {
+      "url": "https://openstax.org/books/biology-2e/pages/12-3-laws-of-inheritance",
+      "key": "12 3 laws of inheritance"
+    },
+    {
+      "url": "https://openstax.org/books/biology-2e/pages/12-chapter-summary",
+      "key": "12 chapter summary"
+    },
+    {
+      "url": "https://openstax.org/books/biology-2e/pages/12-critical-thinking-questions",
+      "key": "12 critical thinking questions"
+    },
+    {
+      "url": "https://openstax.org/books/biology-2e/pages/12-introduction",
+      "key": "12 introduction"
+    },
+    {
+      "url": "https://openstax.org/books/biology-2e/pages/12-key-terms",
+      "key": "12 key terms"
+    },
+    {
+      "url": "https://openstax.org/books/biology-2e/pages/12-review-questions",
+      "key": "12 review questions"
+    },
+    {
+      "url": "https://openstax.org/books/biology-2e/pages/12-visual-connection-questions",
+      "key": "12 visual connection questions"
+    },
+    {
+      "url": "https://openstax.org/books/biology-2e/pages/13-1-chromosomal-theory-and-genetic-linkage",
+      "key": "13 1 chromosomal theory and genetic linkage"
+    },
+    {
+      "url": "https://openstax.org/books/biology-2e/pages/13-2-chromosomal-basis-of-inherited-disorders",
+      "key": "13 2 chromosomal basis of inherited disorders"
+    },
+    {
+      "url": "https://openstax.org/books/biology-2e/pages/13-chapter-summary",
+      "key": "13 chapter summary"
+    },
+    {
+      "url": "https://openstax.org/books/biology-2e/pages/13-critical-thinking-questions",
+      "key": "13 critical thinking questions"
+    },
+    {
+      "url": "https://openstax.org/books/biology-2e/pages/13-introduction",
+      "key": "13 introduction"
+    },
+    {
+      "url": "https://openstax.org/books/biology-2e/pages/13-key-terms",
+      "key": "13 key terms"
+    },
+    {
+      "url": "https://openstax.org/books/biology-2e/pages/13-review-questions",
+      "key": "13 review questions"
+    },
+    {
+      "url": "https://openstax.org/books/biology-2e/pages/13-visual-connection-questions",
+      "key": "13 visual connection questions"
+    },
+    {
+      "url": "https://openstax.org/books/biology-2e/pages/14-1-historical-basis-of-modern-understanding",
+      "key": "14 1 historical basis of modern understanding"
+    },
+    {
+      "url": "https://openstax.org/books/biology-2e/pages/14-2-dna-structure-and-sequencing",
+      "key": "14 2 dna structure and sequencing"
+    },
+    {
+      "url": "https://openstax.org/books/biology-2e/pages/14-3-basics-of-dna-replication",
+      "key": "14 3 basics of dna replication"
+    },
+    {
+      "url": "https://openstax.org/books/biology-2e/pages/14-4-dna-replication-in-prokaryotes",
+      "key": "14 4 dna replication in prokaryotes"
+    },
+    {
+      "url": "https://openstax.org/books/biology-2e/pages/14-5-dna-replication-in-eukaryotes",
+      "key": "14 5 dna replication in eukaryotes"
+    },
+    {
+      "url": "https://openstax.org/books/biology-2e/pages/14-6-dna-repair",
+      "key": "14 6 dna repair"
+    },
+    {
+      "url": "https://openstax.org/books/biology-2e/pages/14-chapter-summary",
+      "key": "14 chapter summary"
+    },
+    {
+      "url": "https://openstax.org/books/biology-2e/pages/14-critical-thinking-questions",
+      "key": "14 critical thinking questions"
+    },
+    {
+      "url": "https://openstax.org/books/biology-2e/pages/14-introduction",
+      "key": "14 introduction"
+    },
+    {
+      "url": "https://openstax.org/books/biology-2e/pages/14-key-terms",
+      "key": "14 key terms"
+    },
+    {
+      "url": "https://openstax.org/books/biology-2e/pages/14-review-questions",
+      "key": "14 review questions"
+    },
+    {
+      "url": "https://openstax.org/books/biology-2e/pages/14-visual-connection-questions",
+      "key": "14 visual connection questions"
+    },
+    {
+      "url": "https://openstax.org/books/biology-2e/pages/15-1-the-genetic-code",
+      "key": "15 1 the genetic code"
+    },
+    {
+      "url": "https://openstax.org/books/biology-2e/pages/15-2-prokaryotic-transcription",
+      "key": "15 2 prokaryotic transcription"
+    },
+    {
+      "url": "https://openstax.org/books/biology-2e/pages/15-3-eukaryotic-transcription",
+      "key": "15 3 eukaryotic transcription"
+    },
+    {
+      "url": "https://openstax.org/books/biology-2e/pages/15-4-rna-processing-in-eukaryotes",
+      "key": "15 4 rna processing in eukaryotes"
+    },
+    {
+      "url": "https://openstax.org/books/biology-2e/pages/15-5-ribosomes-and-protein-synthesis",
+      "key": "15 5 ribosomes and protein synthesis"
+    },
+    {
+      "url": "https://openstax.org/books/biology-2e/pages/15-chapter-summary",
+      "key": "15 chapter summary"
+    },
+    {
+      "url": "https://openstax.org/books/biology-2e/pages/15-critical-thinking-questions",
+      "key": "15 critical thinking questions"
+    },
+    {
+      "url": "https://openstax.org/books/biology-2e/pages/15-introduction",
+      "key": "15 introduction"
+    },
+    {
+      "url": "https://openstax.org/books/biology-2e/pages/15-key-terms",
+      "key": "15 key terms"
+    },
+    {
+      "url": "https://openstax.org/books/biology-2e/pages/15-review-questions",
+      "key": "15 review questions"
+    },
+    {
+      "url": "https://openstax.org/books/biology-2e/pages/15-visual-connection-questions",
+      "key": "15 visual connection questions"
+    },
+    {
+      "url": "https://openstax.org/books/biology-2e/pages/16-1-regulation-of-gene-expression",
+      "key": "16 1 regulation of gene expression"
+    },
+    {
+      "url": "https://openstax.org/books/biology-2e/pages/16-2-prokaryotic-gene-regulation",
+      "key": "16 2 prokaryotic gene regulation"
+    },
+    {
+      "url": "https://openstax.org/books/biology-2e/pages/16-3-eukaryotic-epigenetic-gene-regulation",
+      "key": "16 3 eukaryotic epigenetic gene regulation"
+    },
+    {
+      "url": "https://openstax.org/books/biology-2e/pages/16-4-eukaryotic-transcription-gene-regulation",
+      "key": "16 4 eukaryotic transcription gene regulation"
+    },
+    {
+      "url": "https://openstax.org/books/biology-2e/pages/16-5-eukaryotic-post-transcriptional-gene-regulation",
+      "key": "16 5 eukaryotic post transcriptional gene regulation"
+    },
+    {
+      "url": "https://openstax.org/books/biology-2e/pages/16-6-eukaryotic-translational-and-post-translational-gene-regulation",
+      "key": "16 6 eukaryotic translational and post translational gene regulation"
+    },
+    {
+      "url": "https://openstax.org/books/biology-2e/pages/16-7-cancer-and-gene-regulation",
+      "key": "16 7 cancer and gene regulation"
+    },
+    {
+      "url": "https://openstax.org/books/biology-2e/pages/16-chapter-summary",
+      "key": "16 chapter summary"
+    },
+    {
+      "url": "https://openstax.org/books/biology-2e/pages/16-critical-thinking-questions",
+      "key": "16 critical thinking questions"
+    },
+    {
+      "url": "https://openstax.org/books/biology-2e/pages/16-introduction",
+      "key": "16 introduction"
+    },
+    {
+      "url": "https://openstax.org/books/biology-2e/pages/16-key-terms",
+      "key": "16 key terms"
+    },
+    {
+      "url": "https://openstax.org/books/biology-2e/pages/16-review-questions",
+      "key": "16 review questions"
+    },
+    {
+      "url": "https://openstax.org/books/biology-2e/pages/16-visual-connection-questions",
+      "key": "16 visual connection questions"
+    },
+    {
+      "url": "https://openstax.org/books/biology-2e/pages/17-1-biotechnology",
+      "key": "17 1 biotechnology"
+    },
+    {
+      "url": "https://openstax.org/books/biology-2e/pages/17-2-mapping-genomes",
+      "key": "17 2 mapping genomes"
+    },
+    {
+      "url": "https://openstax.org/books/biology-2e/pages/17-3-whole-genome-sequencing",
+      "key": "17 3 whole genome sequencing"
+    },
+    {
+      "url": "https://openstax.org/books/biology-2e/pages/17-4-applying-genomics",
+      "key": "17 4 applying genomics"
+    },
+    {
+      "url": "https://openstax.org/books/biology-2e/pages/17-5-genomics-and-proteomics",
+      "key": "17 5 genomics and proteomics"
+    },
+    {
+      "url": "https://openstax.org/books/biology-2e/pages/17-chapter-summary",
+      "key": "17 chapter summary"
+    },
+    {
+      "url": "https://openstax.org/books/biology-2e/pages/17-critical-thinking-questions",
+      "key": "17 critical thinking questions"
+    },
+    {
+      "url": "https://openstax.org/books/biology-2e/pages/17-introduction",
+      "key": "17 introduction"
+    },
+    {
+      "url": "https://openstax.org/books/biology-2e/pages/17-key-terms",
+      "key": "17 key terms"
+    },
+    {
+      "url": "https://openstax.org/books/biology-2e/pages/17-review-questions",
+      "key": "17 review questions"
+    },
+    {
+      "url": "https://openstax.org/books/biology-2e/pages/17-visual-connection-questions",
+      "key": "17 visual connection questions"
+    },
+    {
+      "url": "https://openstax.org/books/biology-2e/pages/18-1-understanding-evolution",
+      "key": "18 1 understanding evolution"
+    },
+    {
+      "url": "https://openstax.org/books/biology-2e/pages/18-2-formation-of-new-species",
+      "key": "18 2 formation of new species"
+    },
+    {
+      "url": "https://openstax.org/books/biology-2e/pages/18-3-reconnection-and-speciation-rates",
+      "key": "18 3 reconnection and speciation rates"
+    },
+    {
+      "url": "https://openstax.org/books/biology-2e/pages/18-chapter-summary",
+      "key": "18 chapter summary"
+    },
+    {
+      "url": "https://openstax.org/books/biology-2e/pages/18-critical-thinking-questions",
+      "key": "18 critical thinking questions"
+    },
+    {
+      "url": "https://openstax.org/books/biology-2e/pages/18-introduction",
+      "key": "18 introduction"
+    },
+    {
+      "url": "https://openstax.org/books/biology-2e/pages/18-key-terms",
+      "key": "18 key terms"
+    },
+    {
+      "url": "https://openstax.org/books/biology-2e/pages/18-review-questions",
+      "key": "18 review questions"
+    },
+    {
+      "url": "https://openstax.org/books/biology-2e/pages/18-visual-connection-questions",
+      "key": "18 visual connection questions"
+    },
+    {
+      "url": "https://openstax.org/books/biology-2e/pages/19-1-population-evolution",
+      "key": "19 1 population evolution"
+    },
+    {
+      "url": "https://openstax.org/books/biology-2e/pages/19-2-population-genetics",
+      "key": "19 2 population genetics"
+    },
+    {
+      "url": "https://openstax.org/books/biology-2e/pages/19-3-adaptive-evolution",
+      "key": "19 3 adaptive evolution"
+    },
+    {
+      "url": "https://openstax.org/books/biology-2e/pages/19-chapter-summary",
+      "key": "19 chapter summary"
+    },
+    {
+      "url": "https://openstax.org/books/biology-2e/pages/19-critical-thinking-questions",
+      "key": "19 critical thinking questions"
+    },
+    {
+      "url": "https://openstax.org/books/biology-2e/pages/19-introduction",
+      "key": "19 introduction"
+    },
+    {
+      "url": "https://openstax.org/books/biology-2e/pages/19-key-terms",
+      "key": "19 key terms"
+    },
+    {
+      "url": "https://openstax.org/books/biology-2e/pages/19-review-questions",
+      "key": "19 review questions"
+    },
+    {
+      "url": "https://openstax.org/books/biology-2e/pages/19-visual-connection-questions",
+      "key": "19 visual connection questions"
+    },
+    {
+      "url": "https://openstax.org/books/biology-2e/pages/2-1-atoms-isotopes-ions-and-molecules-the-building-blocks",
+      "key": "2 1 atoms isotopes ions and molecules the building blocks"
+    },
+    {
+      "url": "https://openstax.org/books/biology-2e/pages/2-2-water",
+      "key": "2 2 water"
+    },
+    {
+      "url": "https://openstax.org/books/biology-2e/pages/2-3-carbon",
+      "key": "2 3 carbon"
+    },
+    {
+      "url": "https://openstax.org/books/biology-2e/pages/2-chapter-summary",
+      "key": "2 chapter summary"
+    },
+    {
+      "url": "https://openstax.org/books/biology-2e/pages/2-critical-thinking-questions",
+      "key": "2 critical thinking questions"
+    },
+    {
+      "url": "https://openstax.org/books/biology-2e/pages/2-introduction",
+      "key": "2 introduction"
+    },
+    {
+      "url": "https://openstax.org/books/biology-2e/pages/2-key-terms",
+      "key": "2 key terms"
+    },
+    {
+      "url": "https://openstax.org/books/biology-2e/pages/2-review-questions",
+      "key": "2 review questions"
+    },
+    {
+      "url": "https://openstax.org/books/biology-2e/pages/2-visual-connection-questions",
+      "key": "2 visual connection questions"
+    },
+    {
+      "url": "https://openstax.org/books/biology-2e/pages/20-1-organizing-life-on-earth",
+      "key": "20 1 organizing life on earth"
+    },
+    {
+      "url": "https://openstax.org/books/biology-2e/pages/20-2-determining-evolutionary-relationships",
+      "key": "20 2 determining evolutionary relationships"
+    },
+    {
+      "url": "https://openstax.org/books/biology-2e/pages/20-3-perspectives-on-the-phylogenetic-tree",
+      "key": "20 3 perspectives on the phylogenetic tree"
+    },
+    {
+      "url": "https://openstax.org/books/biology-2e/pages/20-chapter-summary",
+      "key": "20 chapter summary"
+    },
+    {
+      "url": "https://openstax.org/books/biology-2e/pages/20-critical-thinking-questions",
+      "key": "20 critical thinking questions"
+    },
+    {
+      "url": "https://openstax.org/books/biology-2e/pages/20-introduction",
+      "key": "20 introduction"
+    },
+    {
+      "url": "https://openstax.org/books/biology-2e/pages/20-key-terms",
+      "key": "20 key terms"
+    },
+    {
+      "url": "https://openstax.org/books/biology-2e/pages/20-review-questions",
+      "key": "20 review questions"
+    },
+    {
+      "url": "https://openstax.org/books/biology-2e/pages/20-visual-connection-questions",
+      "key": "20 visual connection questions"
+    },
+    {
+      "url": "https://openstax.org/books/biology-2e/pages/21-1-viral-evolution-morphology-and-classification",
+      "key": "21 1 viral evolution morphology and classification"
+    },
+    {
+      "url": "https://openstax.org/books/biology-2e/pages/21-2-virus-infections-and-hosts",
+      "key": "21 2 virus infections and hosts"
+    },
+    {
+      "url": "https://openstax.org/books/biology-2e/pages/21-3-prevention-and-treatment-of-viral-infections",
+      "key": "21 3 prevention and treatment of viral infections"
+    },
+    {
+      "url": "https://openstax.org/books/biology-2e/pages/21-4-other-acellular-entities-prions-and-viroids",
+      "key": "21 4 other acellular entities prions and viroids"
+    },
+    {
+      "url": "https://openstax.org/books/biology-2e/pages/21-chapter-summary",
+      "key": "21 chapter summary"
+    },
+    {
+      "url": "https://openstax.org/books/biology-2e/pages/21-critical-thinking-questions",
+      "key": "21 critical thinking questions"
+    },
+    {
+      "url": "https://openstax.org/books/biology-2e/pages/21-introduction",
+      "key": "21 introduction"
+    },
+    {
+      "url": "https://openstax.org/books/biology-2e/pages/21-key-terms",
+      "key": "21 key terms"
+    },
+    {
+      "url": "https://openstax.org/books/biology-2e/pages/21-review-questions",
+      "key": "21 review questions"
+    },
+    {
+      "url": "https://openstax.org/books/biology-2e/pages/21-visual-connection-questions",
+      "key": "21 visual connection questions"
+    },
+    {
+      "url": "https://openstax.org/books/biology-2e/pages/22-1-prokaryotic-diversity",
+      "key": "22 1 prokaryotic diversity"
+    },
+    {
+      "url": "https://openstax.org/books/biology-2e/pages/22-2-structure-of-prokaryotes-bacteria-and-archaea",
+      "key": "22 2 structure of prokaryotes bacteria and archaea"
+    },
+    {
+      "url": "https://openstax.org/books/biology-2e/pages/22-3-prokaryotic-metabolism",
+      "key": "22 3 prokaryotic metabolism"
+    },
+    {
+      "url": "https://openstax.org/books/biology-2e/pages/22-4-bacterial-diseases-in-humans",
+      "key": "22 4 bacterial diseases in humans"
+    },
+    {
+      "url": "https://openstax.org/books/biology-2e/pages/22-5-beneficial-prokaryotes",
+      "key": "22 5 beneficial prokaryotes"
+    },
+    {
+      "url": "https://openstax.org/books/biology-2e/pages/22-chapter-summary",
+      "key": "22 chapter summary"
+    },
+    {
+      "url": "https://openstax.org/books/biology-2e/pages/22-critical-thinking-questions",
+      "key": "22 critical thinking questions"
+    },
+    {
+      "url": "https://openstax.org/books/biology-2e/pages/22-introduction",
+      "key": "22 introduction"
+    },
+    {
+      "url": "https://openstax.org/books/biology-2e/pages/22-key-terms",
+      "key": "22 key terms"
+    },
+    {
+      "url": "https://openstax.org/books/biology-2e/pages/22-review-questions",
+      "key": "22 review questions"
+    },
+    {
+      "url": "https://openstax.org/books/biology-2e/pages/22-visual-connection-questions",
+      "key": "22 visual connection questions"
+    },
+    {
+      "url": "https://openstax.org/books/biology-2e/pages/23-1-eukaryotic-origins",
+      "key": "23 1 eukaryotic origins"
+    },
+    {
+      "url": "https://openstax.org/books/biology-2e/pages/23-2-characteristics-of-protists",
+      "key": "23 2 characteristics of protists"
+    },
+    {
+      "url": "https://openstax.org/books/biology-2e/pages/23-3-groups-of-protists",
+      "key": "23 3 groups of protists"
+    },
+    {
+      "url": "https://openstax.org/books/biology-2e/pages/23-4-ecology-of-protists",
+      "key": "23 4 ecology of protists"
+    },
+    {
+      "url": "https://openstax.org/books/biology-2e/pages/23-chapter-summary",
+      "key": "23 chapter summary"
+    },
+    {
+      "url": "https://openstax.org/books/biology-2e/pages/23-critical-thinking-questions",
+      "key": "23 critical thinking questions"
+    },
+    {
+      "url": "https://openstax.org/books/biology-2e/pages/23-introduction",
+      "key": "23 introduction"
+    },
+    {
+      "url": "https://openstax.org/books/biology-2e/pages/23-key-terms",
+      "key": "23 key terms"
+    },
+    {
+      "url": "https://openstax.org/books/biology-2e/pages/23-review-questions",
+      "key": "23 review questions"
+    },
+    {
+      "url": "https://openstax.org/books/biology-2e/pages/23-visual-connection-questions",
+      "key": "23 visual connection questions"
+    },
+    {
+      "url": "https://openstax.org/books/biology-2e/pages/24-1-characteristics-of-fungi",
+      "key": "24 1 characteristics of fungi"
+    },
+    {
+      "url": "https://openstax.org/books/biology-2e/pages/24-2-classifications-of-fungi",
+      "key": "24 2 classifications of fungi"
+    },
+    {
+      "url": "https://openstax.org/books/biology-2e/pages/24-3-ecology-of-fungi",
+      "key": "24 3 ecology of fungi"
+    },
+    {
+      "url": "https://openstax.org/books/biology-2e/pages/24-4-fungal-parasites-and-pathogens",
+      "key": "24 4 fungal parasites and pathogens"
+    },
+    {
+      "url": "https://openstax.org/books/biology-2e/pages/24-5-importance-of-fungi-in-human-life",
+      "key": "24 5 importance of fungi in human life"
+    },
+    {
+      "url": "https://openstax.org/books/biology-2e/pages/24-chapter-summary",
+      "key": "24 chapter summary"
+    },
+    {
+      "url": "https://openstax.org/books/biology-2e/pages/24-critical-thinking-questions",
+      "key": "24 critical thinking questions"
+    },
+    {
+      "url": "https://openstax.org/books/biology-2e/pages/24-introduction",
+      "key": "24 introduction"
+    },
+    {
+      "url": "https://openstax.org/books/biology-2e/pages/24-key-terms",
+      "key": "24 key terms"
+    },
+    {
+      "url": "https://openstax.org/books/biology-2e/pages/24-review-questions",
+      "key": "24 review questions"
+    },
+    {
+      "url": "https://openstax.org/books/biology-2e/pages/24-visual-connection-questions",
+      "key": "24 visual connection questions"
+    },
+    {
+      "url": "https://openstax.org/books/biology-2e/pages/25-1-early-plant-life",
+      "key": "25 1 early plant life"
+    },
+    {
+      "url": "https://openstax.org/books/biology-2e/pages/25-2-green-algae-precursors-of-land-plants",
+      "key": "25 2 green algae precursors of land plants"
+    },
+    {
+      "url": "https://openstax.org/books/biology-2e/pages/25-3-bryophytes",
+      "key": "25 3 bryophytes"
+    },
+    {
+      "url": "https://openstax.org/books/biology-2e/pages/25-4-seedless-vascular-plants",
+      "key": "25 4 seedless vascular plants"
+    },
+    {
+      "url": "https://openstax.org/books/biology-2e/pages/25-chapter-summary",
+      "key": "25 chapter summary"
+    },
+    {
+      "url": "https://openstax.org/books/biology-2e/pages/25-critical-thinking-questions",
+      "key": "25 critical thinking questions"
+    },
+    {
+      "url": "https://openstax.org/books/biology-2e/pages/25-introduction",
+      "key": "25 introduction"
+    },
+    {
+      "url": "https://openstax.org/books/biology-2e/pages/25-key-terms",
+      "key": "25 key terms"
+    },
+    {
+      "url": "https://openstax.org/books/biology-2e/pages/25-review-questions",
+      "key": "25 review questions"
+    },
+    {
+      "url": "https://openstax.org/books/biology-2e/pages/25-visual-connection-questions",
+      "key": "25 visual connection questions"
+    },
+    {
+      "url": "https://openstax.org/books/biology-2e/pages/26-1-evolution-of-seed-plants",
+      "key": "26 1 evolution of seed plants"
+    },
+    {
+      "url": "https://openstax.org/books/biology-2e/pages/26-2-gymnosperms",
+      "key": "26 2 gymnosperms"
+    },
+    {
+      "url": "https://openstax.org/books/biology-2e/pages/26-3-angiosperms",
+      "key": "26 3 angiosperms"
+    },
+    {
+      "url": "https://openstax.org/books/biology-2e/pages/26-4-the-role-of-seed-plants",
+      "key": "26 4 the role of seed plants"
+    },
+    {
+      "url": "https://openstax.org/books/biology-2e/pages/26-chapter-summary",
+      "key": "26 chapter summary"
+    },
+    {
+      "url": "https://openstax.org/books/biology-2e/pages/26-critical-thinking-questions",
+      "key": "26 critical thinking questions"
+    },
+    {
+      "url": "https://openstax.org/books/biology-2e/pages/26-introduction",
+      "key": "26 introduction"
+    },
+    {
+      "url": "https://openstax.org/books/biology-2e/pages/26-key-terms",
+      "key": "26 key terms"
+    },
+    {
+      "url": "https://openstax.org/books/biology-2e/pages/26-review-questions",
+      "key": "26 review questions"
+    },
+    {
+      "url": "https://openstax.org/books/biology-2e/pages/26-visual-connection-questions",
+      "key": "26 visual connection questions"
+    },
+    {
+      "url": "https://openstax.org/books/biology-2e/pages/27-1-features-of-the-animal-kingdom",
+      "key": "27 1 features of the animal kingdom"
+    },
+    {
+      "url": "https://openstax.org/books/biology-2e/pages/27-2-features-used-to-classify-animals",
+      "key": "27 2 features used to classify animals"
+    },
+    {
+      "url": "https://openstax.org/books/biology-2e/pages/27-3-animal-phylogeny",
+      "key": "27 3 animal phylogeny"
+    },
+    {
+      "url": "https://openstax.org/books/biology-2e/pages/27-4-the-evolutionary-history-of-the-animal-kingdom",
+      "key": "27 4 the evolutionary history of the animal kingdom"
+    },
+    {
+      "url": "https://openstax.org/books/biology-2e/pages/27-chapter-summary",
+      "key": "27 chapter summary"
+    },
+    {
+      "url": "https://openstax.org/books/biology-2e/pages/27-critical-thinking-questions",
+      "key": "27 critical thinking questions"
+    },
+    {
+      "url": "https://openstax.org/books/biology-2e/pages/27-introduction",
+      "key": "27 introduction"
+    },
+    {
+      "url": "https://openstax.org/books/biology-2e/pages/27-key-terms",
+      "key": "27 key terms"
+    },
+    {
+      "url": "https://openstax.org/books/biology-2e/pages/27-review-questions",
+      "key": "27 review questions"
+    },
+    {
+      "url": "https://openstax.org/books/biology-2e/pages/27-visual-connection-questions",
+      "key": "27 visual connection questions"
+    },
+    {
+      "url": "https://openstax.org/books/biology-2e/pages/28-1-phylum-porifera",
+      "key": "28 1 phylum porifera"
+    },
+    {
+      "url": "https://openstax.org/books/biology-2e/pages/28-2-phylum-cnidaria",
+      "key": "28 2 phylum cnidaria"
+    },
+    {
+      "url": "https://openstax.org/books/biology-2e/pages/28-3-superphylum-lophotrochozoa-flatworms-rotifers-and-nemerteans",
+      "key": "28 3 superphylum lophotrochozoa flatworms rotifers and nemerteans"
+    },
+    {
+      "url": "https://openstax.org/books/biology-2e/pages/28-4-superphylum-lophotrochozoa-mollusks-and-annelids",
+      "key": "28 4 superphylum lophotrochozoa mollusks and annelids"
+    },
+    {
+      "url": "https://openstax.org/books/biology-2e/pages/28-5-superphylum-ecdysozoa-nematodes-and-tardigrades",
+      "key": "28 5 superphylum ecdysozoa nematodes and tardigrades"
+    },
+    {
+      "url": "https://openstax.org/books/biology-2e/pages/28-6-superphylum-ecdysozoa-arthropods",
+      "key": "28 6 superphylum ecdysozoa arthropods"
+    },
+    {
+      "url": "https://openstax.org/books/biology-2e/pages/28-7-superphylum-deuterostomia",
+      "key": "28 7 superphylum deuterostomia"
+    },
+    {
+      "url": "https://openstax.org/books/biology-2e/pages/28-chapter-summary",
+      "key": "28 chapter summary"
+    },
+    {
+      "url": "https://openstax.org/books/biology-2e/pages/28-critical-thinking-questions",
+      "key": "28 critical thinking questions"
+    },
+    {
+      "url": "https://openstax.org/books/biology-2e/pages/28-introduction",
+      "key": "28 introduction"
+    },
+    {
+      "url": "https://openstax.org/books/biology-2e/pages/28-key-terms",
+      "key": "28 key terms"
+    },
+    {
+      "url": "https://openstax.org/books/biology-2e/pages/28-review-questions",
+      "key": "28 review questions"
+    },
+    {
+      "url": "https://openstax.org/books/biology-2e/pages/28-visual-connection-questions",
+      "key": "28 visual connection questions"
+    },
+    {
+      "url": "https://openstax.org/books/biology-2e/pages/29-1-chordates",
+      "key": "29 1 chordates"
+    },
+    {
+      "url": "https://openstax.org/books/biology-2e/pages/29-2-fishes",
+      "key": "29 2 fishes"
+    },
+    {
+      "url": "https://openstax.org/books/biology-2e/pages/29-3-amphibians",
+      "key": "29 3 amphibians"
+    },
+    {
+      "url": "https://openstax.org/books/biology-2e/pages/29-4-reptiles",
+      "key": "29 4 reptiles"
+    },
+    {
+      "url": "https://openstax.org/books/biology-2e/pages/29-5-birds",
+      "key": "29 5 birds"
+    },
+    {
+      "url": "https://openstax.org/books/biology-2e/pages/29-6-mammals",
+      "key": "29 6 mammals"
+    },
+    {
+      "url": "https://openstax.org/books/biology-2e/pages/29-7-the-evolution-of-primates",
+      "key": "29 7 the evolution of primates"
+    },
+    {
+      "url": "https://openstax.org/books/biology-2e/pages/29-chapter-summary",
+      "key": "29 chapter summary"
+    },
+    {
+      "url": "https://openstax.org/books/biology-2e/pages/29-critical-thinking-questions",
+      "key": "29 critical thinking questions"
+    },
+    {
+      "url": "https://openstax.org/books/biology-2e/pages/29-introduction",
+      "key": "29 introduction"
+    },
+    {
+      "url": "https://openstax.org/books/biology-2e/pages/29-key-terms",
+      "key": "29 key terms"
+    },
+    {
+      "url": "https://openstax.org/books/biology-2e/pages/29-review-questions",
+      "key": "29 review questions"
+    },
+    {
+      "url": "https://openstax.org/books/biology-2e/pages/29-visual-connection-questions",
+      "key": "29 visual connection questions"
+    },
+    {
+      "url": "https://openstax.org/books/biology-2e/pages/3-1-synthesis-of-biological-macromolecules",
+      "key": "3 1 synthesis of biological macromolecules"
+    },
+    {
+      "url": "https://openstax.org/books/biology-2e/pages/3-2-carbohydrates",
+      "key": "3 2 carbohydrates"
+    },
+    {
+      "url": "https://openstax.org/books/biology-2e/pages/3-3-lipids",
+      "key": "3 3 lipids"
+    },
+    {
+      "url": "https://openstax.org/books/biology-2e/pages/3-4-proteins",
+      "key": "3 4 proteins"
+    },
+    {
+      "url": "https://openstax.org/books/biology-2e/pages/3-5-nucleic-acids",
+      "key": "3 5 nucleic acids"
+    },
+    {
+      "url": "https://openstax.org/books/biology-2e/pages/3-chapter-summary",
+      "key": "3 chapter summary"
+    },
+    {
+      "url": "https://openstax.org/books/biology-2e/pages/3-critical-thinking-questions",
+      "key": "3 critical thinking questions"
+    },
+    {
+      "url": "https://openstax.org/books/biology-2e/pages/3-introduction",
+      "key": "3 introduction"
+    },
+    {
+      "url": "https://openstax.org/books/biology-2e/pages/3-key-terms",
+      "key": "3 key terms"
+    },
+    {
+      "url": "https://openstax.org/books/biology-2e/pages/3-review-questions",
+      "key": "3 review questions"
+    },
+    {
+      "url": "https://openstax.org/books/biology-2e/pages/3-visual-connection-questions",
+      "key": "3 visual connection questions"
+    },
+    {
+      "url": "https://openstax.org/books/biology-2e/pages/30-1-the-plant-body",
+      "key": "30 1 the plant body"
+    },
+    {
+      "url": "https://openstax.org/books/biology-2e/pages/30-2-stems",
+      "key": "30 2 stems"
+    },
+    {
+      "url": "https://openstax.org/books/biology-2e/pages/30-3-roots",
+      "key": "30 3 roots"
+    },
+    {
+      "url": "https://openstax.org/books/biology-2e/pages/30-4-leaves",
+      "key": "30 4 leaves"
+    },
+    {
+      "url": "https://openstax.org/books/biology-2e/pages/30-5-transport-of-water-and-solutes-in-plants",
+      "key": "30 5 transport of water and solutes in plants"
+    },
+    {
+      "url": "https://openstax.org/books/biology-2e/pages/30-6-plant-sensory-systems-and-responses",
+      "key": "30 6 plant sensory systems and responses"
+    },
+    {
+      "url": "https://openstax.org/books/biology-2e/pages/30-chapter-summary",
+      "key": "30 chapter summary"
+    },
+    {
+      "url": "https://openstax.org/books/biology-2e/pages/30-critical-thinking-questions",
+      "key": "30 critical thinking questions"
+    },
+    {
+      "url": "https://openstax.org/books/biology-2e/pages/30-introduction",
+      "key": "30 introduction"
+    },
+    {
+      "url": "https://openstax.org/books/biology-2e/pages/30-key-terms",
+      "key": "30 key terms"
+    },
+    {
+      "url": "https://openstax.org/books/biology-2e/pages/30-review-questions",
+      "key": "30 review questions"
+    },
+    {
+      "url": "https://openstax.org/books/biology-2e/pages/30-visual-connection-questions",
+      "key": "30 visual connection questions"
+    },
+    {
+      "url": "https://openstax.org/books/biology-2e/pages/31-1-nutritional-requirements-of-plants",
+      "key": "31 1 nutritional requirements of plants"
+    },
+    {
+      "url": "https://openstax.org/books/biology-2e/pages/31-2-the-soil",
+      "key": "31 2 the soil"
+    },
+    {
+      "url": "https://openstax.org/books/biology-2e/pages/31-3-nutritional-adaptations-of-plants",
+      "key": "31 3 nutritional adaptations of plants"
+    },
+    {
+      "url": "https://openstax.org/books/biology-2e/pages/31-chapter-summary",
+      "key": "31 chapter summary"
+    },
+    {
+      "url": "https://openstax.org/books/biology-2e/pages/31-critical-thinking-questions",
+      "key": "31 critical thinking questions"
+    },
+    {
+      "url": "https://openstax.org/books/biology-2e/pages/31-introduction",
+      "key": "31 introduction"
+    },
+    {
+      "url": "https://openstax.org/books/biology-2e/pages/31-key-terms",
+      "key": "31 key terms"
+    },
+    {
+      "url": "https://openstax.org/books/biology-2e/pages/31-review-questions",
+      "key": "31 review questions"
+    },
+    {
+      "url": "https://openstax.org/books/biology-2e/pages/31-visual-connection-questions",
+      "key": "31 visual connection questions"
+    },
+    {
+      "url": "https://openstax.org/books/biology-2e/pages/32-1-reproductive-development-and-structure",
+      "key": "32 1 reproductive development and structure"
+    },
+    {
+      "url": "https://openstax.org/books/biology-2e/pages/32-2-pollination-and-fertilization",
+      "key": "32 2 pollination and fertilization"
+    },
+    {
+      "url": "https://openstax.org/books/biology-2e/pages/32-3-asexual-reproduction",
+      "key": "32 3 asexual reproduction"
+    },
+    {
+      "url": "https://openstax.org/books/biology-2e/pages/32-chapter-summary",
+      "key": "32 chapter summary"
+    },
+    {
+      "url": "https://openstax.org/books/biology-2e/pages/32-critical-thinking-questions",
+      "key": "32 critical thinking questions"
+    },
+    {
+      "url": "https://openstax.org/books/biology-2e/pages/32-introduction",
+      "key": "32 introduction"
+    },
+    {
+      "url": "https://openstax.org/books/biology-2e/pages/32-key-terms",
+      "key": "32 key terms"
+    },
+    {
+      "url": "https://openstax.org/books/biology-2e/pages/32-review-questions",
+      "key": "32 review questions"
+    },
+    {
+      "url": "https://openstax.org/books/biology-2e/pages/32-visual-connection-questions",
+      "key": "32 visual connection questions"
+    },
+    {
+      "url": "https://openstax.org/books/biology-2e/pages/33-1-animal-form-and-function",
+      "key": "33 1 animal form and function"
+    },
+    {
+      "url": "https://openstax.org/books/biology-2e/pages/33-2-animal-primary-tissues",
+      "key": "33 2 animal primary tissues"
+    },
+    {
+      "url": "https://openstax.org/books/biology-2e/pages/33-3-homeostasis",
+      "key": "33 3 homeostasis"
+    },
+    {
+      "url": "https://openstax.org/books/biology-2e/pages/33-chapter-summary",
+      "key": "33 chapter summary"
+    },
+    {
+      "url": "https://openstax.org/books/biology-2e/pages/33-critical-thinking-questions",
+      "key": "33 critical thinking questions"
+    },
+    {
+      "url": "https://openstax.org/books/biology-2e/pages/33-introduction",
+      "key": "33 introduction"
+    },
+    {
+      "url": "https://openstax.org/books/biology-2e/pages/33-key-terms",
+      "key": "33 key terms"
+    },
+    {
+      "url": "https://openstax.org/books/biology-2e/pages/33-review-questions",
+      "key": "33 review questions"
+    },
+    {
+      "url": "https://openstax.org/books/biology-2e/pages/33-visual-connection-questions",
+      "key": "33 visual connection questions"
+    },
+    {
+      "url": "https://openstax.org/books/biology-2e/pages/34-1-digestive-systems",
+      "key": "34 1 digestive systems"
+    },
+    {
+      "url": "https://openstax.org/books/biology-2e/pages/34-2-nutrition-and-energy-production",
+      "key": "34 2 nutrition and energy production"
+    },
+    {
+      "url": "https://openstax.org/books/biology-2e/pages/34-3-digestive-system-processes",
+      "key": "34 3 digestive system processes"
+    },
+    {
+      "url": "https://openstax.org/books/biology-2e/pages/34-4-digestive-system-regulation",
+      "key": "34 4 digestive system regulation"
+    },
+    {
+      "url": "https://openstax.org/books/biology-2e/pages/34-chapter-summary",
+      "key": "34 chapter summary"
+    },
+    {
+      "url": "https://openstax.org/books/biology-2e/pages/34-critical-thinking-questions",
+      "key": "34 critical thinking questions"
+    },
+    {
+      "url": "https://openstax.org/books/biology-2e/pages/34-introduction",
+      "key": "34 introduction"
+    },
+    {
+      "url": "https://openstax.org/books/biology-2e/pages/34-key-terms",
+      "key": "34 key terms"
+    },
+    {
+      "url": "https://openstax.org/books/biology-2e/pages/34-review-questions",
+      "key": "34 review questions"
+    },
+    {
+      "url": "https://openstax.org/books/biology-2e/pages/34-visual-connection-questions",
+      "key": "34 visual connection questions"
+    },
+    {
+      "url": "https://openstax.org/books/biology-2e/pages/35-1-neurons-and-glial-cells",
+      "key": "35 1 neurons and glial cells"
+    },
+    {
+      "url": "https://openstax.org/books/biology-2e/pages/35-2-how-neurons-communicate",
+      "key": "35 2 how neurons communicate"
+    },
+    {
+      "url": "https://openstax.org/books/biology-2e/pages/35-3-the-central-nervous-system",
+      "key": "35 3 the central nervous system"
+    },
+    {
+      "url": "https://openstax.org/books/biology-2e/pages/35-4-the-peripheral-nervous-system",
+      "key": "35 4 the peripheral nervous system"
+    },
+    {
+      "url": "https://openstax.org/books/biology-2e/pages/35-5-nervous-system-disorders",
+      "key": "35 5 nervous system disorders"
+    },
+    {
+      "url": "https://openstax.org/books/biology-2e/pages/35-chapter-summary",
+      "key": "35 chapter summary"
+    },
+    {
+      "url": "https://openstax.org/books/biology-2e/pages/35-critical-thinking-questions",
+      "key": "35 critical thinking questions"
+    },
+    {
+      "url": "https://openstax.org/books/biology-2e/pages/35-introduction",
+      "key": "35 introduction"
+    },
+    {
+      "url": "https://openstax.org/books/biology-2e/pages/35-key-terms",
+      "key": "35 key terms"
+    },
+    {
+      "url": "https://openstax.org/books/biology-2e/pages/35-review-questions",
+      "key": "35 review questions"
+    },
+    {
+      "url": "https://openstax.org/books/biology-2e/pages/35-visual-connection-questions",
+      "key": "35 visual connection questions"
+    },
+    {
+      "url": "https://openstax.org/books/biology-2e/pages/36-1-sensory-processes",
+      "key": "36 1 sensory processes"
+    },
+    {
+      "url": "https://openstax.org/books/biology-2e/pages/36-2-somatosensation",
+      "key": "36 2 somatosensation"
+    },
+    {
+      "url": "https://openstax.org/books/biology-2e/pages/36-3-taste-and-smell",
+      "key": "36 3 taste and smell"
+    },
+    {
+      "url": "https://openstax.org/books/biology-2e/pages/36-4-hearing-and-vestibular-sensation",
+      "key": "36 4 hearing and vestibular sensation"
+    },
+    {
+      "url": "https://openstax.org/books/biology-2e/pages/36-5-vision",
+      "key": "36 5 vision"
+    },
+    {
+      "url": "https://openstax.org/books/biology-2e/pages/36-chapter-summary",
+      "key": "36 chapter summary"
+    },
+    {
+      "url": "https://openstax.org/books/biology-2e/pages/36-critical-thinking-questions",
+      "key": "36 critical thinking questions"
+    },
+    {
+      "url": "https://openstax.org/books/biology-2e/pages/36-introduction",
+      "key": "36 introduction"
+    },
+    {
+      "url": "https://openstax.org/books/biology-2e/pages/36-key-terms",
+      "key": "36 key terms"
+    },
+    {
+      "url": "https://openstax.org/books/biology-2e/pages/36-review-questions",
+      "key": "36 review questions"
+    },
+    {
+      "url": "https://openstax.org/books/biology-2e/pages/36-visual-connection-questions",
+      "key": "36 visual connection questions"
+    },
+    {
+      "url": "https://openstax.org/books/biology-2e/pages/37-1-types-of-hormones",
+      "key": "37 1 types of hormones"
+    },
+    {
+      "url": "https://openstax.org/books/biology-2e/pages/37-2-how-hormones-work",
+      "key": "37 2 how hormones work"
+    },
+    {
+      "url": "https://openstax.org/books/biology-2e/pages/37-3-regulation-of-body-processes",
+      "key": "37 3 regulation of body processes"
+    },
+    {
+      "url": "https://openstax.org/books/biology-2e/pages/37-4-regulation-of-hormone-production",
+      "key": "37 4 regulation of hormone production"
+    },
+    {
+      "url": "https://openstax.org/books/biology-2e/pages/37-5-endocrine-glands",
+      "key": "37 5 endocrine glands"
+    },
+    {
+      "url": "https://openstax.org/books/biology-2e/pages/37-chapter-summary",
+      "key": "37 chapter summary"
+    },
+    {
+      "url": "https://openstax.org/books/biology-2e/pages/37-critical-thinking-questions",
+      "key": "37 critical thinking questions"
+    },
+    {
+      "url": "https://openstax.org/books/biology-2e/pages/37-introduction",
+      "key": "37 introduction"
+    },
+    {
+      "url": "https://openstax.org/books/biology-2e/pages/37-key-terms",
+      "key": "37 key terms"
+    },
+    {
+      "url": "https://openstax.org/books/biology-2e/pages/37-review-questions",
+      "key": "37 review questions"
+    },
+    {
+      "url": "https://openstax.org/books/biology-2e/pages/37-visual-connection-questions",
+      "key": "37 visual connection questions"
+    },
+    {
+      "url": "https://openstax.org/books/biology-2e/pages/38-1-types-of-skeletal-systems",
+      "key": "38 1 types of skeletal systems"
+    },
+    {
+      "url": "https://openstax.org/books/biology-2e/pages/38-2-bone",
+      "key": "38 2 bone"
+    },
+    {
+      "url": "https://openstax.org/books/biology-2e/pages/38-3-joints-and-skeletal-movement",
+      "key": "38 3 joints and skeletal movement"
+    },
+    {
+      "url": "https://openstax.org/books/biology-2e/pages/38-4-muscle-contraction-and-locomotion",
+      "key": "38 4 muscle contraction and locomotion"
+    },
+    {
+      "url": "https://openstax.org/books/biology-2e/pages/38-chapter-summary",
+      "key": "38 chapter summary"
+    },
+    {
+      "url": "https://openstax.org/books/biology-2e/pages/38-critical-thinking-questions",
+      "key": "38 critical thinking questions"
+    },
+    {
+      "url": "https://openstax.org/books/biology-2e/pages/38-introduction",
+      "key": "38 introduction"
+    },
+    {
+      "url": "https://openstax.org/books/biology-2e/pages/38-key-terms",
+      "key": "38 key terms"
+    },
+    {
+      "url": "https://openstax.org/books/biology-2e/pages/38-review-questions",
+      "key": "38 review questions"
+    },
+    {
+      "url": "https://openstax.org/books/biology-2e/pages/38-visual-connection-questions",
+      "key": "38 visual connection questions"
+    },
+    {
+      "url": "https://openstax.org/books/biology-2e/pages/39-1-systems-of-gas-exchange",
+      "key": "39 1 systems of gas exchange"
+    },
+    {
+      "url": "https://openstax.org/books/biology-2e/pages/39-2-gas-exchange-across-respiratory-surfaces",
+      "key": "39 2 gas exchange across respiratory surfaces"
+    },
+    {
+      "url": "https://openstax.org/books/biology-2e/pages/39-3-breathing",
+      "key": "39 3 breathing"
+    },
+    {
+      "url": "https://openstax.org/books/biology-2e/pages/39-4-transport-of-gases-in-human-bodily-fluids",
+      "key": "39 4 transport of gases in human bodily fluids"
+    },
+    {
+      "url": "https://openstax.org/books/biology-2e/pages/39-chapter-summary",
+      "key": "39 chapter summary"
+    },
+    {
+      "url": "https://openstax.org/books/biology-2e/pages/39-critical-thinking-questions",
+      "key": "39 critical thinking questions"
+    },
+    {
+      "url": "https://openstax.org/books/biology-2e/pages/39-introduction",
+      "key": "39 introduction"
+    },
+    {
+      "url": "https://openstax.org/books/biology-2e/pages/39-key-terms",
+      "key": "39 key terms"
+    },
+    {
+      "url": "https://openstax.org/books/biology-2e/pages/39-review-questions",
+      "key": "39 review questions"
+    },
+    {
+      "url": "https://openstax.org/books/biology-2e/pages/39-visual-connection-questions",
+      "key": "39 visual connection questions"
+    },
+    {
+      "url": "https://openstax.org/books/biology-2e/pages/4-1-studying-cells",
+      "key": "4 1 studying cells"
+    },
+    {
+      "url": "https://openstax.org/books/biology-2e/pages/4-2-prokaryotic-cells",
+      "key": "4 2 prokaryotic cells"
+    },
+    {
+      "url": "https://openstax.org/books/biology-2e/pages/4-3-eukaryotic-cells",
+      "key": "4 3 eukaryotic cells"
+    },
+    {
+      "url": "https://openstax.org/books/biology-2e/pages/4-4-the-endomembrane-system-and-proteins",
+      "key": "4 4 the endomembrane system and proteins"
+    },
+    {
+      "url": "https://openstax.org/books/biology-2e/pages/4-5-the-cytoskeleton",
+      "key": "4 5 the cytoskeleton"
+    },
+    {
+      "url": "https://openstax.org/books/biology-2e/pages/4-6-connections-between-cells-and-cellular-activities",
+      "key": "4 6 connections between cells and cellular activities"
+    },
+    {
+      "url": "https://openstax.org/books/biology-2e/pages/4-chapter-summary",
+      "key": "4 chapter summary"
+    },
+    {
+      "url": "https://openstax.org/books/biology-2e/pages/4-critical-thinking-questions",
+      "key": "4 critical thinking questions"
+    },
+    {
+      "url": "https://openstax.org/books/biology-2e/pages/4-introduction",
+      "key": "4 introduction"
+    },
+    {
+      "url": "https://openstax.org/books/biology-2e/pages/4-key-terms",
+      "key": "4 key terms"
+    },
+    {
+      "url": "https://openstax.org/books/biology-2e/pages/4-review-questions",
+      "key": "4 review questions"
+    },
+    {
+      "url": "https://openstax.org/books/biology-2e/pages/4-visual-connection-questions",
+      "key": "4 visual connection questions"
+    },
+    {
+      "url": "https://openstax.org/books/biology-2e/pages/40-1-overview-of-the-circulatory-system",
+      "key": "40 1 overview of the circulatory system"
+    },
+    {
+      "url": "https://openstax.org/books/biology-2e/pages/40-2-components-of-the-blood",
+      "key": "40 2 components of the blood"
+    },
+    {
+      "url": "https://openstax.org/books/biology-2e/pages/40-3-mammalian-heart-and-blood-vessels",
+      "key": "40 3 mammalian heart and blood vessels"
+    },
+    {
+      "url": "https://openstax.org/books/biology-2e/pages/40-4-blood-flow-and-blood-pressure-regulation",
+      "key": "40 4 blood flow and blood pressure regulation"
+    },
+    {
+      "url": "https://openstax.org/books/biology-2e/pages/40-chapter-summary",
+      "key": "40 chapter summary"
+    },
+    {
+      "url": "https://openstax.org/books/biology-2e/pages/40-critical-thinking-questions",
+      "key": "40 critical thinking questions"
+    },
+    {
+      "url": "https://openstax.org/books/biology-2e/pages/40-introduction",
+      "key": "40 introduction"
+    },
+    {
+      "url": "https://openstax.org/books/biology-2e/pages/40-key-terms",
+      "key": "40 key terms"
+    },
+    {
+      "url": "https://openstax.org/books/biology-2e/pages/40-review-questions",
+      "key": "40 review questions"
+    },
+    {
+      "url": "https://openstax.org/books/biology-2e/pages/40-visual-connection-questions",
+      "key": "40 visual connection questions"
+    },
+    {
+      "url": "https://openstax.org/books/biology-2e/pages/41-1-osmoregulation-and-osmotic-balance",
+      "key": "41 1 osmoregulation and osmotic balance"
+    },
+    {
+      "url": "https://openstax.org/books/biology-2e/pages/41-2-the-kidneys-and-osmoregulatory-organs",
+      "key": "41 2 the kidneys and osmoregulatory organs"
+    },
+    {
+      "url": "https://openstax.org/books/biology-2e/pages/41-3-excretion-systems",
+      "key": "41 3 excretion systems"
+    },
+    {
+      "url": "https://openstax.org/books/biology-2e/pages/41-4-nitrogenous-wastes",
+      "key": "41 4 nitrogenous wastes"
+    },
+    {
+      "url": "https://openstax.org/books/biology-2e/pages/41-5-hormonal-control-of-osmoregulatory-functions",
+      "key": "41 5 hormonal control of osmoregulatory functions"
+    },
+    {
+      "url": "https://openstax.org/books/biology-2e/pages/41-chapter-summary",
+      "key": "41 chapter summary"
+    },
+    {
+      "url": "https://openstax.org/books/biology-2e/pages/41-critical-thinking-questions",
+      "key": "41 critical thinking questions"
+    },
+    {
+      "url": "https://openstax.org/books/biology-2e/pages/41-introduction",
+      "key": "41 introduction"
+    },
+    {
+      "url": "https://openstax.org/books/biology-2e/pages/41-key-terms",
+      "key": "41 key terms"
+    },
+    {
+      "url": "https://openstax.org/books/biology-2e/pages/41-review-questions",
+      "key": "41 review questions"
+    },
+    {
+      "url": "https://openstax.org/books/biology-2e/pages/41-visual-connection-questions",
+      "key": "41 visual connection questions"
+    },
+    {
+      "url": "https://openstax.org/books/biology-2e/pages/42-1-innate-immune-response",
+      "key": "42 1 innate immune response"
+    },
+    {
+      "url": "https://openstax.org/books/biology-2e/pages/42-2-adaptive-immune-response",
+      "key": "42 2 adaptive immune response"
+    },
+    {
+      "url": "https://openstax.org/books/biology-2e/pages/42-3-antibodies",
+      "key": "42 3 antibodies"
+    },
+    {
+      "url": "https://openstax.org/books/biology-2e/pages/42-4-disruptions-in-the-immune-system",
+      "key": "42 4 disruptions in the immune system"
+    },
+    {
+      "url": "https://openstax.org/books/biology-2e/pages/42-chapter-summary",
+      "key": "42 chapter summary"
+    },
+    {
+      "url": "https://openstax.org/books/biology-2e/pages/42-critical-thinking-questions",
+      "key": "42 critical thinking questions"
+    },
+    {
+      "url": "https://openstax.org/books/biology-2e/pages/42-introduction",
+      "key": "42 introduction"
+    },
+    {
+      "url": "https://openstax.org/books/biology-2e/pages/42-key-terms",
+      "key": "42 key terms"
+    },
+    {
+      "url": "https://openstax.org/books/biology-2e/pages/42-review-questions",
+      "key": "42 review questions"
+    },
+    {
+      "url": "https://openstax.org/books/biology-2e/pages/42-visual-connection-questions",
+      "key": "42 visual connection questions"
+    },
+    {
+      "url": "https://openstax.org/books/biology-2e/pages/43-1-reproduction-methods",
+      "key": "43 1 reproduction methods"
+    },
+    {
+      "url": "https://openstax.org/books/biology-2e/pages/43-2-fertilization",
+      "key": "43 2 fertilization"
+    },
+    {
+      "url": "https://openstax.org/books/biology-2e/pages/43-3-human-reproductive-anatomy-and-gametogenesis",
+      "key": "43 3 human reproductive anatomy and gametogenesis"
+    },
+    {
+      "url": "https://openstax.org/books/biology-2e/pages/43-4-hormonal-control-of-human-reproduction",
+      "key": "43 4 hormonal control of human reproduction"
+    },
+    {
+      "url": "https://openstax.org/books/biology-2e/pages/43-5-human-pregnancy-and-birth",
+      "key": "43 5 human pregnancy and birth"
+    },
+    {
+      "url": "https://openstax.org/books/biology-2e/pages/43-6-fertilization-and-early-embryonic-development",
+      "key": "43 6 fertilization and early embryonic development"
+    },
+    {
+      "url": "https://openstax.org/books/biology-2e/pages/43-7-organogenesis-and-vertebrate-axis-formation",
+      "key": "43 7 organogenesis and vertebrate axis formation"
+    },
+    {
+      "url": "https://openstax.org/books/biology-2e/pages/43-chapter-summary",
+      "key": "43 chapter summary"
+    },
+    {
+      "url": "https://openstax.org/books/biology-2e/pages/43-critical-thinking-questions",
+      "key": "43 critical thinking questions"
+    },
+    {
+      "url": "https://openstax.org/books/biology-2e/pages/43-introduction",
+      "key": "43 introduction"
+    },
+    {
+      "url": "https://openstax.org/books/biology-2e/pages/43-key-terms",
+      "key": "43 key terms"
+    },
+    {
+      "url": "https://openstax.org/books/biology-2e/pages/43-review-questions",
+      "key": "43 review questions"
+    },
+    {
+      "url": "https://openstax.org/books/biology-2e/pages/43-visual-connection-questions",
+      "key": "43 visual connection questions"
+    },
+    {
+      "url": "https://openstax.org/books/biology-2e/pages/44-1-the-scope-of-ecology",
+      "key": "44 1 the scope of ecology"
+    },
+    {
+      "url": "https://openstax.org/books/biology-2e/pages/44-2-biogeography",
+      "key": "44 2 biogeography"
+    },
+    {
+      "url": "https://openstax.org/books/biology-2e/pages/44-3-terrestrial-biomes",
+      "key": "44 3 terrestrial biomes"
+    },
+    {
+      "url": "https://openstax.org/books/biology-2e/pages/44-4-aquatic-biomes",
+      "key": "44 4 aquatic biomes"
+    },
+    {
+      "url": "https://openstax.org/books/biology-2e/pages/44-5-climate-and-the-effects-of-global-climate-change",
+      "key": "44 5 climate and the effects of global climate change"
+    },
+    {
+      "url": "https://openstax.org/books/biology-2e/pages/44-chapter-summary",
+      "key": "44 chapter summary"
+    },
+    {
+      "url": "https://openstax.org/books/biology-2e/pages/44-critical-thinking-questions",
+      "key": "44 critical thinking questions"
+    },
+    {
+      "url": "https://openstax.org/books/biology-2e/pages/44-introduction",
+      "key": "44 introduction"
+    },
+    {
+      "url": "https://openstax.org/books/biology-2e/pages/44-key-terms",
+      "key": "44 key terms"
+    },
+    {
+      "url": "https://openstax.org/books/biology-2e/pages/44-review-questions",
+      "key": "44 review questions"
+    },
+    {
+      "url": "https://openstax.org/books/biology-2e/pages/44-visual-connection-questions",
+      "key": "44 visual connection questions"
+    },
+    {
+      "url": "https://openstax.org/books/biology-2e/pages/45-1-population-demography",
+      "key": "45 1 population demography"
+    },
+    {
+      "url": "https://openstax.org/books/biology-2e/pages/45-2-life-histories-and-natural-selection",
+      "key": "45 2 life histories and natural selection"
+    },
+    {
+      "url": "https://openstax.org/books/biology-2e/pages/45-3-environmental-limits-to-population-growth",
+      "key": "45 3 environmental limits to population growth"
+    },
+    {
+      "url": "https://openstax.org/books/biology-2e/pages/45-4-population-dynamics-and-regulation",
+      "key": "45 4 population dynamics and regulation"
+    },
+    {
+      "url": "https://openstax.org/books/biology-2e/pages/45-5-human-population-growth",
+      "key": "45 5 human population growth"
+    },
+    {
+      "url": "https://openstax.org/books/biology-2e/pages/45-6-community-ecology",
+      "key": "45 6 community ecology"
+    },
+    {
+      "url": "https://openstax.org/books/biology-2e/pages/45-7-behavioral-biology-proximate-and-ultimate-causes-of-behavior",
+      "key": "45 7 behavioral biology proximate and ultimate causes of behavior"
+    },
+    {
+      "url": "https://openstax.org/books/biology-2e/pages/45-chapter-summary",
+      "key": "45 chapter summary"
+    },
+    {
+      "url": "https://openstax.org/books/biology-2e/pages/45-critical-thinking-questions",
+      "key": "45 critical thinking questions"
+    },
+    {
+      "url": "https://openstax.org/books/biology-2e/pages/45-introduction",
+      "key": "45 introduction"
+    },
+    {
+      "url": "https://openstax.org/books/biology-2e/pages/45-key-terms",
+      "key": "45 key terms"
+    },
+    {
+      "url": "https://openstax.org/books/biology-2e/pages/45-review-questions",
+      "key": "45 review questions"
+    },
+    {
+      "url": "https://openstax.org/books/biology-2e/pages/45-visual-connection-questions",
+      "key": "45 visual connection questions"
+    },
+    {
+      "url": "https://openstax.org/books/biology-2e/pages/46-1-ecology-of-ecosystems",
+      "key": "46 1 ecology of ecosystems"
+    },
+    {
+      "url": "https://openstax.org/books/biology-2e/pages/46-2-energy-flow-through-ecosystems",
+      "key": "46 2 energy flow through ecosystems"
+    },
+    {
+      "url": "https://openstax.org/books/biology-2e/pages/46-3-biogeochemical-cycles",
+      "key": "46 3 biogeochemical cycles"
+    },
+    {
+      "url": "https://openstax.org/books/biology-2e/pages/46-chapter-summary",
+      "key": "46 chapter summary"
+    },
+    {
+      "url": "https://openstax.org/books/biology-2e/pages/46-critical-thinking-questions",
+      "key": "46 critical thinking questions"
+    },
+    {
+      "url": "https://openstax.org/books/biology-2e/pages/46-introduction",
+      "key": "46 introduction"
+    },
+    {
+      "url": "https://openstax.org/books/biology-2e/pages/46-key-terms",
+      "key": "46 key terms"
+    },
+    {
+      "url": "https://openstax.org/books/biology-2e/pages/46-review-questions",
+      "key": "46 review questions"
+    },
+    {
+      "url": "https://openstax.org/books/biology-2e/pages/46-visual-connection-questions",
+      "key": "46 visual connection questions"
+    },
+    {
+      "url": "https://openstax.org/books/biology-2e/pages/47-1-the-biodiversity-crisis",
+      "key": "47 1 the biodiversity crisis"
+    },
+    {
+      "url": "https://openstax.org/books/biology-2e/pages/47-2-the-importance-of-biodiversity-to-human-life",
+      "key": "47 2 the importance of biodiversity to human life"
+    },
+    {
+      "url": "https://openstax.org/books/biology-2e/pages/47-3-threats-to-biodiversity",
+      "key": "47 3 threats to biodiversity"
+    },
+    {
+      "url": "https://openstax.org/books/biology-2e/pages/47-4-preserving-biodiversity",
+      "key": "47 4 preserving biodiversity"
+    },
+    {
+      "url": "https://openstax.org/books/biology-2e/pages/47-chapter-summary",
+      "key": "47 chapter summary"
+    },
+    {
+      "url": "https://openstax.org/books/biology-2e/pages/47-critical-thinking-questions",
+      "key": "47 critical thinking questions"
+    },
+    {
+      "url": "https://openstax.org/books/biology-2e/pages/47-introduction",
+      "key": "47 introduction"
+    },
+    {
+      "url": "https://openstax.org/books/biology-2e/pages/47-key-terms",
+      "key": "47 key terms"
+    },
+    {
+      "url": "https://openstax.org/books/biology-2e/pages/47-review-questions",
+      "key": "47 review questions"
+    },
+    {
+      "url": "https://openstax.org/books/biology-2e/pages/47-visual-connection-questions",
+      "key": "47 visual connection questions"
+    },
+    {
+      "url": "https://openstax.org/books/biology-2e/pages/5-1-components-and-structure",
+      "key": "5 1 components and structure"
+    },
+    {
+      "url": "https://openstax.org/books/biology-2e/pages/5-2-passive-transport",
+      "key": "5 2 passive transport"
+    },
+    {
+      "url": "https://openstax.org/books/biology-2e/pages/5-3-active-transport",
+      "key": "5 3 active transport"
+    },
+    {
+      "url": "https://openstax.org/books/biology-2e/pages/5-4-bulk-transport",
+      "key": "5 4 bulk transport"
+    },
+    {
+      "url": "https://openstax.org/books/biology-2e/pages/5-chapter-summary",
+      "key": "5 chapter summary"
+    },
+    {
+      "url": "https://openstax.org/books/biology-2e/pages/5-critical-thinking-questions",
+      "key": "5 critical thinking questions"
+    },
+    {
+      "url": "https://openstax.org/books/biology-2e/pages/5-introduction",
+      "key": "5 introduction"
+    },
+    {
+      "url": "https://openstax.org/books/biology-2e/pages/5-key-terms",
+      "key": "5 key terms"
+    },
+    {
+      "url": "https://openstax.org/books/biology-2e/pages/5-review-questions",
+      "key": "5 review questions"
+    },
+    {
+      "url": "https://openstax.org/books/biology-2e/pages/5-visual-connection-questions",
+      "key": "5 visual connection questions"
+    },
+    {
+      "url": "https://openstax.org/books/biology-2e/pages/6-1-energy-and-metabolism",
+      "key": "6 1 energy and metabolism"
+    },
+    {
+      "url": "https://openstax.org/books/biology-2e/pages/6-2-potential-kinetic-free-and-activation-energy",
+      "key": "6 2 potential kinetic free and activation energy"
+    },
+    {
+      "url": "https://openstax.org/books/biology-2e/pages/6-3-the-laws-of-thermodynamics",
+      "key": "6 3 the laws of thermodynamics"
+    },
+    {
+      "url": "https://openstax.org/books/biology-2e/pages/6-4-atp-adenosine-triphosphate",
+      "key": "6 4 atp adenosine triphosphate"
+    },
+    {
+      "url": "https://openstax.org/books/biology-2e/pages/6-5-enzymes",
+      "key": "6 5 enzymes"
+    },
+    {
+      "url": "https://openstax.org/books/biology-2e/pages/6-chapter-summary",
+      "key": "6 chapter summary"
+    },
+    {
+      "url": "https://openstax.org/books/biology-2e/pages/6-critical-thinking-questions",
+      "key": "6 critical thinking questions"
+    },
+    {
+      "url": "https://openstax.org/books/biology-2e/pages/6-introduction",
+      "key": "6 introduction"
+    },
+    {
+      "url": "https://openstax.org/books/biology-2e/pages/6-key-terms",
+      "key": "6 key terms"
+    },
+    {
+      "url": "https://openstax.org/books/biology-2e/pages/6-review-questions",
+      "key": "6 review questions"
+    },
+    {
+      "url": "https://openstax.org/books/biology-2e/pages/6-visual-connection-questions",
+      "key": "6 visual connection questions"
+    },
+    {
+      "url": "https://openstax.org/books/biology-2e/pages/7-1-energy-in-living-systems",
+      "key": "7 1 energy in living systems"
+    },
+    {
+      "url": "https://openstax.org/books/biology-2e/pages/7-2-glycolysis",
+      "key": "7 2 glycolysis"
+    },
+    {
+      "url": "https://openstax.org/books/biology-2e/pages/7-3-oxidation-of-pyruvate-and-the-citric-acid-cycle",
+      "key": "7 3 oxidation of pyruvate and the citric acid cycle"
+    },
+    {
+      "url": "https://openstax.org/books/biology-2e/pages/7-4-oxidative-phosphorylation",
+      "key": "7 4 oxidative phosphorylation"
+    },
+    {
+      "url": "https://openstax.org/books/biology-2e/pages/7-5-metabolism-without-oxygen",
+      "key": "7 5 metabolism without oxygen"
+    },
+    {
+      "url": "https://openstax.org/books/biology-2e/pages/7-6-connections-of-carbohydrate-protein-and-lipid-metabolic-pathways",
+      "key": "7 6 connections of carbohydrate protein and lipid metabolic pathways"
+    },
+    {
+      "url": "https://openstax.org/books/biology-2e/pages/7-7-regulation-of-cellular-respiration",
+      "key": "7 7 regulation of cellular respiration"
+    },
+    {
+      "url": "https://openstax.org/books/biology-2e/pages/7-chapter-summary",
+      "key": "7 chapter summary"
+    },
+    {
+      "url": "https://openstax.org/books/biology-2e/pages/7-critical-thinking-questions",
+      "key": "7 critical thinking questions"
+    },
+    {
+      "url": "https://openstax.org/books/biology-2e/pages/7-introduction",
+      "key": "7 introduction"
+    },
+    {
+      "url": "https://openstax.org/books/biology-2e/pages/7-key-terms",
+      "key": "7 key terms"
+    },
+    {
+      "url": "https://openstax.org/books/biology-2e/pages/7-review-questions",
+      "key": "7 review questions"
+    },
+    {
+      "url": "https://openstax.org/books/biology-2e/pages/7-visual-connection-questions",
+      "key": "7 visual connection questions"
+    },
+    {
+      "url": "https://openstax.org/books/biology-2e/pages/8-1-overview-of-photosynthesis",
+      "key": "8 1 overview of photosynthesis"
+    },
+    {
+      "url": "https://openstax.org/books/biology-2e/pages/8-2-the-light-dependent-reactions-of-photosynthesis",
+      "key": "8 2 the light dependent reactions of photosynthesis"
+    },
+    {
+      "url": "https://openstax.org/books/biology-2e/pages/8-3-using-light-energy-to-make-organic-molecules",
+      "key": "8 3 using light energy to make organic molecules"
+    },
+    {
+      "url": "https://openstax.org/books/biology-2e/pages/8-chapter-summary",
+      "key": "8 chapter summary"
+    },
+    {
+      "url": "https://openstax.org/books/biology-2e/pages/8-critical-thinking-questions",
+      "key": "8 critical thinking questions"
+    },
+    {
+      "url": "https://openstax.org/books/biology-2e/pages/8-introduction",
+      "key": "8 introduction"
+    },
+    {
+      "url": "https://openstax.org/books/biology-2e/pages/8-key-terms",
+      "key": "8 key terms"
+    },
+    {
+      "url": "https://openstax.org/books/biology-2e/pages/8-review-questions",
+      "key": "8 review questions"
+    },
+    {
+      "url": "https://openstax.org/books/biology-2e/pages/8-visual-connection-questions",
+      "key": "8 visual connection questions"
+    },
+    {
+      "url": "https://openstax.org/books/biology-2e/pages/9-1-signaling-molecules-and-cellular-receptors",
+      "key": "9 1 signaling molecules and cellular receptors"
+    },
+    {
+      "url": "https://openstax.org/books/biology-2e/pages/9-2-propagation-of-the-signal",
+      "key": "9 2 propagation of the signal"
+    },
+    {
+      "url": "https://openstax.org/books/biology-2e/pages/9-3-response-to-the-signal",
+      "key": "9 3 response to the signal"
+    },
+    {
+      "url": "https://openstax.org/books/biology-2e/pages/9-4-signaling-in-single-celled-organisms",
+      "key": "9 4 signaling in single celled organisms"
+    },
+    {
+      "url": "https://openstax.org/books/biology-2e/pages/9-chapter-summary",
+      "key": "9 chapter summary"
+    },
+    {
+      "url": "https://openstax.org/books/biology-2e/pages/9-critical-thinking-questions",
+      "key": "9 critical thinking questions"
+    },
+    {
+      "url": "https://openstax.org/books/biology-2e/pages/9-introduction",
+      "key": "9 introduction"
+    },
+    {
+      "url": "https://openstax.org/books/biology-2e/pages/9-key-terms",
+      "key": "9 key terms"
+    },
+    {
+      "url": "https://openstax.org/books/biology-2e/pages/9-review-questions",
+      "key": "9 review questions"
+    },
+    {
+      "url": "https://openstax.org/books/biology-2e/pages/9-visual-connection-questions",
+      "key": "9 visual connection questions"
+    },
+    {
+      "url": "https://openstax.org/books/biology-2e/pages/a-the-periodic-table-of-elements",
+      "key": "a the periodic table of elements"
+    },
+    {
+      "url": "https://openstax.org/books/biology-2e/pages/b-geological-time",
+      "key": "b geological time"
+    },
+    {
+      "url": "https://openstax.org/books/biology-2e/pages/c-measurements-and-the-metric-system",
+      "key": "c measurements and the metric system"
+    },
+    {
+      "url": "https://openstax.org/books/biology-2e/pages/index",
+      "key": "index"
+    },
+    {
+      "url": "https://openstax.org/books/biology-2e/pages/preface",
+      "key": "preface"
+    },
+    {
+      "url": "https://openstax.org/details/books/biology-2e",
+      "key": "biology 2e"
+    }
+  ]
+}

@@ -1,141 +1,213 @@
 {
   "selected_processed_ids": [
-    "processed_12",
-    "processed_14",
-    "processed_16",
-    "processed_18"
+    "processed_3",
+    "processed_7",
+    "processed_10",
+    "processed_12"
   ],
   "selected_ids_by_base_context": {
     "Eukaryotic cell": [
-      "processed_12",
-      "processed_14"
+      "processed_3"
+    ],
+    "Glucose": [
+      "processed_7"
+    ],
+    "Human heart": [
+      "processed_10"
     ],
     "Pythagorean theorem": [
-      "processed_16",
-      "processed_18"
+      "processed_12"
     ]
   },
   "selection_payload_by_base_context": {
     "Eukaryotic cell": {
       "base_context": "Eukaryotic cell",
       "stage1": {
-        "processed_10": {
+        "processed_0": {
           "objects": [],
           "structure": "",
           "dominant": "",
           "simplicity": 5,
           "score": 0.37343567848205567
         },
-        "processed_11": {
+        "processed_1": {
           "objects": [],
           "structure": "",
           "dominant": "",
           "simplicity": 5,
           "score": 0.30855488076806065
         },
-        "processed_12": {
+        "processed_2": {
           "objects": [],
           "structure": "",
           "dominant": "",
           "simplicity": 5,
-          "score": 0.4668887835741043
-        },
-        "processed_13": {
-          "objects": [
-            "elliptical shape",
-            "long tube",
-            "spikes",
-            "curved tail",
-            "internal structure",
-            "layered structure",
-            "brown mass",
-            "white lines"
-          ],
-          "structure": "centered",
-          "dominant": "elliptical shape",
-          "simplicity": 4,
           "score": 0.3956157714128493
         },
-        "processed_14": {
+        "processed_3": {
           "objects": [],
           "structure": "",
           "dominant": "",
           "simplicity": 5,
           "score": 0.48785560250282284
+        },
+        "processed_4": {
+          "objects": [],
+          "structure": "",
+          "dominant": "",
+          "simplicity": 5,
+          "score": 0.46755307465791696
         }
       },
       "candidates": [
         {
-          "processed_id": "processed_12",
-          "unique_path": "ResearchImages\\UniqueImages\\eukaryotic_cell_a2f4d971\\59e8c90582ac092790f71b32f1ca8727bc3af025.webp",
-          "reason": "Clear eukaryotic cell with",
-          "main_object": "eukaryotic cell",
-          "simplicity": 5,
-          "score": 0.4668887835741043
-        },
-        {
-          "processed_id": "processed_14",
+          "processed_id": "processed_3",
           "unique_path": "ResearchImages\\UniqueImages\\eukaryotic_cell_a2f4d971\\8b5b1e5ecd14b16968cb80c4a72d85faf14020b2.webp",
-          "reason": "High clarity of eukaryotic",
+          "reason": "clearly focused",
           "main_object": "eukaryotic cell",
           "simplicity": 5,
           "score": 0.48785560250282284
         }
       ]
     },
+    "Glucose": {
+      "base_context": "Glucose",
+      "stage1": {
+        "processed_5": {
+          "objects": [],
+          "structure": "",
+          "dominant": "",
+          "simplicity": 5,
+          "score": 0.3575915217399597
+        },
+        "processed_6": {
+          "objects": [],
+          "structure": "",
+          "dominant": "",
+          "simplicity": 5,
+          "score": 0.37432419806718825
+        },
+        "processed_7": {
+          "objects": [],
+          "structure": "",
+          "dominant": "",
+          "simplicity": 5,
+          "score": 0.518320019096136
+        },
+        "processed_8": {
+          "objects": [],
+          "structure": "",
+          "dominant": "",
+          "simplicity": 5,
+          "score": 0.3433002780377865
+        },
+        "processed_9": {
+          "objects": [],
+          "structure": "",
+          "dominant": "",
+          "simplicity": 5,
+          "score": 0.2868629059195518
+        }
+      },
+      "candidates": [
+        {
+          "processed_id": "processed_7",
+          "unique_path": "ResearchImages\\UniqueImages\\glucose_5079a608\\c7c0403d928b1a9b5dda30ab29281f71da5437c4.webp",
+          "reason": "most detailed",
+          "main_object": "glucose",
+          "simplicity": 5,
+          "score": 0.518320019096136
+        }
+      ]
+    },
+    "Human heart": {
+      "base_context": "Human heart",
+      "stage1": {
+        "processed_10": {
+          "objects": [
+            "heart",
+            "blood vessels",
+            "arrows",
+            "blood flow",
+            "arteries",
+            "veins"
+          ],
+          "structure": "centered",
+          "dominant": "",
+          "simplicity": 5,
+          "score": 0.4826388800144195
+        }
+      },
+      "candidates": [
+        {
+          "processed_id": "processed_10",
+          "unique_path": "ResearchImages\\UniqueImages\\human_heart_72618701\\eb83a7546b3cd676ed19a99c625c9d094848531d.webp",
+          "reason": "contains heart and blood",
+          "main_object": "heart",
+          "simplicity": 5,
+          "score": 0.4826388800144195
+        }
+      ]
+    },
     "Pythagorean theorem": {
       "base_context": "Pythagorean theorem",
       "stage1": {
-        "processed_15": {
-          "objects": [
-            "triangle",
-            "right angle",
-            "gray fill",
-            "black outline"
-          ],
-          "structure": "right-angled",
-          "dominant": "triangle",
-          "simplicity": 3,
+        "processed_11": {
+          "objects": [],
+          "structure": "",
+          "dominant": "",
+          "simplicity": 5,
           "score": 0.5582330504059791
         },
-        "processed_16": {
+        "processed_12": {
           "objects": [
             "triangle",
-            "right angle",
-            "```json"
+            "rectangle",
+            "line"
           ],
-          "structure": "right triangle",
-          "dominant": "triangle",
-          "simplicity": 1,
+          "structure": "spread out",
+          "dominant": "",
+          "simplicity": 5,
           "score": 0.5826039582490921
         },
-        "processed_17": {
+        "processed_13": {
           "objects": [
             "box",
             "open",
-            "two panels",
-            "white rectangles",
-            "triangle"
+            "blue",
+            "white",
+            "rectangle",
+            "triangle",
+            "square"
           ],
-          "structure": "open",
-          "dominant": "box",
-          "simplicity": 3,
+          "structure": "spread out",
+          "dominant": "",
+          "simplicity": 5,
           "score": 0.472274596914649
         },
-        "processed_18": {
+        "processed_14": {
           "objects": [
             "triangle",
             "right angle",
-            "line"
+            "line",
+            "rectangle"
           ],
-          "structure": "horizontal base",
-          "dominant": "triangle",
-          "simplicity": 2,
+          "structure": "spread out",
+          "dominant": "",
+          "simplicity": 5,
           "score": 0.4766927622258662
         },
-        "processed_19": {
-          "objects": [],
-          "structure": "",
+        "processed_15": {
+          "objects": [
+            "triangle",
+            "line",
+            "point",
+            "grid",
+            "coordinate",
+            "rectangle",
+            "square"
+          ],
+          "structure": "spread out",
           "dominant": "",
           "simplicity": 5,
           "score": 0.37710920155048366
@@ -143,20 +215,12 @@
       },
       "candidates": [
         {
-          "processed_id": "processed_16",
+          "processed_id": "processed_12",
           "unique_path": "ResearchImages\\UniqueImages\\pythagorean_theorem_82cb0124\\219377b7cdb9e0d2ba4e5047cb5bf33c54eefb7e.webp",
-          "reason": "Simple single triangle with",
-          "main_object": "triangle",
-          "simplicity": 1,
+          "reason": "clear triangle with legs",
+          "main_object": "right triangle",
+          "simplicity": 5,
           "score": 0.5826039582490921
-        },
-        {
-          "processed_id": "processed_18",
-          "unique_path": "ResearchImages\\UniqueImages\\pythagorean_theorem_82cb0124\\68c255112152e03547cb6a14e72a0997949e3bd2.webp",
-          "reason": "Compact triangle with right",
-          "main_object": "triangle",
-          "simplicity": 2,
-          "score": 0.4766927622258662
         }
       ]
     }

@@ -1256,23 +1256,19 @@ def label_clusters_transformers(
 
 def build_stage1_visual_probe_prompt() -> str:
     # Strict schema; no semantic inference; small + consistent keys for stage2.
-    return (
-        "Describe ONLY what is visually present (shapes/layout), NOT meaning/identity.\n"
-        "No guessing.\n"
-        "Output JSON ONLY with EXACT keys:\n"
-        "{"
-        "\"objects\":[\"...\"],"
-        "\"structure\":\"...\","
-        "\"dominant\":\"...\","
-        "\"simplicity\":1"
-        "}\n"
-        "Rules:\n"
-        "- objects: 3-8 items, each 1-4 words, purely visual (e.g. 'round blob', 'thin line', 'cluster of dots')\n"
-        "- structure: 1-4 words about placement (e.g. 'centered', 'spread out', 'two panels')\n"
-        "- dominant: 1-4 words, most visually dominant thing\n"
-        "- simplicity: integer 1..5 (1 = very simple single-object, 5 = very busy/complex)\n"
-        "- no extra keys, no prose\n"
-    )
+    return ( 
+        "Make a full VISUAL characteristic of the image with WITH NO regard to semantic meaning\n"
+          "You have to describe all the shapes and objects spread out through it from an analytical standpoint" 
+          "Talk figures, clusters, membranes, blobs, ex." 
+          "Describe how the object(s) are spread out and what area they cover in the image"
+          "Do NOT infer meaning or identity.\n"
+          "Output JSON ONLY with:\n" "{" "\"objects\":[\"shape\", ...],"
+          "\"structure\":\"1-4 words\"," "\"dominant\"" "}\n"
+          "Rules:\n" 
+           "- objects: 3-8 items, each 1-4 words\n"
+           "- structure: how the objects are located (center, spread out, ..) (1-4 words)\n" 
+           "- description : a litteral full visual description of everything" "- no extra keys, no prose\n" 
+        )
 
 
 def _as_meta_score(v: Any) -> Optional[float]:
@@ -1562,32 +1558,23 @@ def build_stage2_pick_prompt(
 
     joined = "\n".join(lines)
 
-    return (
-        f"DESIRED IMAGE CONTENT: {bc}\n\n"
-        "Pick EXACTLY 2 best images to keep.\n"
-        "Primary goal: a SIMPLE, single dominant object (ideally centered).\n"
-        "Secondary goal: compact detail is OK if it is one object (e.g. 'cell with organelles').\n"
-        "Reject:\n"
-        "- many separate things spread out\n"
-        "- flowcharts/arrows/dense text\n\n"
-        "Each candidate has an external meta score (score=...). Higher score is better.\n"
-        "If 2 candidates are similarly good visually, prefer the higher score.\n\n"
-        "Candidates:\n"
-        f"{joined}\n\n"
-        "Return JSON ONLY with this exact schema:\n"
-        "{"
-        "\"candidates\":["
-        "{\"processed_id\":\"...\",\"reason\":\"...\",\"main_object\":\"...\",\"simplicity\":1},"
-        "{\"processed_id\":\"...\",\"reason\":\"...\",\"main_object\":\"...\",\"simplicity\":1}"
-        "]"
-        "}\n"
-        "Rules:\n"
-        "- exactly 2 candidates\n"
-        "- processed_id must match one of the listed ids\n"
+    return ( 
+        f"DESIRED IMAGE CONTENT: {bc}\n\n" 
+        "You must pick EXACTLY 1 best image to keep.\n" 
+        "Goal: a SIMPLE visual OBJECT - one full thing identified in the center of the screen.\n" 
+        "Seperated complex compact detail is wanted. Example : Eukaryotic cell > nucleus + organells" 
+        "Each candidate comes with an external score. When between two good candidates, pick based on score" 
+        "REJECT:\n" "- Images filled with many things spread out\n" 
+        "- flowcharts, clusters linked with arrouws, any dense text\n"
+        "Candidates:\n" f"{joined}\n\n" 
+        "Return JSON ONLY with this exact schema:\n" 
+        "{" "\"candidate\":[" 
+        "{\"processed_id\":\"...\",\"reason\":\"...\",\"main_object\":\"...\",\"simplicity\":1}" "]" "}\n" 
+        "Rules:\n" "- exactly 1 candidates\n" 
+        "- processed_id must match one of the listed ids\n" 
         "- reason and main_object must be 1-8 words (short)\n"
-        "- simplicity integer 1..5\n"
-        "- no extra keys\n"
-    )
+        "- simplicity integer 1..5\n" "- no extra keys\n" 
+        )
 
 
 def _parse_stage2_candidates(text_out: str) -> List[Dict[str, Any]]:
@@ -1595,10 +1582,11 @@ def _parse_stage2_candidates(text_out: str) -> List[Dict[str, Any]]:
     if not isinstance(obj, dict):
         return []
 
-    # tolerate old key too
-    cands = obj.get("candidates")
+    # Prefer the schema your prompt actually requests: "candidate": [...]
+    cands = obj.get("candidate")
     if not isinstance(cands, list):
-        cands = obj.get("candidate")
+        # tolerate old key if the model drifts
+        cands = obj.get("candidates")
     if not isinstance(cands, list):
         return []
 
@@ -1639,8 +1627,8 @@ def _parse_stage2_candidates(text_out: str) -> List[Dict[str, Any]]:
             "simplicity": simp_i,
         })
 
-        if len(out) >= 2:
-            break
+        # EXACTLY 1 candidate
+        break
 
     return out
 
@@ -1657,21 +1645,8 @@ def pick_two_processed_candidates_transformers(
     longest_side: int = 600,
 ) -> Dict[str, Any]:
     """
-    processed_items expected fields:
-      - processed_id: "processed_12"
-      - image_pil: PIL image (processed/whited-out)
-      - base_context: optional
-      - NEW optional: final_score (float 0..1)
-
-    Returns:
-      {
-        "base_context": "...",
-        "stage1": { processed_id: {...}, ... },
-        "candidates": [
-          {"processed_id":"...","unique_path":"...","reason":"...","main_object":"...","simplicity":1,"score":0.83},
-          {"processed_id":"...","unique_path":"...","reason":"...","main_object":"...","simplicity":1,"score":0.79}
-        ]
-      }
+    Stage2 returns/keeps EXACTLY 1 candidate (as your prompt/schema expects).
+    Prompts are untouched; we enforce 1 in parsing + fallback + packaging.
     """
     # Stage 1 (vision)
     stage1 = probe_processed_images_stage1(
@@ -1683,7 +1658,7 @@ def pick_two_processed_candidates_transformers(
         longest_side=longest_side,
     )
 
-    # Stage 2 (text-only decision)
+    # Stage 2 (text-only decision)  <-- PROMPT TEXT IS UNCHANGED (build_stage2_pick_prompt)
     SYSTEM_MSG = (
         "You are a strict JSON decision engine.\n"
         "Pick exactly 2 candidates.\n"
@@ -1734,12 +1709,12 @@ def pick_two_processed_candidates_transformers(
         print(f"[warn] stage2 selection failed: {e}")
         chosen = []
 
-    # Validate
+    # Validate + keep ONLY 1
     valid_ids = set(stage1.keys())
-    chosen = [c for c in chosen if c.get("processed_id") in valid_ids]
+    chosen = [c for c in chosen if c.get("processed_id") in valid_ids][:1]
 
-    # Fallback if model didn't return 2
-    if len(chosen) < 2:
+    # Fallback if model didn't return 1 valid candidate
+    if len(chosen) < 1:
         ranked = []
         for pid, info in stage1.items():
             simp = info.get("simplicity", 5)
@@ -1758,31 +1733,28 @@ def pick_two_processed_candidates_transformers(
             except Exception:
                 sc_f = -1.0
 
-            # lower simplicity is better, higher score is better, fewer objects is better
+            # lower simplicity better, higher score better, fewer objects better
             ranked.append((simp_i, -sc_f, nobj, pid))
 
         ranked.sort()
-        fallback_ids = [pid for _, _, _, pid in ranked[:2]]
+        fallback_pid = ranked[0][3] if ranked else None
 
         chosen = []
-        for pid in fallback_ids:
+        if fallback_pid:
             chosen.append({
-                "processed_id": pid,
+                "processed_id": fallback_pid,
                 "reason": "fallback rank",
-                "main_object": stage1.get(pid, {}).get("dominant", "") or "",
-                "simplicity": int(stage1.get(pid, {}).get("simplicity", 5)),
+                "main_object": stage1.get(fallback_pid, {}).get("dominant", "") or "",
+                "simplicity": int(stage1.get(fallback_pid, {}).get("simplicity", 5)),
             })
 
-    # Attach unique paths + scores (authoritative)
+    # Attach unique path + score (authoritative) and keep ONLY 1
     final_candidates: List[Dict[str, Any]] = []
-    used = set()
-    for c in chosen:
-        pid = c.get("processed_id")
-        if not pid or pid in used:
-            continue
-        used.add(pid)
-
+    if chosen:
+        c = chosen[0]
+        pid = c.get("processed_id", "")
         info = stage1.get(pid, {}) if isinstance(stage1.get(pid, {}), dict) else {}
+
         sc = info.get("score", None)
         sc_out = None
         try:
@@ -1799,13 +1771,11 @@ def pick_two_processed_candidates_transformers(
             "simplicity": int(c.get("simplicity", 5)),
             "score": sc_out,
         })
-        if len(final_candidates) >= 2:
-            break
 
     return {
         "base_context": (base_context or "").strip(),
         "stage1": stage1,
-        "candidates": final_candidates,
+        "candidates": final_candidates,  # list with exactly 1 dict (or empty if stage1 empty)
     }
 
 
