@@ -1,226 +1,115 @@
 {
   "selected_processed_ids": [
-    "processed_3",
-    "processed_7",
-    "processed_10",
-    "processed_12"
+    "processed_21",
+    "processed_23"
   ],
   "selected_ids_by_base_context": {
-    "Eukaryotic cell": [
-      "processed_3"
+    "Eukaryotic Cell": [
+      "processed_21"
     ],
-    "Glucose": [
-      "processed_7"
-    ],
-    "Human heart": [
-      "processed_10"
-    ],
-    "Pythagorean theorem": [
-      "processed_12"
+    "Human Heart": [
+      "processed_23"
     ]
   },
   "selection_payload_by_base_context": {
-    "Eukaryotic cell": {
-      "base_context": "Eukaryotic cell",
+    "Eukaryotic Cell": {
+      "base_context": "Eukaryotic Cell",
       "stage1": {
-        "processed_0": {
-          "objects": [],
-          "structure": "",
-          "dominant": "",
-          "simplicity": 5,
-          "score": 0.37343567848205567
-        },
-        "processed_1": {
-          "objects": [],
-          "structure": "",
-          "dominant": "",
-          "simplicity": 5,
-          "score": 0.30855488076806065
-        },
-        "processed_2": {
-          "objects": [],
-          "structure": "",
-          "dominant": "",
-          "simplicity": 5,
-          "score": 0.3956157714128493
-        },
-        "processed_3": {
-          "objects": [],
-          "structure": "",
-          "dominant": "",
-          "simplicity": 5,
-          "score": 0.48785560250282284
-        },
-        "processed_4": {
-          "objects": [],
-          "structure": "",
-          "dominant": "",
-          "simplicity": 5,
-          "score": 0.46755307465791696
-        }
-      },
-      "candidates": [
-        {
-          "processed_id": "processed_3",
-          "unique_path": "ResearchImages\\UniqueImages\\eukaryotic_cell_a2f4d971\\8b5b1e5ecd14b16968cb80c4a72d85faf14020b2.webp",
-          "reason": "clearly focused",
-          "main_object": "eukaryotic cell",
-          "simplicity": 5,
-          "score": 0.48785560250282284
-        }
-      ]
-    },
-    "Glucose": {
-      "base_context": "Glucose",
-      "stage1": {
-        "processed_5": {
-          "objects": [],
-          "structure": "",
-          "dominant": "",
-          "simplicity": 5,
-          "score": 0.3575915217399597
-        },
-        "processed_6": {
-          "objects": [],
-          "structure": "",
-          "dominant": "",
-          "simplicity": 5,
-          "score": 0.37432419806718825
-        },
-        "processed_7": {
-          "objects": [],
-          "structure": "",
-          "dominant": "",
-          "simplicity": 5,
-          "score": 0.518320019096136
-        },
-        "processed_8": {
-          "objects": [],
-          "structure": "",
-          "dominant": "",
-          "simplicity": 5,
-          "score": 0.3433002780377865
-        },
-        "processed_9": {
-          "objects": [],
-          "structure": "",
-          "dominant": "",
-          "simplicity": 5,
-          "score": 0.2868629059195518
-        }
-      },
-      "candidates": [
-        {
-          "processed_id": "processed_7",
-          "unique_path": "ResearchImages\\UniqueImages\\glucose_5079a608\\c7c0403d928b1a9b5dda30ab29281f71da5437c4.webp",
-          "reason": "most detailed",
-          "main_object": "glucose",
-          "simplicity": 5,
-          "score": 0.518320019096136
-        }
-      ]
-    },
-    "Human heart": {
-      "base_context": "Human heart",
-      "stage1": {
-        "processed_10": {
+        "processed_18": {
           "objects": [
-            "heart",
-            "blood vessels",
-            "arrows",
-            "blood flow",
-            "arteries",
-            "veins"
+            "bacteria",
+            "cell",
+            "spike",
+            "flagellum",
+            "capsule",
+            "nucleoid",
+            "membrane"
+          ],
+          "structure": "spreading",
+          "dominant": "",
+          "simplicity": 5,
+          "score": 0.19746389031410216
+        },
+        "processed_19": {
+          "objects": [
+            "icon",
+            "logo",
+            "stack",
+            "document",
+            "paper",
+            "blue",
+            "white"
+          ],
+          "structure": "left",
+          "dominant": "",
+          "simplicity": 5,
+          "score": 0.3083546805381775
+        },
+        "processed_20": {
+          "objects": [],
+          "structure": "",
+          "dominant": "",
+          "simplicity": 5,
+          "score": 0.3459037655591965
+        },
+        "processed_21": {
+          "objects": [
+            "cell",
+            "nucleus",
+            "mitochondria",
+            "ribosome",
+            "endoplasmic reticulum",
+            "lysosome",
+            "golgi",
+            "vesicle"
           ],
           "structure": "centered",
           "dominant": "",
           "simplicity": 5,
-          "score": 0.4826388800144195
+          "score": 0.24628153294324873
+        },
+        "processed_22": {
+          "objects": [
+            "stack",
+            "book",
+            "```json"
+          ],
+          "structure": "stacked",
+          "dominant": "",
+          "simplicity": 5,
+          "score": 0.30091799542307857
         }
       },
       "candidates": [
         {
-          "processed_id": "processed_10",
-          "unique_path": "ResearchImages\\UniqueImages\\human_heart_72618701\\eb83a7546b3cd676ed19a99c625c9d094848531d.webp",
-          "reason": "contains heart and blood",
-          "main_object": "heart",
+          "processed_id": "processed_21",
+          "unique_path": "ResearchImages\\UniqueImages\\eukaryotic_cell_0cd0d668\\Figure_04_03_01a.png",
+          "reason": "centered, clear structure",
+          "main_object": "eukaryotic cell",
           "simplicity": 5,
-          "score": 0.4826388800144195
+          "score": 0.24628153294324873
         }
       ]
     },
-    "Pythagorean theorem": {
-      "base_context": "Pythagorean theorem",
+    "Human Heart": {
+      "base_context": "Human Heart",
       "stage1": {
-        "processed_11": {
+        "processed_23": {
           "objects": [],
           "structure": "",
           "dominant": "",
           "simplicity": 5,
-          "score": 0.5582330504059791
-        },
-        "processed_12": {
-          "objects": [
-            "triangle",
-            "rectangle",
-            "line"
-          ],
-          "structure": "spread out",
-          "dominant": "",
-          "simplicity": 5,
-          "score": 0.5826039582490921
-        },
-        "processed_13": {
-          "objects": [
-            "box",
-            "open",
-            "blue",
-            "white",
-            "rectangle",
-            "triangle",
-            "square"
-          ],
-          "structure": "spread out",
-          "dominant": "",
-          "simplicity": 5,
-          "score": 0.472274596914649
-        },
-        "processed_14": {
-          "objects": [
-            "triangle",
-            "right angle",
-            "line",
-            "rectangle"
-          ],
-          "structure": "spread out",
-          "dominant": "",
-          "simplicity": 5,
-          "score": 0.4766927622258662
-        },
-        "processed_15": {
-          "objects": [
-            "triangle",
-            "line",
-            "point",
-            "grid",
-            "coordinate",
-            "rectangle",
-            "square"
-          ],
-          "structure": "spread out",
-          "dominant": "",
-          "simplicity": 5,
-          "score": 0.37710920155048366
+          "score": 0.32759748335927724
         }
       },
       "candidates": [
         {
-          "processed_id": "processed_12",
-          "unique_path": "ResearchImages\\UniqueImages\\pythagorean_theorem_82cb0124\\219377b7cdb9e0d2ba4e5047cb5bf33c54eefb7e.webp",
-          "reason": "clear triangle with legs",
-          "main_object": "right triangle",
+          "processed_id": "processed_23",
+          "unique_path": "ResearchImages\\UniqueImages\\human_heart_731eb6b0\\fc789bd8b54c90f5fdb851e8b1d0b9dc0443e01d.webp",
+          "reason": "simple human heart",
+          "main_object": "human heart",
           "simplicity": 5,
-          "score": 0.5826039582490921
+          "score": 0.32759748335927724
         }
       ]
     }

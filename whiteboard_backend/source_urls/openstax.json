@@ -16,6 +16,34 @@
     "Math": [
       "https://openstax.org/details/books/algebra-1",
       "https://openstax.org/details/books/contemporary-mathematics"
+    ],
+    "WW2 History of Germany": [
+      "https://openstax.org/details/books/us-history"
+    ],
+    "Cell Biology - Eukaryotic Cell": [
+      "https://openstax.org/details/books/concepts-biology",
+      "https://openstax.org/subjects/science"
+    ],
+    "Classroom interaction": [
+      "https://openstax.org/accounts/i/signup/educator"
+    ],
+    "Cell Biology - Cell Types": [
+      "https://openstax.org/subjects/science",
+      "https://openstax.org/subjects/math"
+    ],
+    "Cell Biology - Organelles & Membranes": [
+      "https://openstax.org/details/books/concepts-biology",
+      "https://openstax.org/details/books/biology-2e"
+    ],
+    "Cell Biology - Membrane Function": [
+      "https://openstax.org/subjects/science",
+      "https://openstax.org/details/books/biology-2e"
+    ],
+    "Cell biology": [
+      "https://openstax.org/details/books/biology-2e"
+    ],
+    "Anatomy": [
+      "https://openstax.org/details/books/anatomy-and-physiology-2e"
     ]
   },
   "Roots": [
@@ -38,6 +66,103 @@
           "count": 1,
           "reason": "no_images",
           "last_seen": "2026-02-20T23:03:11.151072Z"
+        },
+        "circucircumcision_16145256": {
+          "query": "Circucircumcision",
+          "count": 1,
+          "reason": "no_images",
+          "last_seen": "2026-02-24T13:14:35.509062Z"
+        },
+        "detailed_eukaryotic_cell_diagram_large_l_8bff5376": {
+          "query": "Detailed eukaryotic cell diagram (large, labeled): plasma membrane (phospholipid bilayer + embedded proteins), nucleus (double envelope, nuclear pores, nucleolus), rough ER (with bound ribosomes), smooth ER, Golgi (cis, medial, trans), lysosome, endosome, mitochondrion (double membranes, cristae, matrix, mtDNA), peroxisome, free and bound ribosomes, cytoskeleton (actin filaments, microtubules, intermediate filaments).",
+          "count": 1,
+          "reason": "no_images",
+          "last_seen": "2026-02-26T20:56:24.224200Z"
+        },
+        "balloon_with_tiny_selective_holes_visual_7f867024": {
+          "query": "Balloon with tiny selective holes (visual metaphor for selective permeability)",
+          "count": 1,
+          "reason": "no_images",
+          "last_seen": "2026-02-26T20:57:38.172217Z"
+        }
+      }
+    },
+    {
+      "root": "https://openstax.org/details/books/concepts-biology",
+      "NoImagePromptBlocklist": {
+        "circucircumcision_16145256": {
+          "query": "Circucircumcision",
+          "count": 1,
+          "reason": "no_images",
+          "last_seen": "2026-02-24T13:15:21.322134Z"
+        },
+        "detailed_labeled_eukaryotic_cell_diagram_18029dc9": {
+          "query": "Detailed labeled eukaryotic cell diagram",
+          "count": 1,
+          "reason": "no_images",
+          "last_seen": "2026-02-26T20:51:21.803134Z"
+        },
+        "detailed_eukaryotic_cell_diagram_large_l_8bff5376": {
+          "query": "Detailed eukaryotic cell diagram (large, labeled): plasma membrane (phospholipid bilayer + embedded proteins), nucleus (double envelope, nuclear pores, nucleolus), rough ER (with bound ribosomes), smooth ER, Golgi (cis, medial, trans), lysosome, endosome, mitochondrion (double membranes, cristae, matrix, mtDNA), peroxisome, free and bound ribosomes, cytoskeleton (actin filaments, microtubules, intermediate filaments).",
+          "count": 1,
+          "reason": "no_images",
+          "last_seen": "2026-02-26T20:56:03.053578Z"
+        }
+      }
+    },
+    {
+      "root": "https://openstax.org/details/books/us-history",
+      "NoImagePromptBlocklist": {
+        "adolf_hitler_63c4153a": {
+          "query": "Adolf Hitler",
+          "count": 1,
+          "reason": "no_images",
+          "last_seen": "2026-02-26T20:46:21.843526Z"
+        }
+      }
+    },
+    {
+      "root": "https://openstax.org/subjects/science",
+      "NoImagePromptBlocklist": {
+        "detailed_labeled_eukaryotic_cell_diagram_18029dc9": {
+          "query": "Detailed labeled eukaryotic cell diagram",
+          "count": 1,
+          "reason": "no_images",
+          "last_seen": "2026-02-26T20:51:57.639531Z"
+        },
+        "side_by_side_schematic_left_eukaryotic_c_7e4df6ab": {
+          "query": "Side-by-side schematic: left = eukaryotic cell labeled with true nucleus, membrane-bound organelles (ER, Golgi, mitochondria, lysosome, peroxisome), cytoskeleton; right = prokaryotic cell (no nucleus, few internal membranes). Include a small scale bar showing 'larger' vs 'smaller'.",
+          "count": 1,
+          "reason": "no_images",
+          "last_seen": "2026-02-26T20:53:49.577422Z"
+        },
+        "balloon_with_tiny_selective_holes_visual_7f867024": {
+          "query": "Balloon with tiny selective holes (visual metaphor for selective permeability)",
+          "count": 1,
+          "reason": "no_images",
+          "last_seen": "2026-02-26T20:57:12.487860Z"
+        }
+      }
+    },
+    {
+      "root": "https://openstax.org/accounts/i/signup/educator",
+      "NoImagePromptBlocklist": {
+        "students_in_a_classroom_raising_hands_si_a791ac8b": {
+          "query": "students in a classroom raising hands (simple sketch)",
+          "count": 1,
+          "reason": "no_images",
+          "last_seen": "2026-02-26T20:52:54.636552Z"
+        }
+      }
+    },
+    {
+      "root": "https://openstax.org/subjects/math",
+      "NoImagePromptBlocklist": {
+        "side_by_side_schematic_left_eukaryotic_c_7e4df6ab": {
+          "query": "Side-by-side schematic: left = eukaryotic cell labeled with true nucleus, membrane-bound organelles (ER, Golgi, mitochondria, lysosome, peroxisome), cytoskeleton; right = prokaryotic cell (no nucleus, few internal membranes). Include a small scale bar showing 'larger' vs 'smaller'.",
+          "count": 1,
+          "reason": "no_images",
+          "last_seen": "2026-02-26T20:54:27.936550Z"
         }
       }
     }

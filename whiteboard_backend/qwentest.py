@@ -516,8 +516,7 @@ def refine_candidate_labels_with_qwen(
     except Exception as e:
         print(f"[warn] refine_candidate_labels_with_qwen failed: {e}")
         return raw_candidates[:SUGGESTION_LIMIT]
-
-
+    
 
 # ============================
 # Prompt + parse (ONE IMAGE)
@@ -543,13 +542,13 @@ def build_prompt(
         f"- RIGHT: A(n) {base_context}, LEFT crop from there\n\n"
         f"Visually charecterize the features of LEFT's object and its placement in the {base_context} based on foreground.\n"
         "Look at RIGHT and LEFTS FOREGROUND and link the crop to WIDER surroundings (their shapes, colours) for RELATIVE context \n"
-        "Based on LEFT's full semantic profile label it, matching it's characteristics with a candidate  label:\n\n"
-        f"{sug_text}\n\n"
+        "Based on LEFT's full semantic profile label it - what it is\n\n"
         "Return ONLY JSON with REQUIRED keys:\n"
         "{"
         "\"label\":string|null,"
         "\"full_visual_LEFT\": string,"
         "\"LEFT_SURROUNDINGS\": string,"
+        "\"geometry_keywords\": strings"
         "}\n"
     )
 
@@ -612,6 +611,212 @@ def _store_cluster_result(results: Dict[str, Any], cluster_key: str, payload: Di
     if cluster_key not in clusters:
         order.append(cluster_key)
     clusters[cluster_key] = payload
+
+def build_cluster_visual_prompt(
+    colour_hint: Optional[str],
+    base_context: str,
+) -> str:
+    colour_txt = colour_hint if colour_hint else "unknown"
+    bc = (base_context or "").strip() or "unknown"
+
+    return (
+        "Input : Two images merged horizontally\n"
+        f"- LEFT: Cropped box with with coloured {colour_txt} main object and grayscaled surroundings\n"
+        f"- RIGHT: A(n) {base_context}, LEFT crop from there\n\n"
+        f"Visually charecterize the features of LEFT's object and its placement in the {base_context} based on foreground.\n"
+        "Look at RIGHT and LEFTS FOREGROUND and link the crop to WIDER surroundings (their shapes, colours) for RELATIVE context \n"
+        "Based on LEFT's full semantic profile label it - what it is\n\n"
+        "Return ONLY JSON with REQUIRED keys:\n"
+        "{"
+        "\"label\":string|null,"
+        "\"full_visual_LEFT\": string,"
+        "\"LEFT_SURROUNDINGS\": string,"
+        "\"geometry_keywords\": strings"
+        "}\n"
+    )
+
+
+def _parse_cluster_visual(text_out: str) -> Dict[str, Any]:
+    obj = extract_json_object(text_out or "")
+    if not isinstance(obj, dict):
+        return {
+            "full_visual_LEFT": "",
+            "LEFT_SURROUNDINGS": "",
+            "geometry_keywords": [],
+        }
+
+    fv = obj.get("full_visual_LEFT")
+    ls = obj.get("LEFT_SURROUNDINGS")
+    gk = obj.get("geometry_keywords")
+
+    out = {
+        "full_visual_LEFT": fv if isinstance(fv, str) else "",
+        "LEFT_SURROUNDINGS": ls if isinstance(ls, str) else "",
+        "geometry_keywords": [],
+    }
+
+    if isinstance(gk, list):
+        kk = []
+        for it in gk:
+            if isinstance(it, str):
+                s = _clean_short_label(it)
+                if s:
+                    kk.append(s)
+        out["geometry_keywords"] = kk[:12]
+
+    return out
+
+
+def build_postfacto_label_match_prompt(
+    base_context: str,
+    refined_labels: List[str],
+    cluster_visual_map: Dict[str, Dict[str, Any]],
+) -> str:
+    bc = (base_context or "").strip() or "unknown"
+
+    # compact the payload
+    labels = [str(x).strip() for x in (refined_labels or []) if str(x).strip()]
+    labels = labels[:120]
+
+    clusters_compact = {}
+    for k, v in (cluster_visual_map or {}).items():
+        if not isinstance(v, dict):
+            continue
+        clusters_compact[str(k)] = {
+            "geometry_keywords": v.get("geometry_keywords", []) if isinstance(v.get("geometry_keywords"), list) else [],
+            "full_visual_LEFT": str(v.get("full_visual_LEFT", "") or "")[:600],
+            "LEFT_SURROUNDINGS": str(v.get("LEFT_SURROUNDINGS", "") or "")[:600],
+        }
+
+    return (
+        f"BASE CONTEXT: {bc}\n\n"
+        "You are given:\n"
+        "1) A list of refined component labels (things that buuld up something - cell, face, ex).\n"
+        "2) A map unlabeled objects, described ONLY by visual characteristics.\n\n"
+        "Your job:\n"
+        "- For EACH object, choose the single BEST label from the refined label list.\n"
+        "- Match by how that label would LOOK visually (its known characteristics).\n"
+        "- If none fit, output null.\n\n"
+        "Output JSON ONLY with schema:\n"
+        "{"
+        "\"matches\":["
+        "{\"object_key\":\"...\",\"label\":string|null,\"confidence\":0.0,\"reason\":\"...\"}"
+        "]"
+        "}\n\n"
+        "Rules:\n"
+        "- label must be exactly one of refined_labels or null\n"
+        "- confidence is 0..1\n"
+        "- reason is 2-10 words\n"
+        "REFINED LABELS:\n"
+        f"{json.dumps(labels, ensure_ascii=False)}\n\n"
+        "OBJECT VISUAL MAP, INDEXED:\n"
+        f"{json.dumps(clusters_compact, ensure_ascii=False)}\n"
+    )
+
+
+def _parse_postfacto_matches(text_out: str, refined_labels: List[str]) -> Dict[str, Dict[str, Any]]:
+    obj = extract_json_object(text_out or "")
+    if not isinstance(obj, dict):
+        return {}
+
+    matches = obj.get("matches")
+    if not isinstance(matches, list):
+        return {}
+
+    allowed = {str(x) for x in (refined_labels or []) if isinstance(x, str) and x.strip()}
+    out: Dict[str, Dict[str, Any]] = {}
+
+    for it in matches:
+        if not isinstance(it, dict):
+            continue
+        ck = it.get("object_key")
+        if not isinstance(ck, str) or not ck.strip():
+            continue
+        ck = ck.strip()
+
+        lab = it.get("label")
+        if lab is not None and (not isinstance(lab, str) or lab not in allowed):
+            lab = None
+
+        conf = it.get("confidence", 0.0)
+        try:
+            conf_f = float(conf)
+        except Exception:
+            conf_f = 0.0
+        conf_f = max(0.0, min(1.0, conf_f))
+
+        reason = it.get("reason")
+        reason_s = str(reason or "").strip()
+
+        out[ck] = {
+            "label": lab,
+            "confidence": conf_f,
+            "reason": reason_s,
+        }
+
+    return out
+
+
+def postfacto_match_labels_with_qwen(
+    model,
+    processor,
+    device: torch.device,
+    *,
+    base_context: str,
+    refined_labels: List[str],
+    cluster_visual_map: Dict[str, Dict[str, Any]],
+) -> Dict[str, Dict[str, Any]]:
+    if not refined_labels or not cluster_visual_map:
+        return {}
+
+    SYSTEM_MSG = (
+        "You are a strict visual to semantic matcher.\n"
+        "You output only JSON.\n"
+    )
+
+    prompt_text = build_postfacto_label_match_prompt(base_context, refined_labels, cluster_visual_map)
+
+    conv = [
+        {"role": "system", "content": [{"type": "text", "text": SYSTEM_MSG}]},
+        {"role": "user", "content": [{"type": "text", "text": prompt_text}]},
+    ]
+    prompt_str = processor.apply_chat_template(conv, tokenize=False, add_generation_prompt=True)
+
+    gen_kwargs = dict(
+        max_new_tokens=500,
+        do_sample=False,
+        num_beams=1,
+        use_cache=True,
+    )
+
+    try:
+        inputs = processor(
+            text=[prompt_str],
+            return_tensors="pt",
+            padding=True,
+            truncation=True,
+        )
+        for k, v in list(inputs.items()):
+            if torch.is_tensor(v):
+                inputs[k] = v.to(device=device, non_blocking=True)
+
+        with torch.inference_mode():
+            out_ids = model.generate(**inputs, **gen_kwargs)
+
+        if "input_ids" in inputs and torch.is_tensor(inputs["input_ids"]):
+            prompt_len = int(inputs["input_ids"].shape[1])
+            gen_only_ids = out_ids[:, prompt_len:]
+        else:
+            gen_only_ids = out_ids
+
+        text_out = processor.batch_decode(gen_only_ids, skip_special_tokens=True)[0]
+        return _parse_postfacto_matches(text_out, refined_labels)
+
+    except Exception as e:
+        print(f"[warn] postfacto_match_labels_with_qwen failed: {e}")
+        return {}
+
+
 
 
 # ============================
@@ -1003,38 +1208,32 @@ def label_clusters_transformers(
 
     results_by_idx: Dict[int, Dict[str, Any]] = {}
 
-    
-
     for idx in sorted(clusters_state.keys()):
 
-        if save_outputs and SKIP_EXISTING_LABELS:
-            folder = out_dir / f"processed_{idx}"
-            labels_path = folder / "labels.json"
-            if labels_path.exists():
-                try:
-                    results_by_idx[idx] = json.loads(labels_path.read_text(encoding="utf-8"))
-                    print(f"[skip] idx={idx}: existing labels.json loaded")
-                    continue
-                except Exception:
-                    pass
+        folder = out_dir / f"processed_{idx}"
+        folder.mkdir(parents=True, exist_ok=True)
+        labels_path = folder / "labels.json"
+
+        if save_outputs and SKIP_EXISTING_LABELS and labels_path.exists():
+            try:
+                results_by_idx[idx] = json.loads(labels_path.read_text(encoding="utf-8"))
+                print(f"[skip] idx={idx}: existing labels.json loaded")
+                continue
+            except Exception:
+                pass
 
         pack = clusters_state[idx]
         t0 = time.time()
 
         base_context = str(pack.get("base_context", "") or "")
+
         suggestions_all = list(pack.get("candidate_labels_raw", []) or [])
+        refined_upstream = list(pack.get("candidate_labels_refined", []) or [])
 
-        refined = refine_candidate_labels_with_qwen(
-            model=model,
-            processor=processor,
-            device=device,
-            base_context=base_context,
-            raw_candidates=suggestions_all,
-        ) if suggestions_all else []
+        # NOTE: refined_upstream now used ONLY in post-facto stage2 matching
+        refined_labels = refined_upstream or suggestions_all
+        refined_labels = [str(x).strip() for x in refined_labels if str(x).strip()]
 
-        suggestions = (refined or suggestions_all)[: int(SUGGESTION_LIMIT)]
-
-        # full_img_rgb is required (your pipeline provides it)
         full_img_rgb = _as_rgb_uint8(pack.get("full_img_rgb"))
         if full_img_rgb is None:
             print(f"[skip] idx={idx}: missing full_img_rgb")
@@ -1046,7 +1245,7 @@ def label_clusters_transformers(
         results: Dict[str, Any] = {
             "image_index": int(idx),
             "candidate_labels_raw": suggestions_all[: int(SUGGESTION_LIMIT)],
-            "candidate_labels_refined": suggestions,
+            "candidate_labels_refined": refined_labels[: int(SUGGESTION_LIMIT)],
             "base_context": base_context,
             "model_id": str(getattr(model, "name_or_path", MODEL_ID)),
             "proc_longest_edge": int(PROC_LONGEST_EDGE),
@@ -1054,6 +1253,7 @@ def label_clusters_transformers(
             "batch_size": int(BATCH_SIZE),
             "clusters": {},
             "cluster_order": [],
+            "postfacto_matches": {},
         }
         results_by_idx[idx] = results
 
@@ -1062,9 +1262,7 @@ def label_clusters_transformers(
             print(f"[skip] idx={idx}: pack has no clusters list")
             continue
 
-        # Get masks from pack (robust), else fallback to disk renders
         mask_map = _extract_mask_map(pack)
-
         renders_dir = CLUSTER_RENDER_DIR / f"processed_{idx}"
 
         def _load_mask_from_disk(mask_name: str) -> Optional[np.ndarray]:
@@ -1082,7 +1280,6 @@ def label_clusters_transformers(
                 results["cluster_order"].append(cluster_key)
             results["clusters"][cluster_key] = payload
 
-        # Build tasks
         tasks: List[Dict[str, Any]] = []
         for ci, entry in enumerate(entries, start=1):
             bbox_xyxy = entry.get("bbox_xyxy")
@@ -1094,10 +1291,8 @@ def label_clusters_transformers(
                 continue
 
             mask_name = mask_name.strip()
-
             mask_rgb = mask_map.get(mask_name)
             if mask_rgb is None:
-                # fallback to disk if available
                 mask_rgb = _load_mask_from_disk(mask_name)
 
             if mask_rgb is None:
@@ -1118,7 +1313,6 @@ def label_clusters_transformers(
                 "colour_hint": colour_hint,
             })
 
-        # Batch inference
         bs = max(1, int(BATCH_SIZE))
         for start in range(0, len(tasks), bs):
             chunk = tasks[start:start + bs]
@@ -1155,13 +1349,14 @@ def label_clusters_transformers(
 
                 composite = _make_composite(left_sq, right_sq)
 
-                prompt_text = build_prompt(colour_hint, suggestions, base_context)
+                prompt_text = build_cluster_visual_prompt(colour_hint, base_context)
 
                 SYSTEM_MSG = (
-                    "You are a visual object labeling engine.\n"
-                    "Use ONLY the provided candidate labels.\n"
-                    "Return ONLY JSON.\n"
+                    "You are a strict visual transcription engine.\n"
+                    "No guessing identity.\n"
+                    "Return JSON only.\n"
                 )
+
                 conv = [
                     {"role": "system", "content": [{"type": "text", "text": SYSTEM_MSG}]},
                     {"role": "user", "content": [{"type": "image"}, {"type": "text", "text": prompt_text}]},
@@ -1224,8 +1419,7 @@ def label_clusters_transformers(
                 text_out = texts_out[j]
                 meta = meta_batch[j]
 
-                json_objects = extract_json_objects(text_out)
-                parsed = json_objects[0] if json_objects else None
+                parsed_visual = _parse_cluster_visual(text_out)
 
                 _store(meta["cluster_key"], {
                     "entry": meta["entry"],
@@ -1234,21 +1428,39 @@ def label_clusters_transformers(
                     "bbox_right_panel_xyxy": meta["bbox_right_panel_xyxy"],
                     "timing_s": float(f"{dt:.4f}"),
                     "model_raw": text_out,
-                    "json_objects": json_objects,
-                    "parsed": parsed,
+                    "visual": parsed_visual,
+                    "matched_label": None,
+                    "match_confidence": None,
+                    "match_reason": "",
                 })
 
-        if save_outputs and SKIP_EXISTING_LABELS:
-            folder = out_dir / f"processed_{idx}"
-            labels_path = folder / "labels.json"
-            if labels_path.exists():
-                try:
-                    results_by_idx[idx] = json.loads(labels_path.read_text(encoding="utf-8"))
-                    print(f"[skip] idx={idx}: existing labels.json loaded")
-                    continue
-                except Exception:
-                    pass
+        # ---- Stage 2: post-facto label matching across all clusters (text-only)
+        cluster_visual_map: Dict[str, Dict[str, Any]] = {}
+        for ck in results.get("cluster_order", []):
+            rec = results["clusters"].get(ck, {})
+            vis = rec.get("visual")
+            if isinstance(vis, dict):
+                cluster_visual_map[ck] = vis
 
+        matches = postfacto_match_labels_with_qwen(
+            model=model,
+            processor=processor,
+            device=device,
+            base_context=base_context,
+            refined_labels=refined_labels,
+            cluster_visual_map=cluster_visual_map,
+        )
+
+        results["postfacto_matches"] = matches
+
+        for ck, m in matches.items():
+            if ck in results["clusters"] and isinstance(m, dict):
+                results["clusters"][ck]["matched_label"] = m.get("label")
+                results["clusters"][ck]["match_confidence"] = m.get("confidence")
+                results["clusters"][ck]["match_reason"] = m.get("reason", "")
+
+        if save_outputs:
+            labels_path.write_text(json.dumps(results, ensure_ascii=False, indent=2), encoding="utf-8")
 
         print(f"[ok] idx={idx}: clusters={len(tasks)} dt={time.time()-t0:.2f}s")
 
@@ -1777,6 +1989,244 @@ def pick_two_processed_candidates_transformers(
         "stage1": stage1,
         "candidates": final_candidates,  # list with exactly 1 dict (or empty if stage1 empty)
     }
+
+
+import json
+import re
+from typing import Any, Dict, List, Optional
+
+import torch
+
+
+def _extract_first_json_object(text: str) -> Optional[Dict[str, Any]]:
+    """
+    Pull the first {...} JSON object out of model text, tolerant of pre/post junk.
+    """
+    if not isinstance(text, str):
+        return None
+
+    # fast path
+    text = text.strip()
+    if text.startswith("{") and text.endswith("}"):
+        try:
+            return json.loads(text)
+        except Exception:
+            pass
+
+    # find first balanced {...}
+    start = text.find("{")
+    if start < 0:
+        return None
+
+    depth = 0
+    for i in range(start, len(text)):
+        c = text[i]
+        if c == "{":
+            depth += 1
+        elif c == "}":
+            depth -= 1
+            if depth == 0:
+                chunk = text[start : i + 1]
+                try:
+                    return json.loads(chunk)
+                except Exception:
+                    return None
+    return None
+
+def plan_whiteboard_actions_transformers(
+    *,
+    model,
+    processor,
+    device,
+    event: Dict[str, Any],
+    whiteboard_state: Dict[str, Any],
+    base_actions: List[str],
+    diagram_actions: List[str],
+    temperature: float = 0.2,
+    max_new_tokens: int = 700,
+) -> Dict[str, Any]:
+    """
+    Qwen simple call:
+      - event: image or silence packet (includes fine speech text + bbox + objects for diagrams)
+      - whiteboard_state: current objects and bboxes on the board
+      - base_actions: list of allowed base actions
+      - diagram_actions: extra actions allowed only if diagram=1 (operate on objects_that_comprise_image)
+
+    Returns dict:
+      {
+        "actions": [ ... ],   # list of dicts OR strings
+        "raw_text": "...",
+        "notes": "...",
+      }
+    """
+
+    # Build instruction prompt (NO loops/state management here)
+    kind = str(event.get("kind", "") or "")
+    is_diagram = int(event.get("diagram", 0) or 0) == 1
+
+    # NEW: text tag (0/1). When 1, this "image event" represents board text.
+    text_tag = int(event.get("text", 0) or 0)
+    write_text = str(event.get("write_text", "") or "")
+
+    # Strong constraints: produce JSON only, avoid code fences.
+    system_rules = (
+        "You are planning actions with images to build a synced animation under some narration.\n"
+        "You have to fill as much different actions for a rich result, using your base actions.\n"
+        "Images will come sometimes come with a DIAGRAM tag.\n"
+        "For these use the special diagram actions with each of their objects, pushing for text.\n\n"
+
+        "You are provided with a white state with all present objects.\n"
+        "Draw in empty spaces not already taken up by an object and manage object layout based on their relations.\n"
+        "If there's no space either shift the board to make space (center shifts, you can draw at further coords)"
+        "or delete an irrelevant object.\n"
+        "Try and find an empty space first, if you erase plan your actions - > first erase then draw\n"
+
+        "After you finish with an image dont erase it by default if it wasnt very \"temporary\""
+        "During SILENCE: prefer erasing many objects and/or shifting the board to reset space.\n"
+
+        "Try to keep something happening most of the time: output many actions when appropriate.\n"
+
+        # --- ONLY ADDITION: TEXT TAG RULES ---
+        "TEXT TAG RULES:\n"
+        "- If CURRENT EVENT includes text_tag=1, this is NOT an image draw request.\n"
+        "- For text_tag=1 you should primarily output a 'write' action to place the provided write_text.\n"
+        "- Avoid complex layout/multi-step work for text_tag=1; only erase/shift if needed to make space.\n"
+        "- Assume one letter width = 15 px (times scale). If you must clear space, erase first, then write.\n"
+        "- Do NOT output diagram-only actions for text_tag=1.\n\n"
+        # ------------------------------------
+
+        "You MUST output ONLY a single JSON object, no markdown, no code fences.\n"
+        "Do not invent new action types.\n"
+        "All actions MUST be from the allowed action sets.\n"
+        "Do not invent new action types.\n"
+        "Whiteboard default scale is 4000 x 2000 px"
+        "Coordinates are in whiteboard coords - center 0, 0.\n"
+    )
+
+    allowed = {
+        "base_actions": base_actions,
+        "diagram_actions": diagram_actions if is_diagram else [],
+    }
+
+    # Event payload
+    event_desc = {
+        "kind": kind,
+        "duration_sec": float(event.get("duration_sec", 0.0) or 0.0),
+        "chapter_index": int(event.get("chapter_index", 0) or 0),
+    }
+
+    if kind == "image":
+        event_desc.update(
+            {
+                "image_name": event.get("image_name"),
+                "image_text": event.get("image_text", ""),
+                "bbox_px": event.get("bbox_px", {}),
+                "diagram": 1 if is_diagram else 0,
+                "objects_that_comprise_image": event.get("objects_that_comprise_image", []) if is_diagram else [],
+                # NEW: propagate text tag & the text to write (if any)
+                "text_tag": int(text_tag),
+                "write_text": write_text if int(text_tag) == 1 else "",
+            }
+        )
+    else:
+        event_desc.update(
+            {
+                "context_before": event.get("context_before", ""),
+                "context_after": event.get("context_after", ""),
+            }
+        )
+
+    # Required output schema
+    schema = {
+        "actions": [
+            # base:
+            # {"type":"draw","target":"<image name>","x":123,"y":456}
+            # {"type":"erase","target":"<image name or text object name>"}
+            # {"type":"shift","dx":-200,"dy":0}
+            # {"type":"link","a":"<image name>","b":"<image name>"}
+            # {"type":"write","text":"...","x":100,"y":200,"scale":1.0}
+            # {"type":"move","target":"<image name>","x":400,"y":200}
+            #
+            # diagram-only (do not affect board geometry, still output them):
+            # {"type":"highlight","image":"<image name>","object":"<object name>","time":2.0}
+            # {"type":"zoom","image":"<image name>","object":"<object name>","time":3.0}
+            # {"type":"refine_detail","image":"<image name>","object":"<object name>"}
+        ],
+        "notes": "short optional notes",
+    }
+
+    prompt = (
+        system_rules
+        + "\n\nALLOWED ACTIONS:\n"
+        + json.dumps(allowed, ensure_ascii=False, indent=2)
+        + "\n\nCURRENT WHITEBOARD STATE:\n"
+        + json.dumps(whiteboard_state, ensure_ascii=False, indent=2)
+        + "\n\nCURRENT EVENT:\n"
+        + json.dumps(event_desc, ensure_ascii=False, indent=2)
+        + "\n\nOUTPUT JSON SCHEMA (follow this shape):\n"
+        + json.dumps(schema, ensure_ascii=False, indent=2)
+        + "\n\nNow output the JSON object only."
+    )
+
+    # Try to use chat template if available
+    chat_text = None
+    try:
+        tok = getattr(processor, "tokenizer", None)
+        if tok is not None and hasattr(tok, "apply_chat_template"):
+            messages = [{"role": "user", "content": prompt}]
+            chat_text = tok.apply_chat_template(messages, tokenize=False, add_generation_prompt=True)
+    except Exception:
+        chat_text = None
+
+    if chat_text is None:
+        chat_text = prompt
+
+    with torch.no_grad():
+        inputs = None
+        try:
+            inputs = processor(text=chat_text, return_tensors="pt")
+        except Exception:
+            # fallback for processors that want "input_ids" only
+            inputs = processor(chat_text, return_tensors="pt")
+
+        if hasattr(inputs, "to"):
+            inputs = inputs.to(device)
+        else:
+            for k, v in list(inputs.items()):
+                if hasattr(v, "to"):
+                    inputs[k] = v.to(device)
+
+        gen_kwargs = {
+            "max_new_tokens": int(max_new_tokens),
+            "do_sample": True,
+            "temperature": float(temperature),
+            "top_p": 0.9,
+        }
+
+        out_ids = model.generate(**inputs, **gen_kwargs)
+        try:
+            raw = processor.decode(out_ids[0], skip_special_tokens=True)
+        except Exception:
+            # some processors expose tokenizer.decode
+            raw = processor.tokenizer.decode(out_ids[0], skip_special_tokens=True)
+
+    parsed = _extract_first_json_object(raw)
+    if not isinstance(parsed, dict):
+        return {
+            "actions": [],
+            "raw_text": raw,
+            "notes": "failed_to_parse_json",
+        }
+
+    # Ensure keys exist
+    if "actions" not in parsed or not isinstance(parsed["actions"], list):
+        parsed["actions"] = []
+    if "notes" not in parsed:
+        parsed["notes"] = ""
+
+    parsed["raw_text"] = raw
+    return parsed
+
 
 
 

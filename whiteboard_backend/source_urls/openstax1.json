@@ -1,0 +1,32 @@
+{
+  "url": "https://commons.libretexts.org/collections/OpenStax",
+  "HasApi": "N",
+  "SubjectUrls": {
+    "Maths": "",
+    "Physics": "",
+    "Biology": "",
+    "Chemistry": "",
+    "Geography": ""
+  },
+  "SubjectUrlsFound": {
+    "Cell biology": [
+      "https://commons.libretexts.org/book/bio-1764"
+    ],
+    "Anatomy": [
+      "https://commons.libretexts.org/book/med-46614"
+    ]
+  },
+  "Roots": [
+    {
+      "root": "https://commons.libretexts.org/book/med-46614",
+      "NoImagePromptBlocklist": {
+        "human_heart_731eb6b0": {
+          "query": "Human Heart",
+          "count": 1,
+          "reason": "no_images",
+          "last_seen": "2026-02-27T00:15:44.983140Z"
+        }
+      }
+    }
+  ]
+}

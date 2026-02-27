@@ -1,0 +1,79 @@
+{
+  "word_index_base": 0,
+  "end_index_inclusive": true,
+  "images": [
+    {
+      "content": "Learning objectives:",
+      "topic": "Cell Biology",
+      "diagram": 0,
+      "text": 1,
+      "diagram_required_objects": [],
+      "range_start": 22,
+      "range_end": 34
+    },
+    {
+      "content": "1) Identify and describe major organelles (structure & function)\n2) Explain features that distinguish eukaryotes from prokaryotes\n3) Trace organelle collaboration: protein production/trafficking and energy conversion\n4) Predict effects of organelle damage or drug action",
+      "topic": "Cell Biology",
+      "diagram": 0,
+      "text": 1,
+      "diagram_required_objects": [],
+      "range_start": 35,
+      "range_end": 85
+    },
+    {
+      "content": "Prior-knowledge check: In 3 minutes, name one organelle and one function you know",
+      "topic": "Classroom interaction",
+      "diagram": 0,
+      "text": 1,
+      "diagram_required_objects": [],
+      "range_start": 93,
+      "range_end": 104
+    },
+    {
+      "content": "students in a classroom raising hands (simple sketch)",
+      "topic": "Classroom interaction",
+      "diagram": 0,
+      "text": 0,
+      "diagram_required_objects": [],
+      "range_start": 105,
+      "range_end": 123
+    },
+    {
+      "content": "Lesson roadmap timeline: 1) Eukaryote features → 2) Organelles (examples) → 3) Processes (protein & energy) → 4) Checks & recap",
+      "topic": "Lesson roadmap",
+      "diagram": 0,
+      "text": 1,
+      "diagram_required_objects": [],
+      "range_start": 163,
+      "range_end": 172
+    },
+    {
+      "content": "Exit task (5 min): 1) Identify three organelles 2) Explain what happens if mitochondria fail 3) Sequence protein secretion steps",
+      "topic": "Assessment",
+      "diagram": 0,
+      "text": 1,
+      "diagram_required_objects": [],
+      "range_start": 173,
+      "range_end": 209
+    },
+    {
+      "content": "Detailed labeled eukaryotic cell diagram",
+      "topic": "Cell Biology - Eukaryotic Cell",
+      "diagram": 1,
+      "text": 0,
+      "diagram_required_objects": [
+        "nucleus",
+        "mitochondrion",
+        "rough endoplasmic reticulum",
+        "smooth endoplasmic reticulum",
+        "Golgi apparatus",
+        "ribosomes",
+        "lysosome",
+        "plasma membrane",
+        "cytoskeleton"
+      ],
+      "range_start": 210,
+      "range_end": 229
+    }
+  ]
+}

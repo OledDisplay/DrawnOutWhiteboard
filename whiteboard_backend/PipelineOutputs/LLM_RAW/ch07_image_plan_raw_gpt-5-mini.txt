@@ -1,0 +1,62 @@
+{
+  "word_index_base": 0,
+  "end_index_inclusive": true,
+  "images": [
+    {
+      "name": "Mitochondrion",
+      "prompt": "detailed mitochondrion cross-section showing outer membrane, inner membrane with cristae, intermembrane space, and matrix",
+      "diagram": 1,
+      "range_start": 0,
+      "range_end": 385
+    },
+    {
+      "name": "Glycolysis",
+      "prompt": "simple cytosol diagram: glucose -> glycolysis -> 2 pyruvate + 2 ATP + 2 NADH (arrow flow)",
+      "diagram": 0,
+      "range_start": 132,
+      "range_end": 159
+    },
+    {
+      "name": "TCA cycle",
+      "prompt": "citric acid (Krebs) cycle schematic in mitochondrial matrix with acetyl-CoA input and NADH/FADH2/ATP outputs",
+      "diagram": 0,
+      "range_start": 179,
+      "range_end": 230
+    },
+    {
+      "name": "NADH FADH2",
+      "prompt": "icons for NADH and FADH2 molecules (two distinct molecule icons labeled NADH and FADH2)",
+      "diagram": 0,
+      "range_start": 231,
+      "range_end": 251
+    },
+    {
+      "name": "Chloroplast",
+      "prompt": "chloroplast cross-section showing stroma, stacked thylakoids (grana), thylakoid lumen and thylakoid membranes",
+      "diagram": 1,
+      "range_start": 476,
+      "range_end": 595
+    },
+    {
+      "name": "Endosymbiotic bacterium",
+      "prompt": "small free-living bacterium icon to represent ancestral endosymbiont (simple rod-shaped bacterium)",
+      "diagram": 0,
+      "range_start": 412,
+      "range_end": 474
+    },
+    {
+      "name": "ATP table",
+      "prompt": "compact calculation table summarizing ATP yield per glucose: glycolysis 2 ATP, cytosolic NADH 2, pyruvate->acetyl-CoA 2 NADH, TCA 2 ATP + 6 NADH + 2 FADH2, totals ~32 ATP",
+      "diagram": 0,
+      "range_start": 597,
+      "range_end": 778
+    },
+    {
+      "name": "Lysosome",
+      "prompt": "lysosome organelle icon representing cellular digestion and recycling (single spherical vesicle with enzymes inside)",
+      "diagram": 0,
+      "range_start": 847,
+      "range_end": 864
+    }
+  ]
+}

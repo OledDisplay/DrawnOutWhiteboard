@@ -1,0 +1,76 @@
+{
+  "word_index_base": 0,
+  "end_index_inclusive": true,
+  "images": [
+    {
+      "name": "Lysosome",
+      "prompt": "diagram of a lysosome: spherical membrane-bound organelle cross-section showing acidic lumen with hydrolytic enzymes and labeled membrane",
+      "diagram": 1,
+      "range_start": 24,
+      "range_end": 136
+    },
+    {
+      "name": "V-ATPase",
+      "prompt": "small illustration of a V-ATPase proton pump in a membrane, using ATP to pump H+ into a lumen",
+      "diagram": 0,
+      "range_start": 91,
+      "range_end": 106
+    },
+    {
+      "name": "Endosome",
+      "prompt": "schematic of endocytic pathway: plasma membrane forming vesicle -> early endosome -> late endosome -> fusion with lysosome",
+      "diagram": 1,
+      "range_start": 138,
+      "range_end": 270
+    },
+    {
+      "name": "Autophagosome",
+      "prompt": "double-membrane autophagosome sequestering cytosolic cargo, labeled LC3 on membrane, and showing fusion with lysosome",
+      "diagram": 1,
+      "range_start": 203,
+      "range_end": 437
+    },
+    {
+      "name": "Phagosome",
+      "prompt": "large phagosome engulfing a bacterium, maturing and approaching a lysosome",
+      "diagram": 0,
+      "range_start": 255,
+      "range_end": 267
+    },
+    {
+      "name": "Peroxisome",
+      "prompt": "single-membrane peroxisome with internal catalase and showing beta-oxidation of fatty acids, labeled hydrogen peroxide -> water + oxygen",
+      "diagram": 1,
+      "range_start": 439,
+      "range_end": 575
+    },
+    {
+      "name": "Catalase",
+      "prompt": "icon of catalase enzyme converting hydrogen peroxide into water and oxygen (H2O2 -> H2O + O2)",
+      "diagram": 0,
+      "range_start": 479,
+      "range_end": 496
+    },
+    {
+      "name": "Mitochondrion",
+      "prompt": "damaged mitochondrion being enveloped by a phagophore/autophagosome (mitophagy), showing ubiquitin tags and LC3 receptors",
+      "diagram": 1,
+      "range_start": 577,
+      "range_end": 712
+    },
+    {
+      "name": "Quick-check",
+      "prompt": "simple two-column flashcard: 'Lysosome -> degrades organelles' and 'Peroxisome -> breaks down H2O2 (catalase)'",
+      "diagram": 0,
+      "range_start": 713,
+      "range_end": 755
+    },
+    {
+      "name": "Cytoskeleton",
+      "prompt": "schematic of microtubules and actin filaments organizing organelle positioning, with lysosomes/peroxisomes moved along microtubules",
+      "diagram": 1,
+      "range_start": 768,
+      "range_end": 789
+    }
+  ]
+}

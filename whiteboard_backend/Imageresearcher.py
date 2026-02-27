@@ -238,6 +238,29 @@ os.makedirs(IMAGES_PATH, exist_ok=True)
 IMAGE_METADATA: Dict[str, List[dict]] = {}
 
 
+def is_blocklisted_url(u: str) -> bool:
+    """
+    True if URL should never be used as a root or traversed.
+    Keep this as the single source of truth used by S1/S2/persist.
+    """
+    cu = clean_url(u or "")
+    if not cu:
+        return True
+    low = cu.lower()
+
+    # scheme blocks handled by clean_url already, but keep it safe
+    if any(low.startswith(s) for s in SCHEME_BLOCK):
+        return True
+
+    if any(bad in low for bad in BLOCKED_URL_WORDS):
+        return True
+
+    if any(low.endswith(ext) for ext in NON_HTML_EXT):
+        return True
+
+    return False
+
+
 # =========================
 # Terminal bucket files (ROOT storage)
 # =========================
@@ -417,7 +440,7 @@ BLOCKED_URL_WORDS = [
     "/accessibility", "/accounts/login", "/facebook", "/twitter",
     "/instagram", "/youtube", "/linkedin", "/help",
     "/rice.edu", "/gatesfoundation.org", "google.com", "business.safety.google",
-    "/mailto:", "/tel:", "/pdf", "drive.google.com",
+    "/mailto:", "/tel:", "/pdf", "drive.google.com", "status",
 ]
 
 NON_HTML_EXT = (".pdf", ".doc", ".docx", ".zip", ".rar", ".7z",
@@ -738,6 +761,7 @@ def clean_url(u: str) -> str:
     path = p.path or "/"
     if len(path) > 1 and path.endswith("/"):
         path = path[:-1]
+    path = re.sub(r"/{2,}", "/", path)
     return urlunparse((p.scheme or "https", host, path, "", p.query, ""))
 
 
@@ -889,6 +913,7 @@ def expand_all_disclosures_sync(
     per_round_click_cap: int = 600,
     quiet_ms: int = 250,
     stall_round_limit: int = 2,
+    min_rounds: int = 3,
 ):
     """
     Expand everything expandable ONCE.
@@ -1009,7 +1034,7 @@ def expand_all_disclosures_sync(
         else:
             no_growth += 1
 
-        if clicks == 0 and no_growth >= stall_round_limit:
+        if round_i >= max(1, int(min_rounds)) and clicks == 0 and no_growth >= stall_round_limit:
             print(f"[EXPAND] no clicks + stalled {no_growth}/{stall_round_limit} → stop")
             break
 
@@ -1019,6 +1044,108 @@ def expand_all_disclosures_sync(
 
 def _collect_basic_anchors_sync(page):
     return page.eval_on_selector_all("a[href]", "els => els.map(e => e.href).filter(Boolean)")
+
+
+def _collect_anchor_nearest_text_context_sync(page, max_gap_px: int = 120):
+    script = """
+((maxGap) => {
+  const out = new Map();
+
+  const norm = (s) => (s || "").replace(/\\s+/g, " ").trim();
+
+  const splitSentences = (txt) => {
+    const t = norm(txt);
+    if (!t) return [];
+    return t.split(/(?<=[.!?])\\s+/).map(norm).filter(Boolean);
+  };
+
+  const pickSentence = (txt, dir) => {
+    const parts = splitSentences(txt);
+    if (!parts.length) return "";
+    const picked = (dir === "up") ? parts[parts.length - 1] : parts[0];
+    return norm(picked).slice(0, 260);
+  };
+
+  const isVisible = (el) => {
+    if (!el) return false;
+    const st = window.getComputedStyle(el);
+    if (!st || st.visibility === "hidden" || st.display === "none") return false;
+    const r = el.getBoundingClientRect();
+    return !!(r && r.width > 1 && r.height > 1);
+  };
+
+  const textSel = "p,li,figcaption,td,th,span,div,h1,h2,h3,h4,h5,h6";
+  const textNodes = [];
+  document.querySelectorAll(textSel).forEach((el) => {
+    if (!isVisible(el)) return;
+    const txt = norm(el.innerText || el.textContent || "");
+    if (!txt || txt.length < 12) return;
+    if (txt.length > 700) return;
+    const r = el.getBoundingClientRect();
+    textNodes.push({ el, txt, r });
+  });
+
+  document.querySelectorAll("a[href]").forEach((a) => {
+    if (!isVisible(a)) return;
+    const href = (() => { try { return a.href || ""; } catch (e) { return ""; } })();
+    if (!href) return;
+    const ar = a.getBoundingClientRect();
+
+    const own =
+        norm(a.innerText || a.textContent || "") ||
+        norm(a.getAttribute("aria-label") || "") ||
+        norm(a.getAttribute("title") || "");
+
+        if (own && own.length >= 4) {
+        out.set(href, { ctx: own.slice(0,260), vdist: 0, hdist: 0 });
+        return; // or "continue" if you're in a loop function; here you're inside forEach so use "return"
+        }
+
+    let best = null;
+    for (const cand of textNodes) {
+      if (!cand || !cand.el) continue;
+      if (|| cand.el.contains(a) || a.contains(cand.el)) continue;
+
+      const r = cand.r;
+      let dir = "";
+      let vdist = Infinity;
+
+      if (r.bottom <= ar.top) {
+        dir = "up";
+        vdist = ar.top - r.bottom;
+      } else if (r.top >= ar.bottom) {
+        dir = "down";
+        vdist = r.top - ar.bottom;
+      } else {
+        dir = "overlap";
+        vdist = 0;
+     }
+
+      if (vdist > maxGap) continue;
+
+      const acx = (ar.left + ar.right) / 2;
+      const tcx = (r.left + r.right) / 2;
+      const hdist = Math.abs(acx - tcx);
+
+      if (!best || vdist < best.vdist || (vdist === best.vdist && hdist < best.hdist)) {
+        best = { txt: cand.txt, dir, vdist, hdist };
+      }
+    }
+
+    if (!best) return;
+    const sentence = pickSentence(best.txt, best.dir);
+    if (!sentence) return;
+
+    const prev = out.get(href);
+    if (!prev || best.vdist < prev.vdist || (best.vdist === prev.vdist && best.hdist < prev.hdist)) {
+      out.set(href, { ctx: sentence, vdist: best.vdist, hdist: best.hdist });
+    }
+  });
+
+  return Array.from(out.entries()).map(([url, obj]) => ({ url, ctx: obj.ctx || "" }));
+})(arguments[0])
+"""
+    return page.evaluate(script, max(20, int(max_gap_px)))
 
 
 def _collect_data_links_sync(page):
@@ -1080,6 +1207,360 @@ def _collect_shadow_anchors_sync(page):
 """
     return page.evaluate(script)
 
+def _host_key_s1(u: str) -> str:
+    try:
+        return (urlparse(u).hostname or "").lower()
+    except Exception:
+        return ""
+
+def same_base_host_s1(u: str, base_host: str) -> bool:
+    try:
+        return _host_key_s1(u) == (base_host or "").lower()
+    except Exception:
+        return False
+
+def _dbg_page_state(page, resp=None, tag=""):
+    try:
+        url = page.url
+    except Exception:
+        url = "<no-url>"
+
+    ctype = ""
+    status = None
+    try:
+        if resp is not None:
+            status = resp.status
+            ctype = (resp.headers.get("content-type") or resp.headers.get("Content-Type") or "")
+    except Exception:
+        pass
+
+    title = ""
+    try:
+        title = page.title()
+    except Exception:
+        pass
+
+    head = ""
+    try:
+        html = page.content() or ""
+        head = html[:220].replace("\n", "\\n").replace("\r", "\\r")
+    except Exception:
+        head = "<no-content>"
+
+    dbg(f"[JSFETCH][DBG]{tag} url={url} status={status} ctype='{ctype}' title='{title}' head='{head}'")
+
+def _scroll_page_for_lazy_load_sync(
+    page,
+    passes: int = 3,           # keep compatibility (js_capable_fetch uses this)
+    pause_ms: int = 280,       # keep compatibility
+    *,
+    max_loops: int = 30,       # extra guard
+):
+    """
+    Compatibility: accepts `passes` and `pause_ms`.
+    Behavior: scroll-to-bottom repeatedly and wait long enough for lazy load,
+    stopping early if the page stops changing.
+    """
+    script = r"""
+async (cfg) => {
+const passes = Math.max(1, Number(cfg?.passes ?? 1));
+const pauseMs = Math.max(120, Number(cfg?.pauseMs ?? 250));
+const maxLoops = Math.max(5, Number(cfg?.maxLoops ?? 20));
+const sleep = (ms) => new Promise(r => setTimeout(r, ms));
+const root = document.scrollingElement || document.documentElement || document.body;
+
+const snapshot = () => {
+    const h = Math.max(
+    root?.scrollHeight || 0,
+    document.body?.scrollHeight || 0,
+    document.documentElement?.scrollHeight || 0
+    );
+    const aCount = document.querySelectorAll("a[href]").length;
+    return { h, aCount };
+};
+
+let stable = 0;
+let prev = snapshot();
+
+// "passes" are coarse cycles; within each pass we do some loops
+for (let pass = 0; pass < Math.max(1, passes); pass++) {
+    for (let i = 0; i < Math.max(5, maxLoops); i++) {
+    const cur = snapshot();
+
+    // jump near bottom; many infinite lists load from sentinel near bottom
+    window.scrollTo(0, cur.h);
+    window.dispatchEvent(new Event("scroll"));
+    await sleep(Math.max(250, pauseMs));
+
+    const nxt = snapshot();
+
+    const grew = (nxt.h > cur.h + 5) || (nxt.aCount > cur.aCount);
+
+    if (!grew && nxt.h === prev.h && nxt.aCount === prev.aCount) stable += 1;
+    else stable = 0;
+
+    prev = nxt;
+
+    // if we saw no changes for a bit, stop early
+    if (stable >= 3) return true;
+    }
+
+    // extra wait at the end of each pass (some pages fetch then render delayed)
+    await sleep(Math.max(400, pauseMs + 250));
+}
+
+return true;
+}
+    """
+    try:
+        page.evaluate(
+            script,
+            {
+                "passes": int(passes),
+                "pauseMs": int(pause_ms),
+                "maxLoops": int(max_loops),
+            },
+        )
+    except Exception as e:
+        dbg(f"[S1][LAZY_SCROLL][ERR] {type(e).__name__}: {e}")
+        # don't hard-fail Stage 1
+        pass
+
+from urllib.parse import urlparse
+
+def _scroll_collect_urls_sync(
+    page,
+    *,
+    base_host: str,
+    max_steps: int = 28,
+    step_px: int = 900,
+    wait_each_ms: int = 250,
+    stable_rounds: int = 2,
+    only_paths_prefix: tuple[str, ...] = ("/book/", "/collections/"),
+):
+    """
+    Scrolls progressively and UNIONS discovered URLs across steps.
+    Works even when the page virtualizes (replaces DOM nodes while scrolling).
+
+    Returns:
+      urls: list[str]
+      ctx_map: dict[str,str]  # best-effort (anchor text / aria-label / title)
+    """
+
+    js_collect = r"""
+(cfg) => {
+  const baseHost = String(cfg?.baseHost || "").toLowerCase();
+  const onlyPrefixes = Array.isArray(cfg?.onlyPrefixes) ? cfg.onlyPrefixes : [];
+  const out = [];
+  const norm = (s) => (s || "").replace(/\s+/g, " ").trim();
+
+  const abs = (u) => {
+    try { return new URL(u, document.baseURI).href; } catch(e) { return ""; }
+  };
+
+  const ok = (url) => {
+    try {
+      const p = new URL(url);
+      if (baseHost && (p.hostname || "").toLowerCase() !== baseHost) return false;
+      const path = (p.pathname || "");
+      if (onlyPrefixes && onlyPrefixes.length) {
+        for (const pref of onlyPrefixes) if (path.startsWith(pref)) return true;
+        return false;
+      }
+      return true;
+    } catch(e) { return false; }
+  };
+
+  const collectRoots = () => {
+    const roots = [document];
+    const seen = new Set([document]);
+    const stack = [document];
+    while (stack.length) {
+      const root = stack.pop();
+      let all = [];
+      try { all = Array.from(root.querySelectorAll("*")); } catch (e) { all = []; }
+      for (const el of all) {
+        try {
+          if (el && el.shadowRoot && !seen.has(el.shadowRoot)) {
+            seen.add(el.shadowRoot);
+            roots.push(el.shadowRoot);
+            stack.push(el.shadowRoot);
+          }
+        } catch(e) {}
+      }
+    }
+    return roots;
+  };
+
+  const roots = collectRoots();
+
+  const qsaAllRoots = (selector) => {
+    const arr = [];
+    for (const r of roots) {
+      try {
+        const nodes = r.querySelectorAll(selector);
+        for (const n of nodes) arr.push(n);
+      } catch(e) {}
+    }
+    return arr;
+  };
+
+  // A) normal anchors
+  for (const a of qsaAllRoots("a[href]")) {
+    let href = "";
+    try { href = a.href || ""; } catch(e) {}
+    if (!href) continue;
+    href = abs(href);
+    if (!href || !ok(href)) continue;
+
+    const ctx =
+      norm(a.innerText || a.textContent || "") ||
+      norm(a.getAttribute("aria-label") || "") ||
+      norm(a.getAttribute("title") || "");
+
+    out.push({ url: href, ctx: ctx.slice(0, 260) });
+  }
+
+  // B) data-href / data-url style clickables
+  const pickAttr = (el, attr) => {
+    const v = el.getAttribute(attr);
+    if (!v) return;
+    const u = abs(v);
+    if (u && ok(u)) out.push({ url: u, ctx: "" });
+  };
+
+  for (const el of qsaAllRoots("[data-href],[data-url]")) {
+    pickAttr(el, "data-href");
+    pickAttr(el, "data-url");
+  }
+
+  // C) onclick location / window.open
+  for (const el of qsaAllRoots("[onclick]")) {
+    const t = String(el.getAttribute("onclick") || "");
+    let m = t.match(/location\.(?:href|assign|replace)\s*=\s*['"]([^'"]+)['"]/i);
+    if (m) {
+      const u = abs(m[1]);
+      if (u && ok(u)) out.push({ url: u, ctx: "" });
+    }
+    m = t.match(/window\.open\(\s*['"]([^'"]+)['"]/i);
+    if (m) {
+      const u = abs(m[1]);
+      if (u && ok(u)) out.push({ url: u, ctx: "" });
+    }
+  }
+
+  // D) link-like clickable cards with common navigation attributes
+  for (const el of qsaAllRoots("[role='link'],[data-route],[data-path]")) {
+    const ctx =
+      norm(el.innerText || el.textContent || "") ||
+      norm(el.getAttribute("aria-label") || "") ||
+      norm(el.getAttribute("title") || "");
+    for (const attr of ["data-route", "data-path"]) {
+      const v = el.getAttribute(attr);
+      if (!v) continue;
+      const u = abs(v);
+      if (u && ok(u)) out.push({ url: u, ctx: ctx.slice(0, 260) });
+    }
+  }
+
+  return out;
+}
+"""
+
+    def _host(u: str) -> str:
+        try:
+            return (urlparse(u).hostname or "").lower()
+        except Exception:
+            return ""
+
+    seen = set()
+    ctx_map: dict[str, str] = {}
+
+    stable = 0
+    last_url_count = -1
+
+    # ensure page is settled before starting
+    try:
+        page.wait_for_load_state("domcontentloaded", timeout=2500)
+    except Exception:
+        pass
+
+    for _ in range(max_steps):
+        # 1) harvest *now* (before DOM is replaced by next scroll)
+        items = []
+        try:
+            items = page.evaluate(
+                js_collect,
+                {
+                    "baseHost": base_host,
+                    "onlyPrefixes": list(only_paths_prefix),
+                },
+            ) or []
+        except Exception as e:
+            dbg(f"[S1][SCROLL_COLLECT][EVAL_ERR] {type(e).__name__}: {e}")
+            items = []
+
+        for it in items:
+            u = (it or {}).get("url") or ""
+            c = (it or {}).get("ctx") or ""
+            if not u:
+                continue
+            if base_host and _host(u) != base_host.lower():
+                continue
+            if u not in seen:
+                seen.add(u)
+            if c and (u not in ctx_map or len(c) > len(ctx_map.get(u, ""))):
+                ctx_map[u] = c
+
+        # compute a generic progress metric (total URLs collected)
+        url_count = len(seen)
+
+        # 2) scroll a step
+        try:
+            page.mouse.wheel(0, int(step_px))
+        except Exception:
+            # fallback: JS scroll
+            try:
+                page.evaluate("(y) => window.scrollBy(0, y)", int(step_px))
+            except Exception as e:
+                dbg(f"[S1][SCROLL_COLLECT][SCROLL_ERR] {type(e).__name__}: {e}")
+                pass
+
+        # 3) wait for either more books or network to settle
+        grew = False
+        try:
+            # wait until the visible DOM itself contains more /book/ anchors than before
+            prev = max(0, last_url_count)
+            page.wait_for_function(
+                """(prev) => document.querySelectorAll("a[href]").length > prev""",
+                arg=prev,
+                timeout=max(400, int(wait_each_ms)),
+            )
+            grew = True
+        except Exception:
+            pass
+
+        try:
+            page.wait_for_load_state("networkidle", timeout=1200)
+        except Exception:
+            pass
+
+        try:
+            page.wait_for_timeout(int(wait_each_ms))
+        except Exception:
+            pass
+
+        # 4) stop when stable
+        if url_count <= last_url_count and not grew:
+            stable += 1
+        else:
+            stable = 0
+        last_url_count = url_count
+
+        if stable >= stable_rounds:
+            break
+
+    return sorted(seen), ctx_map
 
 MODAL_TEXT_PATTERNS = (
     r"\b(read|view|open|launch|access|start|continue|student resources|instructor resources|resources|contents|table of contents|toc)\b"
@@ -1220,7 +1701,7 @@ def _harvest_popup_urls_on_click_sync(page, el, popup_timeout_ms=1500):
     return anchors, pop_urls
 
 
-def collect_links_with_modals_sync(page, expand=True, max_modal_clicks=6, **kwargs):
+def collect_links_with_modals_sync(page, expand=True, max_modal_clicks=6, link_context_out: Optional[Dict[str, str]] = None, **kwargs):
     """
     Returns deduped list of links discovered on:
       - main DOM
@@ -1276,10 +1757,28 @@ def collect_links_with_modals_sync(page, expand=True, max_modal_clicks=6, **kwar
         basic = list(_collect_basic_anchors_sync(page) or [])
         for u in basic:
             urls.append(u)
+        # Even in light mode, capture bookcard-like clickable containers.
+        data_links = list(_collect_data_links_sync(page) or [])
+        for u in data_links:
+            urls.append(u)
 
     raw = [u for u in urls if u]
 
     deduped = ordered_dedupe(raw)
+    if isinstance(link_context_out, dict):
+        try:
+            ctx_rows = _collect_anchor_nearest_text_context_sync(page, max_gap_px=120) or []
+            for row in ctx_rows:
+                if not isinstance(row, dict):
+                    continue
+                u = (row.get("url") or "").strip()
+                ctx = re.sub(r"\s+", " ", (row.get("ctx") or "")).strip()
+                if not u or not ctx:
+                    continue
+                if u not in link_context_out:
+                    link_context_out[u] = ctx
+        except Exception:
+            pass
     return deduped
 
 
@@ -1810,17 +2309,94 @@ def pinecone_upsert_terminal_index(
 # =========================
 #js_capable_fetch 
 # =========================
+def _pick_nearest_sentence_from_text(text: str, prefer_above: bool) -> str:
+    txt = re.sub(r"\s+", " ", (text or "")).strip()
+    if not txt:
+        return ""
+    parts = [p.strip() for p in re.split(r"(?<=[.!?])\s+", txt) if p and p.strip()]
+    if not parts:
+        return txt[:260]
+    picked = parts[-1] if prefer_above else parts[0]
+    return picked[:260]
+
+
+def _closest_normal_text_for_anchor_soup(a_tag: Tag) -> str:
+    if not isinstance(a_tag, Tag):
+        return ""
+
+    def _sib_text(sib) -> str:
+        if isinstance(sib, NavigableString):
+            return str(sib).strip()
+        if isinstance(sib, Tag):
+            if sib.name in {"script", "style", "noscript"}:
+                return ""
+            return sib.get_text(" ", strip=True)
+        return ""
+
+    # Prefer immediate sibling text (closest up/down in DOM flow), then broaden one parent level.
+    up_text = ""
+    dn_text = ""
+    steps = 0
+    sib = a_tag.previous_sibling
+    while sib is not None and steps < 5:
+        t = _sib_text(sib)
+        if t:
+            up_text = t
+            break
+        sib = sib.previous_sibling
+        steps += 1
+
+    steps = 0
+    sib = a_tag.next_sibling
+    while sib is not None and steps < 5:
+        t = _sib_text(sib)
+        if t:
+            dn_text = t
+            break
+        sib = sib.next_sibling
+        steps += 1
+
+    if not up_text and a_tag.parent is not None:
+        steps = 0
+        sib = a_tag.parent.previous_sibling
+        while sib is not None and steps < 3:
+            t = _sib_text(sib)
+            if t:
+                up_text = t
+                break
+            sib = sib.previous_sibling
+            steps += 1
+
+    if not dn_text and a_tag.parent is not None:
+        steps = 0
+        sib = a_tag.parent.next_sibling
+        while sib is not None and steps < 3:
+            t = _sib_text(sib)
+            if t:
+                dn_text = t
+                break
+            sib = sib.next_sibling
+            steps += 1
+
+    up_sentence = _pick_nearest_sentence_from_text(up_text, prefer_above=True)
+    dn_sentence = _pick_nearest_sentence_from_text(dn_text, prefer_above=False)
+    if up_sentence and dn_sentence:
+        return up_sentence if len(up_sentence) <= len(dn_sentence) else dn_sentence
+    return up_sentence or dn_sentence
+
+
 def js_capable_fetch(
     url: str,
     timeout_ms: int = 15000,
     wait_selector: str | None = "a[href]",
-    js_mode: str = "full",          # "full" | "light" | "none" | "smart-light"
+    js_mode: str = "full",          # "full" | "light" | "none" | "smart-light" | "scroll-collect"
     max_modal_clicks: int = 3,
     min_text_chars: int = 1200,
     min_p_tags: int = 3,
     min_anchors_hint: int = 8,
     pw: "_PlaywrightReuse | None" = None,
     collect_anchors: bool = True,
+    anchor_context_out: Optional[Dict[str, str]] = None,
 ) -> Tuple[str | None, List[str], str]:
     """
     Fetch a page and return (html, anchors, via).
@@ -1852,7 +2428,12 @@ def js_capable_fetch(
             anchors = []
             for a in soup.find_all("a", href=True):
                 try:
-                    anchors.append(urljoin(u, a.get("href")))
+                    abs_u = urljoin(u, a.get("href"))
+                    anchors.append(abs_u)
+                    if isinstance(anchor_context_out, dict):
+                        ctx = _closest_normal_text_for_anchor_soup(a)
+                        if ctx and abs_u not in anchor_context_out:
+                            anchor_context_out[abs_u] = ctx
                 except Exception:
                     continue
 
@@ -1863,32 +2444,78 @@ def js_capable_fetch(
             return None, [], "requests"
 
     def _pw_fetch(pw_obj: _PlaywrightReuse) -> Tuple[str | None, list[str], str]:
+        scroll_collect = (js_mode == "scroll-collect")
         expand = (js_mode == "full")
         page = pw_obj.new_page(timeout_ms)
         try:
             page.goto(url, wait_until="domcontentloaded")
-            try:
-                page.wait_for_load_state("networkidle", timeout=timeout_ms // 2)
-            except Exception:
-                pass
-            if wait_selector:
+            if scroll_collect:
+                # Fast path: don't burn long waits before scrolling collection.
                 try:
-                    page.wait_for_selector(wait_selector, state="attached", timeout=timeout_ms // 2)
+                    page.wait_for_load_state("networkidle", timeout=1200)
                 except Exception:
                     pass
+            else:
+                try:
+                    page.wait_for_load_state("networkidle", timeout=timeout_ms // 2)
+                except Exception:
+                    pass
+                if wait_selector:
+                    try:
+                        page.wait_for_selector(wait_selector, state="attached", timeout=timeout_ms // 2)
+                    except Exception:
+                        pass
+            # Force lazy-loaded cards/sections to render before collecting links.
+            if scroll_collect:
+                _scroll_page_for_lazy_load_sync(page, passes=2, pause_ms=180, max_loops=12)
+            else:
+                _scroll_page_for_lazy_load_sync(page, passes=3, pause_ms=260)
 
             if collect_anchors:
-                anchors = collect_links_with_modals_sync(
-                    page,
-                    expand=expand,
-                    max_modal_clicks=(max_modal_clicks if expand else 0),
-                )
+                local_ctx = {} if isinstance(anchor_context_out, dict) else None
+                if scroll_collect:
+                    base_host = (urlparse(url).hostname or "").lower()
+                    anchors, sc_ctx = _scroll_collect_urls_sync(
+                        page,
+                        base_host=base_host,
+                        only_paths_prefix=(),   # Stage 1 generic discovery; no hard path filter.
+                    )
+                    if isinstance(local_ctx, dict) and isinstance(sc_ctx, dict):
+                        local_ctx.update(sc_ctx)
+                    # Fallback for pages where scroll collector misses anchor surfaces.
+                    if not anchors:
+                        fallback_links = collect_links_with_modals_sync(
+                            page,
+                            expand=False,
+                            max_modal_clicks=0,
+                            link_context_out=local_ctx,
+                        )
+                        anchors = list(fallback_links or [])
+                else:
+                    anchors = collect_links_with_modals_sync(
+                        page,
+                        expand=expand,
+                        max_modal_clicks=(max_modal_clicks if expand else 0),
+                        link_context_out=local_ctx,
+                    )
                 anchors = [urljoin(url, a) for a in (anchors or []) if a]
+                if isinstance(anchor_context_out, dict) and local_ctx:
+                    for raw_u, ctx in local_ctx.items():
+                        try:
+                            abs_u = urljoin(url, raw_u)
+                        except Exception:
+                            abs_u = raw_u
+                        ctx_txt = re.sub(r"\s+", " ", (ctx or "")).strip()
+                        if abs_u and ctx_txt and abs_u not in anchor_context_out:
+                            anchor_context_out[abs_u] = ctx_txt
             else:
                 anchors = []
 
             html = page.content() or ""
-            via = f"playwright:{'full' if expand else 'light'}"
+            if scroll_collect:
+                via = "playwright:scroll-collect"
+            else:
+                via = f"playwright:{'full' if expand else 'light'}"
             dbg(f"[JSFETCH][{via}] {_short_url(url)} anchors={len(anchors)} html_len={len(html)}")
             return html, anchors, via
         finally:
@@ -2890,6 +3517,46 @@ def _blocklist_prompt_for_root(source_name: str, root_url: str, prompt_id: str, 
         _save_json_atomic(path, data)
         dbg(f"[BL][ROOT] blocklisted prompt_id={prompt_id} root={_short_url(root_url)} source={source_name} count={cnt} reason={reason}")
 
+def _is_prompt_blocklisted_for_source(source_name: str, prompt_id: str) -> bool:
+    """
+    READ PATH: checks <source>.json -> NoImagePromptBlocklistGlobal[prompt_id]
+    """
+    if not source_name or not prompt_id:
+        return False
+    path = _source_json_path(source_name)
+    data = _load_json(path)
+    bl = (data.get("NoImagePromptBlocklistGlobal") or {})
+    return bool(str(prompt_id) in bl)
+
+def _blocklist_prompt_for_source(source_name: str, prompt_id: str, query: str, reason: str) -> None:
+    """
+    WRITE PATH: stores record under top-level <source>.json NoImagePromptBlocklistGlobal.
+    """
+    if not source_name or not prompt_id:
+        return
+
+    path = _source_json_path(source_name)
+    lock = _json_lock_for(path)
+    with lock:
+        data = _load_json(path)
+        data.setdefault("NoImagePromptBlocklistGlobal", {})
+        bl = data["NoImagePromptBlocklistGlobal"]
+
+        old = bl.get(str(prompt_id)) or {}
+        try:
+            cnt = int(old.get("count") or 0) + 1
+        except Exception:
+            cnt = 1
+
+        bl[str(prompt_id)] = {
+            "query": str(query or old.get("query") or ""),
+            "count": cnt,
+            "reason": str(reason or old.get("reason") or "stage1_no_roots"),
+            "last_seen": datetime.datetime.utcnow().isoformat() + "Z",
+        }
+        _save_json_atomic(path, data)
+        dbg(f"[BL][SOURCE] blocklisted prompt_id={prompt_id} source={source_name} count={cnt} reason={reason}")
+
 
 # =========================
 # STAGE 2: Drill-by-parent with inline text search + image pick
@@ -2922,6 +3589,7 @@ def stage2_drill_search_and_images(
     terminal_js_mode: str = "none",          # "none" | "smart-light" | "light"
     terminal_collect_anchors: bool = False,  # terminals never need anchors
     terminal_js_fallback: bool = False,      # if True, re-render terminal with js_mode="light" when no img candidates
+    non_terminal_route_top_k_per_page: int = 12,  # Stage 2 BFS routing breadth per page (prompt-nearest first)
 
 
     subject: Optional[str] = None,
@@ -3044,6 +3712,17 @@ def stage2_drill_search_and_images(
         scored.sort(key=lambda x: x[0], reverse=True)
         top = scored[:k] if k and len(scored) > k else scored
         return [u for _, u in top]
+
+    def _pick_non_terminal_routes_for_page(urls: list[str], *, top_k: int) -> list[str]:
+        """
+        Rank all non-terminal URLs discovered on a page against prompt and route only
+        the top prompt-nearest subset to BFS queue.
+        """
+        ranked_all = _score_and_sort_urls(urls, k=0)  # score full page set first
+        if not ranked_all:
+            return []
+        cap = max(1, int(top_k))
+        return ranked_all[:cap]
 
     def _path_depth(u: str) -> int:
         try:
@@ -3675,8 +4354,15 @@ def stage2_drill_search_and_images(
                     if len(term_full) < 10 and len(deeper_full) > 50:
                         _pool_add(deeper_full)
 
-                    deeper = _score_and_sort_urls(deeper_full, k=max(75, url_sort_k))
-                    for du in deeper:
+                    deeper_ranked = _pick_non_terminal_routes_for_page(
+                        deeper_full,
+                        top_k=non_terminal_route_top_k_per_page,
+                    )
+                    dbg(
+                        f"[S2][ROUTE] cur={_short_url(cur)} deeper_total={len(deeper_full)} "
+                        f"deeper_routed={len(deeper_ranked)}"
+                    )
+                    for du in deeper_ranked:
                         cu = clean_url(du)
                         if cu and cu not in expanded_pages:
                             queue.append(cu)
@@ -3761,7 +4447,8 @@ def find_valid_roots(
     import numpy as np
     from collections import deque
 
-    log = print if verbose else (lambda *_a, **_k: None)
+    # Keep legacy verbose flag, but Stage 1 debug should be visible in normal runs too.
+    log = dbg if verbose else (lambda *_a, **_k: None)
 
     # ----------------------------
     # Helpers
@@ -3782,10 +4469,14 @@ def find_valid_roots(
             path = "/"
         return urlunparse((scheme, host, path, "", "", ""))
 
-    def _last_path_part_s1(u: str) -> str:
+    def _last_two_path_parts_s1(u: str) -> str:
         p = urlparse(u)
         segs = [s for s in (p.path or "").split("/") if s]
-        return segs[-1] if segs else ""
+        if not segs:
+            return ""
+        if len(segs) == 1:
+            return segs[-1]
+        return f"{segs[-2]} {segs[-1]}"
 
     def _normalize_for_embed_s1(s: str) -> str:
         s = (s or "").lower()
@@ -3794,12 +4485,41 @@ def find_valid_roots(
         return s
 
     def key_for_url(u: str) -> str:
-        return _normalize_for_embed_s1(_last_path_part_s1(u))
+        return _normalize_for_embed_s1(_last_two_path_parts_s1(u))
 
-    def same_reg(u: str, reg: str) -> bool:
-        t = tldextract.extract(urlparse(u).hostname or "")
-        r = ".".join([t.domain, t.suffix]) if t.suffix else t.domain
-        return r == reg
+    def _normalize_anchor_ctx_s1(s: str) -> str:
+        s = re.sub(r"\s+", " ", (s or "")).strip()
+        return s[:260]
+
+    def embed_text_for_url(u: str, anchor_ctx: str | None = None) -> str:
+        k = key_for_url(u)
+        c = _normalize_anchor_ctx_s1(anchor_ctx or "")
+        if k and c:
+            return f"{k} {c}"
+        return k or c or "query"
+
+    def _origin_key_s1(u: str) -> tuple[str, str, int]:
+        """
+        Strict origin key: (scheme, host, effective_port)
+        """
+        p = urlparse(u or "")
+        scheme = (p.scheme or "https").lower()
+        host = (p.hostname or "").lower()
+        port = p.port
+        if port is None:
+            if scheme == "http":
+                port = 80
+            elif scheme == "https":
+                port = 443
+            else:
+                port = -1
+        return (scheme, host, int(port))
+
+    def same_base_origin_s1(u: str, base_origin_key: tuple[str, str, int]) -> bool:
+        try:
+            return _origin_key_s1(u) == base_origin_key
+        except Exception:
+            return False
 
     def prefer_shortest_by_bucket(urls):
         seen = {}
@@ -3842,48 +4562,67 @@ def find_valid_roots(
     def _dot(a, b) -> float:
         return float(np.dot(a, b))
 
+    def _fmt_s1(v) -> str:
+        try:
+            return f"{float(v):.4f}"
+        except Exception:
+            return "n/a"
+
+    def _dbg_s1(msg: str):
+        # Always print Stage 1 diagnostics via dbg so normal NOAPI runs are inspectable.
+        dbg(msg)
+
     def _prompt_rerank_and_cap(out: dict) -> dict:
         # Collection behavior unchanged; only reorder + cap final returned roots.
         if not (prompt_text and encoder is not None and out):
+            _dbg_s1(
+                f"[S1][RERANK] skipped prompt_text={bool(prompt_text)} encoder={encoder is not None} roots_in={len(out)}"
+            )
             if max_roots and len(out) > max_roots:
+                _dbg_s1(f"[S1][RERANK] cap-only max_roots={max_roots} from={len(out)}")
                 return {k: out[k] for k in list(out.keys())[:max_roots]}
             return out
 
         try:
             pvec = encoder.encode(str(prompt_text), normalize_embeddings=True)
             urls = list(out.keys())
-            keys = [key_for_url(u) for u in urls]
+            keys = [embed_text_for_url(u, (out.get(u) or {}).get("anchor_context")) for u in urls]
             embs = encoder.encode(keys, normalize_embeddings=True)
 
             scored = []
             for u, k, e in zip(urls, keys, embs):
                 s = _dot(pvec, e)
                 scored.append((s, u, k))
+                _dbg_s1(f"[S1][RERANK][RAW] url={u} embed='{k}' prompt_rank={_fmt_s1(s)}")
 
             scored.sort(key=lambda x: x[0], reverse=True)
             keep = scored[:max_roots] if max_roots else scored
+            _dbg_s1(f"[S1][RERANK] keep={len(keep)} of {len(scored)} max_roots={max_roots}")
 
             out2 = {}
             for s, u, k in keep:
                 meta = dict(out[u])
                 meta["prompt_rank_score"] = float(s)
                 meta["prompt_rank_key"] = k
+                _dbg_s1(f"[S1][RERANK][KEEP] url={u} embed='{k}' prompt_rank={_fmt_s1(s)}")
                 out2[u] = meta
             return out2
-        except Exception:
+        except Exception as e:
+            _dbg_s1(f"[S1][RERANK][ERR] {type(e).__name__}: {e}")
             # exact fallback behavior: return original (then cap)
             if max_roots and len(out) > max_roots:
+                _dbg_s1(f"[S1][RERANK] fallback cap-only max_roots={max_roots} from={len(out)}")
                 return {k: out[k] for k in list(out.keys())[:max_roots]}
             return out
 
     encoder = _EMBED_MODEL
     if encoder is None:
-        print("[S1] ⚠ MiniLM encoder unavailable — returning empty roots")
+        _dbg_s1("[S1] WARNING MiniLM encoder unavailable -> returning empty roots")
         return {}
 
     lemma_phrases = _lemma_phrases_from_obj(lemma_obj)
     if not lemma_phrases:
-        inferred = key_for_url(_clean_url_s1(base_url))
+        inferred = embed_text_for_url(_clean_url_s1(base_url))
         lemma_phrases = [inferred or "query"]
 
     menu_keyword = "site navigation menu toc section list"
@@ -3895,14 +4634,18 @@ def find_valid_roots(
     threshold_prompt_root = 0.5
 
     base_clean = _clean_url_s1(base_url)
+    base_host = (urlparse(base_clean).hostname or "").lower()
+    s1_fetch_mode = "none" if js_mode == "none" else "scroll-collect"
+    _dbg_s1(
+        f"[S1] start discovery base={base_clean} host={base_host} "
+        f"max_pages={max_pages_stage1} js_mode={js_mode} s1_fetch_mode={s1_fetch_mode}"
+    )
     if not base_clean:
-        print("[S1] Invalid base URL.")
+        _dbg_s1("[S1] invalid base URL")
         return {}
 
-    host = (urlparse(base_clean).hostname or "").lower()
-    t = tldextract.extract(host)
-    base_reg = ".".join([t.domain, t.suffix]) if t.suffix else t.domain
-
+    base_origin_key = _origin_key_s1(base_clean)
+    base_scheme, host, base_port = base_origin_key
     # ----------------------------
     # If known_roots provided: skip discovery, then rerank+cap at the end.
     # ----------------------------
@@ -3910,9 +4653,12 @@ def find_valid_roots(
         roots0 = [_clean_url_s1(r) for r in known_roots if r]
         roots0 = [
             r for r in roots0
-            if r and same_reg(r, base_reg) and not any(r.lower().endswith(ext) for ext in NON_HTML_EXT)
+            if r and same_base_host_s1(r, base_host) and not is_blocklisted_url(r)
         ]
         roots0 = prefer_shortest_by_bucket(roots0)
+        _dbg_s1(f"[S1] known_roots mode count={len(roots0)}")
+        for i, r in enumerate(roots0[:100], 1):
+            _dbg_s1(f"[S1][KNOWN {i:02d}] url={r}")
         out = {r: {"parent": None, "depth": 0, "prompt": None, "menu": None} for r in roots0}
         return _prompt_rerank_and_cap(out)
 
@@ -3921,28 +4667,38 @@ def find_valid_roots(
     layer_idx = 0
     total_fetches = 0
 
-    log(f"[S1] Starting discovery on {base_clean} (domain={base_reg})")
+    _dbg_s1(
+        f"[S1] start discovery base={base_clean} origin={base_scheme}://{host}:{base_port} "
+        f"max_pages={max_pages_stage1} js_mode={js_mode}"
+    )
+    log(f"[S1] verbose enabled base={base_clean}")
 
     accepted_root = None
     accepted_root_scores = None
+    anchor_context_by_url: Dict[str, str] = {}
 
-    while frontier and layer_idx < 10 and total_fetches < max_pages_stage1:
+    MAX_STAGE1_LAYERS = 3  # run L1..L3 only; never start L4
+    while frontier and layer_idx < MAX_STAGE1_LAYERS and total_fetches < max_pages_stage1:
         layer_idx += 1
         layer = list(frontier)
         frontier.clear()
+        _dbg_s1(f"[S1][L{layer_idx}] frontier_in={len(layer)} total_fetches={total_fetches}")
 
         candidates = []
         for u in layer:
-            if not same_reg(u, base_reg):
+            if not same_base_host_s1(u, base_host):
+                _dbg_s1(f"[S1][L{layer_idx}][SKIP] reason=origin_mismatch url={u}")
                 continue
-            if any(u.lower().endswith(ext) for ext in NON_HTML_EXT):
+            if is_blocklisted_url(u):
+                _dbg_s1(f"[S1][L{layer_idx}][SKIP] reason=blocklisted url={u}")
                 continue
             candidates.append(u)
 
         if not candidates:
+            _dbg_s1(f"[S1][L{layer_idx}] no candidates after filtering")
             continue
 
-        keys = [key_for_url(u) for u in candidates]
+        keys = [embed_text_for_url(u, anchor_context_by_url.get(u)) for u in candidates]
 
         # Note: menu_texts == prompt_texts (menu_key was identical)
         prompt_url_embs = encoder.encode(keys, normalize_embeddings=True)
@@ -3956,10 +4712,31 @@ def find_valid_roots(
         kept_roots = []
 
         for u, k, ps, ms, cs in zip(candidates, keys, prompt_scores, menu_scores, combined):
+            ctx_for_u = anchor_context_by_url.get(u) or ""
+            _dbg_s1(
+                f"[S1][L{layer_idx}][RANK] url={u} embed='{k}' "
+                f"prompt={_fmt_s1(ps)} menu={_fmt_s1(ms)} combo={_fmt_s1(cs)}"
+            )
+            if ctx_for_u:
+                _dbg_s1(f"[S1][L{layer_idx}][CTX] url={u} ctx='{_normalize_anchor_ctx_s1(ctx_for_u)}'")
             if ps >= threshold_prompt_expand or ms >= threshold_menu_expand:
                 kept_expand.append((u, ps, ms, cs, k))
+                _dbg_s1(
+                    f"[S1][L{layer_idx}][EXPAND_OK] url={u} "
+                    f"prompt={_fmt_s1(ps)} menu={_fmt_s1(ms)}"
+                )
                 if ps >= threshold_prompt_root:
                     kept_roots.append((u, ps, ms, cs, k))
+                    _dbg_s1(
+                        f"[S1][L{layer_idx}][ROOT_OK] url={u} "
+                        f"prompt={_fmt_s1(ps)} menu={_fmt_s1(ms)} combo={_fmt_s1(cs)} key='{k}'"
+                    )
+            else:
+                _dbg_s1(
+                    f"[S1][L{layer_idx}][REJECT] url={u} reason=below_expand_threshold "
+                    f"prompt={_fmt_s1(ps)}<{_fmt_s1(threshold_prompt_expand)} "
+                    f"menu={_fmt_s1(ms)}<{_fmt_s1(threshold_menu_expand)}"
+                )
 
         kept_expand_sorted = sorted(kept_expand, key=lambda x: x[1], reverse=True)
         kept_roots_sorted = sorted(kept_roots, key=lambda x: x[1], reverse=True)
@@ -3968,40 +4745,61 @@ def find_valid_roots(
             best = kept_roots_sorted[0]
             accepted_root = best[0]
             accepted_root_scores = (best[1], best[2], best[3], best[4])
+            _dbg_s1(
+                f"[S1][L{layer_idx}] accepted_root={accepted_root} "
+                f"prompt={_fmt_s1(best[1])} menu={_fmt_s1(best[2])} combo={_fmt_s1(best[3])} key='{best[4]}'"
+            )
             break
 
-        expand_from = [u for (u, _, _, _, _) in kept_expand_sorted] if kept_expand_sorted else list(candidates)
+        MAX_EXPAND_PER_LAYER = 25
+        expand_from = [u for (u, _, _, _, _) in kept_expand_sorted[:MAX_EXPAND_PER_LAYER]]
+        if not expand_from:
+            expand_from = candidates[:MAX_EXPAND_PER_LAYER]
+        _dbg_s1(f"[S1][L{layer_idx}] expand_from_count={len(expand_from)}")
 
         next_frontier = []
         for u in expand_from:
+            local_anchor_ctx: Dict[str, str] = {}
             try:
-                _, anchors, _via = js_capable_fetch(u, js_mode=js_mode)
+                _, anchors, _via = js_capable_fetch(u, js_mode=s1_fetch_mode, anchor_context_out=local_anchor_ctx)
             except Exception:
                 anchors = []
             total_fetches += 1
+            _dbg_s1(f"[S1][L{layer_idx}][FETCH] url={u} anchors={len(anchors)} total_fetches={total_fetches}")
             if not anchors:
                 continue
             for a in anchors:
                 cu = _clean_url_s1(a)
                 if not cu or cu in visited:
                     continue
-                if not same_reg(cu, base_reg):
+                if not same_base_host_s1(cu, base_host):
                     continue
-                if any(cu.lower().endswith(ext) for ext in NON_HTML_EXT):
+                if is_blocklisted_url(cu):
                     continue
                 visited.add(cu)
+                ctx = _normalize_anchor_ctx_s1(local_anchor_ctx.get(a) or local_anchor_ctx.get(cu) or "")
+                if ctx and cu not in anchor_context_by_url:
+                    anchor_context_by_url[cu] = ctx
                 next_frontier.append(cu)
 
         if next_frontier:
-            nf_keys = [key_for_url(u) for u in next_frontier]
+            nf_keys = [embed_text_for_url(u, anchor_context_by_url.get(u)) for u in next_frontier]
             nf_embs = encoder.encode(nf_keys, normalize_embeddings=True)
             nf_scores = [_dot(prompt_emb, e) for e in nf_embs]
-            next_frontier = [u for _, u in sorted(zip(nf_scores, next_frontier), reverse=True)]
+            ranked_nf = sorted(zip(nf_scores, next_frontier), reverse=True)
+            next_frontier = [u for _, u in ranked_nf]
+            _dbg_s1(f"[S1][L{layer_idx}] next_frontier_ranked={len(next_frontier)}")
+            for s, u in ranked_nf[:100]:
+                _dbg_s1(f"[S1][L{layer_idx}][NEXT] url={u} prompt={_fmt_s1(s)}")
+        else:
+            _dbg_s1(f"[S1][L{layer_idx}] next_frontier empty")
 
         for n in prefer_shortest_by_bucket(next_frontier):
             frontier.append(n)
+        _dbg_s1(f"[S1][L{layer_idx}] frontier_out={len(frontier)} visited={len(visited)}")
 
     if not accepted_root:
+        _dbg_s1("[S1] no accepted root found")
         return {}
 
     tree_nodes = {}
@@ -4013,6 +4811,7 @@ def find_valid_roots(
         "menu": float(seed_ms),
         "combo": float(seed_cs),
         "key": seed_key,
+        "anchor_context": anchor_context_by_url.get(accepted_root),
     }
 
     tree_frontier = [accepted_root]
@@ -4023,15 +4822,18 @@ def find_valid_roots(
 
     while tree_frontier and tree_depth < max_tree_depth and len(tree_nodes) < max_tree_nodes:
         tree_depth += 1
+        _dbg_s1(f"[S1][TREE][D{tree_depth}] frontier={len(tree_frontier)} nodes={len(tree_nodes)}")
 
         child_candidates = []
         parent_for_child = {}
 
         for parent_url in tree_frontier:
+            local_anchor_ctx: Dict[str, str] = {}
             try:
-                _, anchors, _via = js_capable_fetch(parent_url, js_mode=js_mode)
+                _, anchors, _via = js_capable_fetch(parent_url, js_mode=s1_fetch_mode, anchor_context_out=local_anchor_ctx)
             except Exception:
                 anchors = []
+            _dbg_s1(f"[S1][TREE][D{tree_depth}][FETCH] parent={parent_url} anchors={len(anchors)}")
 
             if not anchors:
                 continue
@@ -4040,20 +4842,24 @@ def find_valid_roots(
                 cu = _clean_url_s1(a)
                 if not cu or cu in tree_visited:
                     continue
-                if not same_reg(cu, base_reg):
+                if not same_base_host_s1(cu, base_host):
                     continue
-                if any(cu.lower().endswith(ext) for ext in NON_HTML_EXT):
+                if is_blocklisted_url(cu):
                     continue
 
                 tree_visited.add(cu)
+                ctx = _normalize_anchor_ctx_s1(local_anchor_ctx.get(a) or local_anchor_ctx.get(cu) or "")
+                if ctx and cu not in anchor_context_by_url:
+                    anchor_context_by_url[cu] = ctx
                 child_candidates.append(cu)
                 parent_for_child.setdefault(cu, parent_url)
 
         child_candidates = prefer_shortest_by_bucket(child_candidates)
         if not child_candidates:
+            _dbg_s1(f"[S1][TREE][D{tree_depth}] no child candidates")
             break
 
-        c_keys = [key_for_url(u) for u in child_candidates]
+        c_keys = [embed_text_for_url(u, anchor_context_by_url.get(u)) for u in child_candidates]
 
         p_embs = encoder.encode(c_keys, normalize_embeddings=True)
         m_embs = encoder.encode(c_keys, normalize_embeddings=True)
@@ -4064,11 +4870,25 @@ def find_valid_roots(
 
         pass_high = []
         for u, k, ps, ms, cs in zip(child_candidates, c_keys, p_scores, m_scores, c_scores):
+            _dbg_s1(
+                f"[S1][TREE][D{tree_depth}][RANK] url={u} embed='{k}' "
+                f"prompt={_fmt_s1(ps)} menu={_fmt_s1(ms)} combo={_fmt_s1(cs)}"
+            )
             if ps >= threshold_prompt_root:
                 pass_high.append((u, ps, ms, cs, k))
+                _dbg_s1(
+                    f"[S1][TREE][D{tree_depth}][KEEP] url={u} "
+                    f"prompt={_fmt_s1(ps)}>={_fmt_s1(threshold_prompt_root)}"
+                )
+            else:
+                _dbg_s1(
+                    f"[S1][TREE][D{tree_depth}][DROP] url={u} "
+                    f"prompt={_fmt_s1(ps)}<{_fmt_s1(threshold_prompt_root)}"
+                )
 
         pass_high_sorted = sorted(pass_high, key=lambda x: x[1], reverse=True)
         if not pass_high_sorted:
+            _dbg_s1(f"[S1][TREE][D{tree_depth}] no children passed root threshold")
             break
 
         next_frontier = []
@@ -4082,10 +4902,12 @@ def find_valid_roots(
                 "menu": float(ms),
                 "combo": float(cs),
                 "key": k,
+                "anchor_context": anchor_context_by_url.get(u),
             }
             next_frontier.append(u)
 
         tree_frontier = next_frontier
+        _dbg_s1(f"[S1][TREE][D{tree_depth}] accepted_children={len(next_frontier)} total_nodes={len(tree_nodes)}")
 
     depth1_plus = [u for u, meta in tree_nodes.items() if meta.get("depth", 0) >= 1]
     depth1_plus = prefer_shortest_by_bucket(depth1_plus)
@@ -4094,6 +4916,13 @@ def find_valid_roots(
         out = {u: tree_nodes[u] for u in depth1_plus if u in tree_nodes}
     else:
         out = {accepted_root: tree_nodes[accepted_root]}
+
+    _dbg_s1(f"[S1] done roots_returned={len(out)} accepted_root={accepted_root}")
+    for i, (u, meta) in enumerate(out.items(), 1):
+        _dbg_s1(
+            f"[S1][OUT {i:02d}] url={u} depth={meta.get('depth')} "
+            f"prompt={_fmt_s1(meta.get('prompt'))} menu={_fmt_s1(meta.get('menu'))} combo={_fmt_s1(meta.get('combo'))}"
+        )
 
     return _prompt_rerank_and_cap(out)
 
@@ -4225,6 +5054,16 @@ def handle_result_no_api(source: Source, query: str, subj: str, hard_image_cap: 
                 seen.add(x); out.append(x)
         return out
 
+    prompt_id = _prompt_key(query or "")
+    if source.name and prompt_id:
+        try:
+            if _is_prompt_blocklisted_for_source(source.name, prompt_id):
+                dbg(f"[NOAPI][SOURCE][SKIP][BL] prompt_id={prompt_id} source={source.name}")
+                source.img_paths = []
+                return []
+        except Exception:
+            pass
+
     # Keep subject-driven Stage 1 discovery (you said it's intentional)
     lemma_obj_subj = get_limited_lemmas(subj, 4)
     lemma_obj_query = get_limited_lemmas(query, 5)
@@ -4252,6 +5091,7 @@ def handle_result_no_api(source: Source, query: str, subj: str, hard_image_cap: 
                 valid_endpoints.append(url_or_list)
 
     valid_endpoints = uniq_keep_order(clean_url(u) for u in valid_endpoints if u)
+    valid_endpoints = [u for u in valid_endpoints if u and not is_blocklisted_url(u)]
 
     if valid_endpoints:
         dbg(f"[NOAPI] using known endpoints count={len(valid_endpoints)} for subj={subj}")
@@ -4263,6 +5103,7 @@ def handle_result_no_api(source: Source, query: str, subj: str, hard_image_cap: 
             prompt_text=query,             # prompt rerank on final roots only
             max_roots=2, 
         )
+        roots = {clean_url(k): v for k, v in (roots or {}).items() if k and not is_blocklisted_url(k)}
     else:
         dbg("[NOAPI] no valid endpoints; starting Stage 1 discovery")
         roots = find_valid_roots(
@@ -4275,6 +5116,16 @@ def handle_result_no_api(source: Source, query: str, subj: str, hard_image_cap: 
 
     if not roots:
         dbg(f"[NOAPI] no roots after Stage 1 for {source.name}")
+        try:
+            if source.name and prompt_id:
+                _blocklist_prompt_for_source(
+                    source_name=source.name,
+                    prompt_id=prompt_id,
+                    query=query,
+                    reason="stage1_no_roots",
+                )
+        except Exception:
+            pass
         source.img_paths = []
         return []
 
@@ -4779,6 +5630,16 @@ def _embed_prompt_to_list(text: str):
     return v
 
 
+def _reset_research_images_dir() -> None:
+    try:
+        shutil.rmtree(IMAGES_PATH, ignore_errors=True)
+    except Exception as e:
+        dbg(f"[FS][WARN] failed to remove {IMAGES_PATH}: {e}")
+    os.makedirs(IMAGES_PATH, exist_ok=True)
+    IMAGE_METADATA.clear()
+    dbg(f"[FS] reset folder: {IMAGES_PATH}")
+
+
 def research_many(prompt_to_topic: Dict[str, str], max_workers: int = 3) -> Dict[str, List[str]]:
     """
     Parallel prompt research:
@@ -4792,6 +5653,8 @@ def research_many(prompt_to_topic: Dict[str, str], max_workers: int = 3) -> Dict
 
     if not items:
         return out
+
+    _reset_research_images_dir()
 
     # Phase A: parallel gather
     futures = []
@@ -4893,6 +5756,7 @@ def research(
     ddg_thr.start()
 
     # ---- 2) Stage2 runs on main thread (Playwright stays safe) ----
+    NON_API_IMAGES_CAP = 10
     stage2_total = 0
     sources_used = 0
 
@@ -4901,9 +5765,9 @@ def research(
             dbg(f"[NOAPI] stop: reached MAX_WEB_SOURCES_PER_PROMPT={MAX_WEB_SOURCES_PER_PROMPT}")
             break
 
-        remaining = MAX_STAGE2_IMAGES_PER_PROMPT - stage2_total
+        remaining = min(MAX_STAGE2_IMAGES_PER_PROMPT, NON_API_IMAGES_CAP) - stage2_total
         if remaining <= 0:
-            dbg(f"[NOAPI] stop: reached MAX_STAGE2_IMAGES_PER_PROMPT={MAX_STAGE2_IMAGES_PER_PROMPT}")
+            dbg(f"[NOAPI] stop: reached NON_API_IMAGES_CAP={NON_API_IMAGES_CAP}")
             break
 
         dbg(f"opened source {src.name}, has no api, starting process.. (remaining_stage2_cap={remaining})")

@@ -1,0 +1,90 @@
+{
+  "word_index_base": 0,
+  "end_index_inclusive": true,
+  "images": [
+    {
+      "name": "cell cycle diagram",
+      "prompt": "Simplified diagram of the eukaryotic cell cycle showing Interphase (G1, S, G2) and M phase in a circular flow, with arrows and labels for G1, S, G2, M",
+      "diagram": 1,
+      "range_start": 0,
+      "range_end": 170
+    },
+    {
+      "name": "cyclin-CDK complex",
+      "prompt": "Cartoon of a cyclin protein binding a CDK kinase to form an active cyclin-CDK complex, with arrows showing phosphorylation of target proteins",
+      "diagram": 1,
+      "range_start": 172,
+      "range_end": 311
+    },
+    {
+      "name": "DNA damage checkpoint",
+      "prompt": "Schematic of G1 DNA damage checkpoint: damaged DNA detected by sensors leading to p53 stabilization and CDK inhibitor increase, blocking G1/S cyclin-CDK",
+      "diagram": 1,
+      "range_start": 312,
+      "range_end": 424
+    },
+    {
+      "name": "mitosis overview",
+      "prompt": "Timeline strip showing the sequence of mitotic phases: prophase, prometaphase, metaphase, anaphase, telophase, cytokinesis with small icons for chromosomes and spindle at each phase",
+      "diagram": 1,
+      "range_start": 426,
+      "range_end": 547
+    },
+    {
+      "name": "prophase detail",
+      "prompt": "Cell in prophase: condensed chromosomes (sister chromatids joined at centromere) and separating centrosomes nucleating microtubules",
+      "diagram": 1,
+      "range_start": 458,
+      "range_end": 538
+    },
+    {
+      "name": "kinetochore attachment",
+      "prompt": "Close-up of prometaphase: nuclear envelope broken down, spindle microtubules attaching to kinetochores on sister chromatids (search-and-capture)",
+      "diagram": 1,
+      "range_start": 540,
+      "range_end": 619
+    },
+    {
+      "name": "metaphase plate",
+      "prompt": "Metaphase view: chromosomes aligned at the metaphase plate with microtubules from opposite poles attached, showing tension",
+      "diagram": 0,
+      "range_start": 620,
+      "range_end": 681
+    },
+    {
+      "name": "anaphase separation",
+      "prompt": "Anaphase action: sister chromatids separated and moving to opposite poles, shortening microtubules and cell elongation",
+      "diagram": 0,
+      "range_start": 682,
+      "range_end": 747
+    },
+    {
+      "name": "telophase events",
+      "prompt": "Telophase scene: nuclear envelopes reforming around decondensing chromosomes, nucleoli reappearing, spindle disassembling",
+      "diagram": 0,
+      "range_start": 748,
+      "range_end": 793
+    },
+    {
+      "name": "cytokinesis types",
+      "prompt": "Side-by-side comparison: animal cell cytokinesis with actin-myosin contractile ring forming a cleavage furrow, and plant cell forming a cell plate from vesicles",
+      "diagram": 0,
+      "range_start": 795,
+      "range_end": 861
+    },
+    {
+      "name": "meiosis pairing",
+      "prompt": "Meiosis I illustration: homologous chromosome pairing and crossing-over during prophase I with exchanged segments indicated",
+      "diagram": 1,
+      "range_start": 890,
+      "range_end": 1018
+    },
+    {
+      "name": "microscopy tools",
+      "prompt": "Simple classroom microscopy setup: light microscope, stained cell smear with visible mitotic figures, and labels for stains/markers for chromatin and spindles",
+      "diagram": 0,
+      "range_start": 1131,
+      "range_end": 1182
+    }
+  ]
+}

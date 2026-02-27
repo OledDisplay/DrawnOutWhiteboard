@@ -219,7 +219,7 @@ def rerank_image_candidates_siglip(
     # ---- STEP 3: Final score ----
 
     for c in prepared:
-        c["final_score"] = float(0.60 * c["confidence_score"] + 0.40 * c["clip_score"])
+        c["final_score"] = float(0.40 * c["confidence_score"] + 0.60 * c["clip_score"])
 
     prepared.sort(key=lambda d: d["final_score"], reverse=True)
     winners = prepared[: min(final_k, len(prepared))]

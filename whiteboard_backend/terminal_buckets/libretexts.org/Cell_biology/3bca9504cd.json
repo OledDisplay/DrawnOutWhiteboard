@@ -1,0 +1,310 @@
+{
+  "id": "3bca9504cd",
+  "subject": "Cell biology",
+  "registrable": "libretexts.org",
+  "entry_url": "https://bio.libretexts.org/Courses/Cedar_Crest_College/Intro_to_Biotechnology",
+  "created_at": "2026-02-26T22:55:26.630926Z",
+  "terminal_count": 75,
+  "terminals": [
+    {
+      "url": "https://bio.libretexts.org/Courses/Cedar_Crest_College/Intro_to_Biotechnology",
+      "key": "intro to biotechnology"
+    },
+    {
+      "url": "https://bio.libretexts.org/Courses/Cedar_Crest_College/Intro_to_Biotechnology/00:_Front_Matter",
+      "key": "00: front matter"
+    },
+    {
+      "url": "https://bio.libretexts.org/Courses/Cedar_Crest_College/Intro_to_Biotechnology/00:_Front_Matter/01:_TitlePage",
+      "key": "01: titlepage"
+    },
+    {
+      "url": "https://bio.libretexts.org/Courses/Cedar_Crest_College/Intro_to_Biotechnology/00:_Front_Matter/02:_InfoPage",
+      "key": "02: infopage"
+    },
+    {
+      "url": "https://bio.libretexts.org/Courses/Cedar_Crest_College/Intro_to_Biotechnology/00:_Front_Matter/03:_Table_of_Contents",
+      "key": "03: table of contents"
+    },
+    {
+      "url": "https://bio.libretexts.org/Courses/Cedar_Crest_College/Intro_to_Biotechnology/00:_Front_Matter/04:_Licensing",
+      "key": "04: licensing"
+    },
+    {
+      "url": "https://bio.libretexts.org/Courses/Cedar_Crest_College/Intro_to_Biotechnology/01:_Introduction_to_Science",
+      "key": "01: introduction to science"
+    },
+    {
+      "url": "https://bio.libretexts.org/Courses/Cedar_Crest_College/Intro_to_Biotechnology/01:_Introduction_to_Science/1.01:_Definition_and_a_Short_History_of_Biotechnology",
+      "key": "1.01: definition and a short history of biotechnology"
+    },
+    {
+      "url": "https://bio.libretexts.org/Courses/Cedar_Crest_College/Intro_to_Biotechnology/01:_Introduction_to_Science/1.02:_The_Process_of_Science",
+      "key": "1.02: the process of science"
+    },
+    {
+      "url": "https://bio.libretexts.org/Courses/Cedar_Crest_College/Intro_to_Biotechnology/02:_The_Molecules_of_Life",
+      "key": "02: the molecules of life"
+    },
+    {
+      "url": "https://bio.libretexts.org/Courses/Cedar_Crest_College/Intro_to_Biotechnology/02:_The_Molecules_of_Life/2.01:_The_Building_Blocks_of_Molecules",
+      "key": "2.01: the building blocks of molecules"
+    },
+    {
+      "url": "https://bio.libretexts.org/Courses/Cedar_Crest_College/Intro_to_Biotechnology/02:_The_Molecules_of_Life/2.02:_Water",
+      "key": "2.02: water"
+    },
+    {
+      "url": "https://bio.libretexts.org/Courses/Cedar_Crest_College/Intro_to_Biotechnology/02:_The_Molecules_of_Life/2.03:_Macromolecules",
+      "key": "2.03: macromolecules"
+    },
+    {
+      "url": "https://bio.libretexts.org/Courses/Cedar_Crest_College/Intro_to_Biotechnology/02:_The_Molecules_of_Life/2.04:_Carbohydrates",
+      "key": "2.04: carbohydrates"
+    },
+    {
+      "url": "https://bio.libretexts.org/Courses/Cedar_Crest_College/Intro_to_Biotechnology/02:_The_Molecules_of_Life/2.05:_Lipids",
+      "key": "2.05: lipids"
+    },
+    {
+      "url": "https://bio.libretexts.org/Courses/Cedar_Crest_College/Intro_to_Biotechnology/02:_The_Molecules_of_Life/2.06:_Nucleic_Acids",
+      "key": "2.06: nucleic acids"
+    },
+    {
+      "url": "https://bio.libretexts.org/Courses/Cedar_Crest_College/Intro_to_Biotechnology/02:_The_Molecules_of_Life/2.07:_Proteins",
+      "key": "2.07: proteins"
+    },
+    {
+      "url": "https://bio.libretexts.org/Courses/Cedar_Crest_College/Intro_to_Biotechnology/03:_Cells_and_Viruses",
+      "key": "03: cells and viruses"
+    },
+    {
+      "url": "https://bio.libretexts.org/Courses/Cedar_Crest_College/Intro_to_Biotechnology/03:_Cells_and_Viruses/3.01:_Themes_and_Concepts_of_Biology",
+      "key": "3.01: themes and concepts of biology"
+    },
+    {
+      "url": "https://bio.libretexts.org/Courses/Cedar_Crest_College/Intro_to_Biotechnology/03:_Cells_and_Viruses/3.02:_Prokaryotic_Cells",
+      "key": "3.02: prokaryotic cells"
+    },
+    {
+      "url": "https://bio.libretexts.org/Courses/Cedar_Crest_College/Intro_to_Biotechnology/03:_Cells_and_Viruses/3.03:_Eukaryotic_Cells",
+      "key": "3.03: eukaryotic cells"
+    },
+    {
+      "url": "https://bio.libretexts.org/Courses/Cedar_Crest_College/Intro_to_Biotechnology/03:_Cells_and_Viruses/3.04:_Viruses",
+      "key": "3.04: viruses"
+    },
+    {
+      "url": "https://bio.libretexts.org/Courses/Cedar_Crest_College/Intro_to_Biotechnology/04:_Central_Dogma",
+      "key": "04: central dogma"
+    },
+    {
+      "url": "https://bio.libretexts.org/Courses/Cedar_Crest_College/Intro_to_Biotechnology/04:_Central_Dogma/4.01:_The_Cell_Cycle",
+      "key": "4.01: the cell cycle"
+    },
+    {
+      "url": "https://bio.libretexts.org/Courses/Cedar_Crest_College/Intro_to_Biotechnology/04:_Central_Dogma/4.02:_DNA_Structure",
+      "key": "4.02: dna structure"
+    },
+    {
+      "url": "https://bio.libretexts.org/Courses/Cedar_Crest_College/Intro_to_Biotechnology/04:_Central_Dogma/4.03:_Replication_of_DNA",
+      "key": "4.03: replication of dna"
+    },
+    {
+      "url": "https://bio.libretexts.org/Courses/Cedar_Crest_College/Intro_to_Biotechnology/04:_Central_Dogma/4.04:_Transcription_of_RNA",
+      "key": "4.04: transcription of rna"
+    },
+    {
+      "url": "https://bio.libretexts.org/Courses/Cedar_Crest_College/Intro_to_Biotechnology/04:_Central_Dogma/4.05:_Translation_of_the_polypeptide",
+      "key": "4.05: translation of the polypeptide"
+    },
+    {
+      "url": "https://bio.libretexts.org/Courses/Cedar_Crest_College/Intro_to_Biotechnology/04:_Central_Dogma/4.06:_How_Genes_Are_Regulated",
+      "key": "4.06: how genes are regulated"
+    },
+    {
+      "url": "https://bio.libretexts.org/Courses/Cedar_Crest_College/Intro_to_Biotechnology/04:_Central_Dogma/4.07:_Mutations_and_DNA_Repair",
+      "key": "4.07: mutations and dna repair"
+    },
+    {
+      "url": "https://bio.libretexts.org/Courses/Cedar_Crest_College/Intro_to_Biotechnology/05:_Genetic_Engineering_and_Recombinant_DNA_Technology",
+      "key": "05: genetic engineering and recombinant dna technology"
+    },
+    {
+      "url": "https://bio.libretexts.org/Courses/Cedar_Crest_College/Intro_to_Biotechnology/05:_Genetic_Engineering_and_Recombinant_DNA_Technology/5.01:_Genome_Sequencing",
+      "key": "5.01: genome sequencing"
+    },
+    {
+      "url": "https://bio.libretexts.org/Courses/Cedar_Crest_College/Intro_to_Biotechnology/05:_Genetic_Engineering_and_Recombinant_DNA_Technology/5.02:_Principles_of_Genetic_Engineering",
+      "key": "5.02: principles of genetic engineering"
+    },
+    {
+      "url": "https://bio.libretexts.org/Courses/Cedar_Crest_College/Intro_to_Biotechnology/05:_Genetic_Engineering_and_Recombinant_DNA_Technology/5.03:_Creating_Recombinant_DNA",
+      "key": "5.03: creating recombinant dna"
+    },
+    {
+      "url": "https://bio.libretexts.org/Courses/Cedar_Crest_College/Intro_to_Biotechnology/05:_Genetic_Engineering_and_Recombinant_DNA_Technology/5.04:_Polymerase_Chain_Reaction_(PCR)",
+      "key": "5.04: polymerase chain reaction (pcr)"
+    },
+    {
+      "url": "https://bio.libretexts.org/Courses/Cedar_Crest_College/Intro_to_Biotechnology/06:_Forensic_Biotechnology",
+      "key": "06: forensic biotechnology"
+    },
+    {
+      "url": "https://bio.libretexts.org/Courses/Cedar_Crest_College/Intro_to_Biotechnology/06:_Forensic_Biotechnology/6.01:_Analysis_of_STRs",
+      "key": "6.01: analysis of strs"
+    },
+    {
+      "url": "https://bio.libretexts.org/Courses/Cedar_Crest_College/Intro_to_Biotechnology/07:_Microbial_Biotechnology",
+      "key": "07: microbial biotechnology"
+    },
+    {
+      "url": "https://bio.libretexts.org/Courses/Cedar_Crest_College/Intro_to_Biotechnology/07:_Microbial_Biotechnology/7.01:_Microbe_classification",
+      "key": "7.01: microbe classification"
+    },
+    {
+      "url": "https://bio.libretexts.org/Courses/Cedar_Crest_College/Intro_to_Biotechnology/07:_Microbial_Biotechnology/7.02:_Industrial_Applications_of_Microbial_Biotechnology",
+      "key": "7.02: industrial applications of microbial biotechnology"
+    },
+    {
+      "url": "https://bio.libretexts.org/Courses/Cedar_Crest_College/Intro_to_Biotechnology/07:_Microbial_Biotechnology/7.03:_Medical_Applications_of_Microbial_Biotechnology",
+      "key": "7.03: medical applications of microbial biotechnology"
+    },
+    {
+      "url": "https://bio.libretexts.org/Courses/Cedar_Crest_College/Intro_to_Biotechnology/07:_Microbial_Biotechnology/7.04:_Vaccines",
+      "key": "7.04: vaccines"
+    },
+    {
+      "url": "https://bio.libretexts.org/Courses/Cedar_Crest_College/Intro_to_Biotechnology/07:_Microbial_Biotechnology/7.05:_How_Does_SARS-Cov-2_Infect_Humans",
+      "key": "7.05: how does sars cov 2 infect humans"
+    },
+    {
+      "url": "https://bio.libretexts.org/Courses/Cedar_Crest_College/Intro_to_Biotechnology/07:_Microbial_Biotechnology/7.06:_Genes_Implicated_in_Severe_COVID-19_Infection_in_Humans",
+      "key": "7.06: genes implicated in severe covid 19 infection in humans"
+    },
+    {
+      "url": "https://bio.libretexts.org/Courses/Cedar_Crest_College/Intro_to_Biotechnology/07:_Microbial_Biotechnology/7.07:_Approaches_for_Vaccine_Development_Against_SARSCov2",
+      "key": "7.07: approaches for vaccine development against sarscov2"
+    },
+    {
+      "url": "https://bio.libretexts.org/Courses/Cedar_Crest_College/Intro_to_Biotechnology/08:_Environmental_Agricultural_and_Aquatic_Biotechnology",
+      "key": "08: environmental agricultural and aquatic biotechnology"
+    },
+    {
+      "url": "https://bio.libretexts.org/Courses/Cedar_Crest_College/Intro_to_Biotechnology/08:_Environmental_Agricultural_and_Aquatic_Biotechnology/8.01:_Applications_of_Environmental_Biotechnology",
+      "key": "8.01: applications of environmental biotechnology"
+    },
+    {
+      "url": "https://bio.libretexts.org/Courses/Cedar_Crest_College/Intro_to_Biotechnology/08:_Environmental_Agricultural_and_Aquatic_Biotechnology/8.02:_Applications_of_Agricultural_Biotechnology",
+      "key": "8.02: applications of agricultural biotechnology"
+    },
+    {
+      "url": "https://bio.libretexts.org/Courses/Cedar_Crest_College/Intro_to_Biotechnology/08:_Environmental_Agricultural_and_Aquatic_Biotechnology/8.03:_Aquaculture",
+      "key": "8.03: aquaculture"
+    },
+    {
+      "url": "https://bio.libretexts.org/Courses/Cedar_Crest_College/Intro_to_Biotechnology/09:_Stem_Cells_Cloning_and_Gene_Therapy",
+      "key": "09: stem cells cloning and gene therapy"
+    },
+    {
+      "url": "https://bio.libretexts.org/Courses/Cedar_Crest_College/Intro_to_Biotechnology/09:_Stem_Cells_Cloning_and_Gene_Therapy/9.01:_Stem_Cells",
+      "key": "9.01: stem cells"
+    },
+    {
+      "url": "https://bio.libretexts.org/Courses/Cedar_Crest_College/Intro_to_Biotechnology/09:_Stem_Cells_Cloning_and_Gene_Therapy/9.02:_Reproductive_Cloning",
+      "key": "9.02: reproductive cloning"
+    },
+    {
+      "url": "https://bio.libretexts.org/Courses/Cedar_Crest_College/Intro_to_Biotechnology/09:_Stem_Cells_Cloning_and_Gene_Therapy/9.03:_Therapeutic_Biotechnology",
+      "key": "9.03: therapeutic biotechnology"
+    },
+    {
+      "url": "https://bio.libretexts.org/Courses/Cedar_Crest_College/Intro_to_Biotechnology/09:_Stem_Cells_Cloning_and_Gene_Therapy/9.04:_Regenerative_Medicine",
+      "key": "9.04: regenerative medicine"
+    },
+    {
+      "url": "https://bio.libretexts.org/Courses/Cedar_Crest_College/Intro_to_Biotechnology/09:_Stem_Cells_Cloning_and_Gene_Therapy/9.05:_Principles_of_Medical_Biotechnology",
+      "key": "9.05: principles of medical biotechnology"
+    },
+    {
+      "url": "https://bio.libretexts.org/Courses/Cedar_Crest_College/Intro_to_Biotechnology/09:_Stem_Cells_Cloning_and_Gene_Therapy/9.06:_Diagnostic_Biotechnology",
+      "key": "9.06: diagnostic biotechnology"
+    },
+    {
+      "url": "https://bio.libretexts.org/Courses/Cedar_Crest_College/Intro_to_Biotechnology/10:_Animal_Biotechnology",
+      "key": "10: animal biotechnology"
+    },
+    {
+      "url": "https://bio.libretexts.org/Courses/Cedar_Crest_College/Intro_to_Biotechnology/10:_Animal_Biotechnology/10.01:_Applications_of_Animal_Biotechnology",
+      "key": "10.01: applications of animal biotechnology"
+    },
+    {
+      "url": "https://bio.libretexts.org/Courses/Cedar_Crest_College/Intro_to_Biotechnology/10:_Animal_Biotechnology/10.02:_Genetic_Engineering_in_Animals",
+      "key": "10.02: genetic engineering in animals"
+    },
+    {
+      "url": "https://bio.libretexts.org/Courses/Cedar_Crest_College/Intro_to_Biotechnology/10:_Animal_Biotechnology/10.03:_Principles_of_Mammalian_Cell_Culture",
+      "key": "10.03: principles of mammalian cell culture"
+    },
+    {
+      "url": "https://bio.libretexts.org/Courses/Cedar_Crest_College/Intro_to_Biotechnology/11:_Government_Oversight_of_Biotechnology",
+      "key": "11: government oversight of biotechnology"
+    },
+    {
+      "url": "https://bio.libretexts.org/Courses/Cedar_Crest_College/Intro_to_Biotechnology/11:_Government_Oversight_of_Biotechnology/11.01:_Environmental_Laws_and_Regulations",
+      "key": "11.01: environmental laws and regulations"
+    },
+    {
+      "url": "https://bio.libretexts.org/Courses/Cedar_Crest_College/Intro_to_Biotechnology/11:_Government_Oversight_of_Biotechnology/11.02:_The_Food_and_Drug_Administration_(FDA)",
+      "key": "11.02: the food and drug administration (fda)"
+    },
+    {
+      "url": "https://bio.libretexts.org/Courses/Cedar_Crest_College/Intro_to_Biotechnology/11:_Government_Oversight_of_Biotechnology/11.03:_Regulation_of_Plant_GMOs",
+      "key": "11.03: regulation of plant gmos"
+    },
+    {
+      "url": "https://bio.libretexts.org/Courses/Cedar_Crest_College/Intro_to_Biotechnology/11:_Government_Oversight_of_Biotechnology/11.04:_Regulation_of_Animal_GMOs_and_Medical_Foods",
+      "key": "11.04: regulation of animal gmos and medical foods"
+    },
+    {
+      "url": "https://bio.libretexts.org/Courses/Cedar_Crest_College/Intro_to_Biotechnology/11:_Government_Oversight_of_Biotechnology/11.05:_Principles_of_Quality_Assurance_(QA)_and_Quality_Control_(QC)",
+      "key": "11.05: principles of quality assurance (qa) and quality control (qc)"
+    },
+    {
+      "url": "https://bio.libretexts.org/Courses/Cedar_Crest_College/Intro_to_Biotechnology/zz:_Back_Matter",
+      "key": "zz: back matter"
+    },
+    {
+      "url": "https://bio.libretexts.org/Courses/Cedar_Crest_College/Intro_to_Biotechnology/zz:_Back_Matter/10:_Index",
+      "key": "10: index"
+    },
+    {
+      "url": "https://bio.libretexts.org/Courses/Cedar_Crest_College/Intro_to_Biotechnology/zz:_Back_Matter/20:_Glossary",
+      "key": "20: glossary"
+    },
+    {
+      "url": "https://bio.libretexts.org/Courses/Cedar_Crest_College/Intro_to_Biotechnology/zz:_Back_Matter/21:_Detailed_Licensing",
+      "key": "21: detailed licensing"
+    },
+    {
+      "url": "https://bio.libretexts.org/Courses/Cedar_Crest_College/Intro_to_Biotechnology/zz:_Back_Matter/22:_Detailed_Licensing",
+      "key": "22: detailed licensing"
+    },
+    {
+      "url": "https://bio.libretexts.org/Courses/Irvine_Valley_College/Biotechnology_Techniques:_From_Theory_to_Practice_(BIOT173_at_IVC)",
+      "key": "biotechnology techniques: from theory to practice (biot173 at ivc)"
+    },
+    {
+      "url": "https://bio.libretexts.org/Courses/Monterey_Peninsula_College/Raskoff_Environmental_Science/07:_Food_and_Agriculture",
+      "key": "07: food and agriculture"
+    },
+    {
+      "url": "https://bio.libretexts.org/Courses/University_of_Kansas/Biology_for_an_Informed_World/15:_Biotechnology",
+      "key": "15: biotechnology"
+    },
+    {
+      "url": "https://bio.libretexts.org/Courses/University_of_Massachusetts_Boston/Bio_252_254:_Genetics/04:__SPOC_IV_-_DNA_Replication",
+      "key": "04: spoc iv dna replication"
+    }
+  ]
+}

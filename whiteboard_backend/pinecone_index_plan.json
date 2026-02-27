@@ -1,0 +1,14 @@
+{
+  "prompt": [
+    "img-meta-promptctx-384",
+    "prompt"
+  ],
+  "context": [
+    "img-meta-promptctx-384",
+    "context"
+  ],
+  "clip": [
+    "img-meta-clip-1152",
+    "clip"
+  ]
+}
