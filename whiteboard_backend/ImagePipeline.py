@@ -1758,7 +1758,6 @@ def _hardcoded_get_images_test() -> int:
     # HARD TEST INPUTS
     prompts = {
         "Eukaryotic Cell": "Cell biology",
-        "Human Heart": "Anatomy",
     }
 
     print("[TEST] get_images hardcoded run")

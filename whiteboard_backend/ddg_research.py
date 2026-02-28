@@ -10,6 +10,8 @@ from urllib.parse import urlparse, unquote
 from bs4 import BeautifulSoup
 from duckduckgo_search import DDGS
 
+from smart_hits import extract_best_semantic_context_from_soup, smart_find_hits_in_soup
+
 
 # ----- LICENSE/HOST FILTERS (DDG ONLY) -----
 CC_PATTERNS = [
@@ -315,6 +317,75 @@ def ddg_cc_image_harvest(
                 break
 
     last_saved_path = None
+    sem_query_vec = query_embedding if query_embedding is not None else base_ctx_embedding
+
+    def _norm_img_url_for_match(u: str) -> str:
+        try:
+            p = urlparse((u or "").strip())
+            if not p.scheme or not p.netloc:
+                return ""
+            host = (p.hostname or "").lower()
+            path = (p.path or "").rstrip("/")
+            return f"{host}{path}"
+        except Exception:
+            return ""
+
+    def _ctx_from_semantic_hits(soup: BeautifulSoup, *, page_url: str, target_img_url: str) -> dict:
+        if soup is None or encoder is None or sem_query_vec is None:
+            return {}
+        try:
+            ranked = smart_find_hits_in_soup(
+                soup,
+                base_query=query,
+                lemma_obj=lemma_obj or {},
+                page_url=page_url,
+                min_score=0.70,
+                top_k=12,
+                encoder=encoder,
+                query_embedding=sem_query_vec,
+                sem_min_score=0.58,
+                return_embedding=True,
+            ) or []
+        except Exception as e:
+            dbg(f"[DDG] smart_find_hits_in_soup error: {e}")
+            return {}
+
+        if not ranked:
+            return {}
+
+        target_norm = _norm_img_url_for_match(target_img_url)
+
+        chosen_details = None
+        chosen_score = 0.0
+        for _node, score, details in ranked:
+            cand_img = (details or {}).get("best_img_url") or ""
+            cand_norm = _norm_img_url_for_match(cand_img)
+            if target_norm and cand_norm and target_norm == cand_norm:
+                chosen_details = details or {}
+                chosen_score = float(score or 0.0)
+                break
+
+        if chosen_details is None:
+            _node, score, details = ranked[0]
+            chosen_details = details or {}
+            chosen_score = float(score or 0.0)
+
+        out = {
+            "source": "semantic_hits",
+            "heading_text": (chosen_details.get("heading_text") or "")[:120],
+            "snippet": (chosen_details.get("snippet") or "")[:160],
+            "ctx_text": (chosen_details.get("ctx_text") or chosen_details.get("snippet") or "")[:240],
+            "ctx_score": float(chosen_details.get("ctx_score", chosen_score) or chosen_score),
+            "ctx_sem_score": float(
+                chosen_details.get("ctx_sem_score", chosen_details.get("sem_score", chosen_score)) or chosen_score
+            ),
+            "ctx_confidence": float(
+                chosen_details.get("ctx_sem_score", chosen_details.get("ctx_score", chosen_score)) or chosen_score
+            ),
+        }
+        if "ctx_embedding" in chosen_details and chosen_details.get("ctx_embedding") is not None:
+            out["ctx_embedding"] = chosen_details.get("ctx_embedding")
+        return normalize_ctx_meta(out)
 
     for r in _yield_ddg_images(query, ddg_cap):
         if len(saved) >= target_count:
@@ -341,7 +412,6 @@ def ddg_cc_image_harvest(
             continue
 
         if not _cc_evidence_in_html(snip_html, _CC_RX):
-            dbg(f"[DDG] no CC evidence -> skip  {page_url}")
             no_cc_streak += 1
             no_save_streak += 1
         else:
@@ -354,21 +424,52 @@ def ddg_cc_image_harvest(
             ctx_meta: dict = {}
             try:
                 soup = BeautifulSoup(full_html, "html.parser")
+
+                # Primary context path: same hit logic style as ImageResearcher.
+                # This uses paragraph -> subpart semantic selection and keeps the exact
+                # embedding that drove the winning hit in ctx_embedding.
                 try:
-                    from ddg_image_context import ddg_extract_image_context
-                    ctx_meta = ddg_extract_image_context(
+                    ctx_meta = _ctx_from_semantic_hits(
                         soup,
                         page_url=page_url,
-                        image_url=img_url,
-                        base_query=query,
-                        lemma_obj=lemma_obj or {},
-                        encoder=encoder,
-                        query_embedding=query_embedding,
-                        return_embedding=True,
+                        target_img_url=img_url,
                     ) or {}
-                    ctx_meta = normalize_ctx_meta(ctx_meta)
                 except Exception as e:
-                    dbg(f"[DDG] ddg_extract_image_context error: {e}")
+                    dbg(f"[DDG] smart_hits context extraction error: {e}")
+
+                # Fallback: image-specific extractor, then legacy semantic fallback.
+                if not ctx_meta:
+                    try:
+                        from ddg_image_context import ddg_extract_image_context
+                        ctx_meta = ddg_extract_image_context(
+                            soup,
+                            page_url=page_url,
+                            image_url=img_url,
+                            base_query=query,
+                            lemma_obj=lemma_obj or {},
+                            encoder=encoder,
+                            query_embedding=sem_query_vec,
+                            return_embedding=True,
+                        ) or {}
+                        ctx_meta = normalize_ctx_meta(ctx_meta)
+                    except Exception as e:
+                        dbg(f"[DDG] ddg_extract_image_context error: {e}")
+
+                if not ctx_meta:
+                    try:
+                        sem_ctx = extract_best_semantic_context_from_soup(
+                            soup,
+                            base_query=query,
+                            encoder=encoder,
+                            query_embedding=sem_query_vec,
+                            sem_min_score=0.58,
+                            return_embedding=True,
+                        ) or {}
+                        sem_ctx = normalize_ctx_meta(sem_ctx)
+                        if sem_ctx:
+                            ctx_meta.update(sem_ctx)
+                    except Exception as e:
+                        dbg(f"[DDG] semantic context extraction error: {e}")
             except Exception as e:
                 dbg(f"[DDG] context soup error: {e}")
 
@@ -413,5 +514,4 @@ def ddg_cc_image_harvest(
                 dbg(f"[DDG] stopping: {no_save_streak} consecutive candidates without saving an image")
                 break
 
-    dbg(f"[DDG] saved ({len(saved)}/{target_count}) last={last_saved_path} dir={dest_dir}")
     return saved

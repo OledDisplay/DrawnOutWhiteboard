@@ -299,6 +299,10 @@ _CAND_SELECTORS = [
     ".caption",".figure"
 ]
 
+_PARA_SELECTORS = [
+    "p", "li", "figcaption", "blockquote"
+]
+
 def _candidate_nodes(soup: BeautifulSoup) -> List[Tag]:
     seen: Set[Tag] = set()
     out: List[Tag] = []
@@ -307,6 +311,85 @@ def _candidate_nodes(soup: BeautifulSoup) -> List[Tag]:
             if isinstance(n, Tag) and n not in seen:
                 seen.add(n); out.append(n)
     return out
+
+
+def _paragraph_nodes(soup: BeautifulSoup) -> List[Tag]:
+    seen: Set[Tag] = set()
+    out: List[Tag] = []
+    for sel in _PARA_SELECTORS:
+        for n in soup.select(sel):
+            if isinstance(n, Tag) and n not in seen:
+                seen.add(n)
+                out.append(n)
+    return out
+
+
+def _split_into_three_parts(text: str) -> List[str]:
+    txt = (text or "").strip()
+    if not txt:
+        return []
+    words = txt.split()
+    if len(words) < 18:
+        return [txt]
+    n = len(words)
+    c1 = max(1, n // 3)
+    c2 = max(c1 + 1, (2 * n) // 3)
+    parts = [
+        " ".join(words[:c1]).strip(),
+        " ".join(words[c1:c2]).strip(),
+        " ".join(words[c2:]).strip(),
+    ]
+    parts = [p for p in parts if p and len(_content_tokens(p)) >= 4]
+    return parts or [txt]
+
+
+def _best_semantic_context_for_text(
+    text: str,
+    *,
+    encoder: Any,
+    query_embedding: Any,
+    para_embedding: Optional[Any] = None,
+    sem_min_score: float = 0.58,
+    solid_margin: float = 0.08,
+) -> Optional[Tuple[str, Any, float, str]]:
+    """
+    Returns best semantic context for a text block:
+      (best_text, best_embedding, best_sim, granularity)
+    granularity = "paragraph" | "subpart"
+    """
+    if not text or encoder is None or query_embedding is None:
+        return None
+
+    try:
+        p_emb = para_embedding if para_embedding is not None else encoder.encode(text)
+    except Exception:
+        return None
+
+    best_text = text
+    best_emb = p_emb
+    best_sim = _cosine_sim(query_embedding, p_emb)
+    granularity = "paragraph"
+
+    sem_floor = max(0.0, float(sem_min_score))
+    solid_thr = min(0.99, sem_floor + max(0.01, float(solid_margin)))
+
+    # Only refine a paragraph when it is already a solid semantic hit.
+    if best_sim >= solid_thr:
+        parts = _split_into_three_parts(text)
+        if len(parts) > 1:
+            try:
+                p_embs = encoder.encode(parts)
+                for part, emb in zip(parts, p_embs):
+                    s = _cosine_sim(query_embedding, emb)
+                    if s > best_sim:
+                        best_sim = s
+                        best_text = part
+                        best_emb = emb
+                        granularity = "subpart"
+            except Exception:
+                pass
+
+    return best_text, best_emb, float(best_sim), granularity
 
 # ---------- image helpers (attrs + local context) ----------
 
@@ -490,6 +573,7 @@ def pick_best_image_for_hit(
 
     hit_ctx = (hit_details.get("ctx_text") or hit_details.get("snippet") or "") if isinstance(hit_details, dict) else ""
     hit_head = (hit_details.get("heading_text") or "") if isinstance(hit_details, dict) else ""
+    hit_sem = float((hit_details.get("ctx_sem_score") if isinstance(hit_details, dict) else None) or (hit_details.get("sem_score") if isinstance(hit_details, dict) else 0.0) or 0.0)
     hit_ref = set(_content_tokens((hit_head + " " + hit_ctx).strip()))
     if not hit_ref:
         hit_ref = set(_content_tokens(_text_of(hit_node)))
@@ -534,8 +618,7 @@ def pick_best_image_for_hit(
 
             attr_text, attr_tokens = _image_attr_text_and_tokens(img)
             dom = _image_dom_context(img)
-            dom_ctx = _find_context_window(dom, base_query, profile) if dom else ""
-            dom_tokens = _content_tokens(dom_ctx)
+            dom_tokens = _content_tokens(dom or "")
 
             hit_loc = _cand_cov(dom_tokens, hit_ref)
             hit_attr = _cand_cov(attr_tokens, hit_ref)
@@ -553,34 +636,22 @@ def pick_best_image_for_hit(
                 "lex": float(lex),
                 "hit_loc": float(hit_loc),
                 "hit_attr": float(hit_attr),
-                "ctx_text": (dom_ctx or "")[:200],
+                "ctx_text": ((hit_ctx or dom or "")[:200]),
                 "attr_text": (attr_text or "")[:120],
             })
 
     if not cands:
         if debug:
-            dbg("[HIT→IMG] ❌ none")
+            dbg("[HIT->IMG] no candidates")
         return None
 
     cands.sort(key=lambda d: d["lex"], reverse=True)
 
-    # optional semantic bump only for top few
-    if encoder is not None and query_embedding is not None:
-        topm = cands[:3]
-        for d in topm:
-            try:
-                t = (d["ctx_text"] or "").strip()
-                if not t:
-                    d["score"] = d["lex"]
-                else:
-                    sem = _cosine_sim(query_embedding, encoder.encode(t))
-                    d["score"] = 0.75 * d["lex"] + 0.25 * float(sem)
-            except Exception:
-                d["score"] = d["lex"]
-        for d in cands[3:]:
-            d["score"] = d["lex"]
-    else:
-        for d in cands:
+    # Use the already-selected hit part semantic score; do not re-embed per-image context.
+    for d in cands:
+        if hit_sem > 0.0:
+            d["score"] = 0.80 * d["lex"] + 0.20 * hit_sem
+        else:
             d["score"] = d["lex"]
 
     cands.sort(key=lambda d: d["score"], reverse=True)
@@ -588,17 +659,18 @@ def pick_best_image_for_hit(
 
     if best["score"] < float(min_score):
         if debug:
-            dbg(f"[HIT→IMG] ❌ best={best['score']:.3f} < {min_score:.3f}")
+            dbg(f"[HIT->IMG] reject best={best['score']:.3f} < {min_score:.3f}")
         return None
 
     if debug:
-        dbg(f"[HIT→IMG] ✅ score={best['score']:.3f} loc={best['hit_loc']:.2f} attr={best['hit_attr']:.2f}  {best['url']}")
+        dbg(f"[HIT->IMG] keep score={best['score']:.3f} loc={best['hit_loc']:.2f} attr={best['hit_attr']:.2f}  {best['url']}")
 
     meta = {
         "best_img_hitLoc": best["hit_loc"],
         "best_img_hitAttr": best["hit_attr"],
         "best_img_attr_text": best["attr_text"],
         "best_img_ctx_text": best["ctx_text"],
+        "best_img_ctx_sem": float(hit_sem),
         "best_img_score": best["score"],
     }
     return best["url"], best["score"], meta
@@ -623,59 +695,107 @@ def smart_find_hits_in_soup(
     Returns a ranked list of (node, score, details). Filter by min_score and optional top_k.
     """
     profile = QueryProfile(base_query, lemma_obj)
-    if not profile.any_tokens() and not profile.exact_rx:
+    if not profile.any_tokens() and not profile.exact_rx and not (encoder is not None and query_embedding is not None):
         return []
 
     use_semantic = encoder is not None and query_embedding is not None
+    scored: List[Tuple[Tag, float, dict]] = []
 
+    # Semantic-first path: paragraph-level embedding + optional 3-way subpart refinement.
+    if use_semantic:
+        sem_floor = max(0.0, float(sem_min_score))
+        para_nodes = _paragraph_nodes(soup) or _candidate_nodes(soup)
+        nodes: List[Tag] = []
+        texts: List[str] = []
+        headings: List[str] = []
+
+        for n in para_nodes:
+            t = _text_of(n)
+            if len(_content_tokens(t)) < 6:
+                continue
+            nodes.append(n)
+            texts.append(t)
+            headings.append(_text_of(_nearest_heading(n)))
+
+        if not nodes:
+            return []
+
+        try:
+            para_embs = encoder.encode(texts)
+        except Exception:
+            para_embs = [None] * len(texts)
+
+        for n, text, htxt, p_emb in zip(nodes, texts, headings, para_embs):
+            if p_emb is None:
+                continue
+
+            best = _best_semantic_context_for_text(
+                text,
+                encoder=encoder,
+                query_embedding=query_embedding,
+                para_embedding=p_emb,
+                sem_min_score=sem_floor,
+            )
+            if not best:
+                continue
+
+            best_text, best_emb, best_sem, gran = best
+            if best_sem < sem_floor:
+                continue
+
+            details = {
+                "source": "semantic_paragraph",
+                "heading_text": (htxt or "")[:120],
+                "snippet": (text or "")[:160],
+                "ctx_text": (best_text or "")[:240],
+                "ctx_score": float(best_sem),
+                "sem_score": float(best_sem),
+                "ctx_sem_score": float(best_sem),
+                "semantic_granularity": gran,
+            }
+            if return_embedding:
+                details["ctx_embedding"] = best_emb
+
+            picked = pick_best_image_for_hit(
+                soup=soup,
+                hit_node=n,
+                hit_details=details,
+                page_url=page_url,
+                base_query=base_query,
+                lemma_obj=lemma_obj,
+                encoder=encoder,
+                query_embedding=query_embedding,
+                window_blocks=2,
+                min_score=0.14,
+                debug=True,
+            )
+            if picked:
+                img_url, img_score, img_meta = picked
+                details["best_img_url"] = img_url
+                details["best_img_score"] = img_score
+                details.update(img_meta)
+
+            scored.append((n, float(best_sem), details))
+
+        scored.sort(key=lambda x: x[1], reverse=True)
+        return scored[:top_k] if top_k else scored
+
+    # Fallback lexical path (only when semantic backend is unavailable).
     cands = _candidate_nodes(soup)
-    scored: List[Tuple[Tag,float,dict]] = []
-
-    # Precompute nearest heading texts to avoid repeated DOM walk
-    heading_cache = {}
     for n in cands:
-        if n in heading_cache:
-            htxt = heading_cache[n]
-        else:
-            h = _nearest_heading(n)
-            htxt = _text_of(h)
-            heading_cache[n] = htxt
-
+        h = _nearest_heading(n)
+        htxt = _text_of(h)
         text = _text_of(n)
         s, details = _score_block(profile, text, htxt)
         if s < min_score:
             continue
 
-        # Build context window around the hit
         ctx_text = _find_context_window(text, base_query, profile)
         details["heading_text"] = htxt[:120]
         details["snippet"] = text[:160]
         details["ctx_text"] = ctx_text[:240]
+        details["ctx_score"] = float(s)
 
-        # Optional semantic filtering with MiniLM (or any sentence encoder)
-        if use_semantic:
-            ctx_emb = encoder.encode(ctx_text)
-            sem_score = _cosine_sim(query_embedding, ctx_emb)
-            details["sem_score"] = sem_score
-            if return_embedding:
-                details["ctx_embedding"] = ctx_emb
-
-            # --- DEBUG: log every rejection by semantic context ---
-            if sem_score < sem_min_score:
-                try:
-                    snip = ctx_text.replace("\n", " ")
-                    if len(snip) > 160:
-                        snip = snip[:160] + "..."
-                except Exception:
-                    snip = ""
-                print(
-                    f"[HIT-REJECT][CTX] sem_score={sem_score:.3f} < threshold={sem_min_score:.3f}  "
-                    f"snippet='{snip}'"
-                )
-                continue
-            # --- end debug block ---
-
-        # attach ONE best image for the hit (above/below only)
         picked = pick_best_image_for_hit(
             soup=soup,
             hit_node=n,
@@ -699,6 +819,67 @@ def smart_find_hits_in_soup(
 
     scored.sort(key=lambda x: x[1], reverse=True)
     return scored[:top_k] if top_k else scored
+
+
+def extract_best_semantic_context_from_soup(
+    soup: BeautifulSoup,
+    base_query: str,
+    *,
+    encoder: Optional[Any],
+    query_embedding: Optional[Any],
+    sem_min_score: float = 0.58,
+    return_embedding: bool = True,
+) -> dict:
+    """
+    Reusable context extractor (DDG + other pipelines):
+      - embeds paragraph blocks
+      - if a paragraph is solid, splits it into 3 subparts and picks the best subpart
+      - returns context metadata compatible with ImageResearcher._normalize_ctx_meta
+    """
+    if soup is None or encoder is None or query_embedding is None:
+        return {}
+
+    sem_floor = max(0.0, float(sem_min_score))
+    para_nodes = _paragraph_nodes(soup) or _candidate_nodes(soup)
+    best_obj = None
+    best_sem = -1.0
+
+    for n in para_nodes:
+        txt = _text_of(n)
+        if len(_content_tokens(txt)) < 6:
+            continue
+        best = _best_semantic_context_for_text(
+            txt,
+            encoder=encoder,
+            query_embedding=query_embedding,
+            sem_min_score=sem_floor,
+        )
+        if not best:
+            continue
+        best_text, best_emb, sem, gran = best
+        if sem > best_sem:
+            best_sem = sem
+            best_obj = (n, txt, best_text, best_emb, gran)
+
+    if best_obj is None or best_sem < sem_floor:
+        return {}
+
+    n, raw_txt, best_text, best_emb, gran = best_obj
+    heading = _text_of(_nearest_heading(n))
+    out = {
+        "source": "semantic_paragraph",
+        "heading_text": (heading or "")[:120],
+        "snippet": (raw_txt or "")[:160],
+        "ctx_text": (best_text or "")[:240],
+        "ctx_score": float(best_sem),
+        "sem_score": float(best_sem),
+        "ctx_sem_score": float(best_sem),
+        "ctx_confidence": float(best_sem),
+        "semantic_granularity": gran,
+    }
+    if return_embedding:
+        out["ctx_embedding"] = best_emb
+    return out
 
 # ---------- second pass: image-driven hits ----------
 

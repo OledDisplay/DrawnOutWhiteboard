@@ -9,24 +9,8 @@
     "Geography": ""
   },
   "SubjectUrlsFound": {
-    "Cell biology": [
+    "embv1:H4sIAEwCo2kA_w3O-09NcQAA8O_5fr_nnO-9t27ldrmsYUqrvOY5tn5izLPMrkxhtYWRtuY1IXlMRdiyPDLzynNCkvKW0VZNWL94DDHNlqG7W7dzzvfJ5y_4mDQTQSuOB-k8rV8vNxa6U8gmyViuvVb-Cj_hNdYpY1jYo3phtrZMBEUSTGcTwQbTT4dab8VHchjujZ4my1AHHyOr9TZxFbWK1VJp74z3cA_IslPAJZ4jk_mmQR84DXwxt-wKdD-2Wt5FI2kM-GOccWVGKsBsXBKZqk7i5_CNlu-KRqvhBZqIOkm9LMLxYpRZSS4wr1iO77mv8j60RwyAK1q7UfC3FvebHuc4afMEgAAHYBK6aL6ytuB0vVgEwQ81X3wXDXqqyVTIXcqK3T9hQH5S5_hlst7OVickAGO0MtEju0kj72E2wqEHqhNag894LEhDheA4Ohp-LX3aDp5gxcrr2uZIOsyjRTLb-upKZOvMNtEhCb9LkgGGpvDyLyrFjhcj1ArLT56iJXQ0nSE2qk-4Wj4xV9rN9KQecnLFPhYwb8Iu1Dm4NKrZrDJK-6rC5aASpMopoTpzZl8uWER84IRxpk-pBeys4w4fYpZ9Gc4Xcx0_fAgfqrqB8VYdX_H_n6FvdSI0RiSRH94E_o3e1zJcE7RmMgpiWEmLB1_gFvmYrVGtobyoxSoXpzLD3RxJ1VexOjCdpsk4rQ0fQ7PQaSOHrzRUJB8ulXOphXLIUxjnGu5ZJktg9sBOWS8-0CZQi_z6QbvJuCbynHjbr0_SsbM7arHwoSyZaE5C591Z9h0qGUDb7FZYAZvgEfiYBkSjKHJ3WwVoP9FlkmxB6aFdVrkT4ABMjr4CKeoNzxG7JFENni6jlExTNcYBWGDOxNNJE19oHwE3-Ft7ovyq1g_5ZTxixaoe_HRtsMpIBxmnd_FaWoqrzM-R2_peUei8xIWygeXAHpjp3RJp52VWTXi79lses2f0F6Kg1ctmo24VNMZ6Erwl4h9mUMQnAAMAAA==": [
       "https://commons.libretexts.org/book/bio-1764"
-    ],
-    "Anatomy": [
-      "https://commons.libretexts.org/book/med-46614"
     ]
-  },
-  "Roots": [
-    {
-      "root": "https://commons.libretexts.org/book/med-46614",
-      "NoImagePromptBlocklist": {
-        "human_heart_731eb6b0": {
-          "query": "Human Heart",
-          "count": 1,
-          "reason": "no_images",
-          "last_seen": "2026-02-27T00:15:44.983140Z"
-        }
-      }
-    }
-  ]
-}
+  }
+  }
