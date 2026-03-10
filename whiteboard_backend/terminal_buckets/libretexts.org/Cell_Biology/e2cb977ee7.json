@@ -1,0 +1,450 @@
+{
+  "id": "e2cb977ee7",
+  "subject": "Cell Biology",
+  "registrable": "libretexts.org",
+  "entry_url": "https://commons.libretexts.org/book/bio-79686",
+  "created_at": "2026-03-10T18:14:44.216874Z",
+  "terminal_count": 110,
+  "terminals": [
+    {
+      "url": "https://batch.libretexts.org/print/Letter/Finished/bio-79686/LibreText.imscc",
+      "key": "libretext.imscc"
+    },
+    {
+      "url": "https://bio.libretexts.org/@api/deki/pages/79686/files/=mindtouch.page",
+      "key": "=mindtouch.page"
+    },
+    {
+      "url": "https://bio.libretexts.org/Courses/CT_State_Northwestern/General_Ecology_Ecology/zz:_Back_Matter/30:_Detailed_Licensing",
+      "key": "30: detailed licensing"
+    },
+    {
+      "url": "https://bio.libretexts.org/Courses/CT_State_Northwestern/Introduction_to_Environmental_Science",
+      "key": "introduction to environmental science"
+    },
+    {
+      "url": "https://bio.libretexts.org/Courses/CT_State_Northwestern/Introduction_to_Environmental_Science/00:_Front_Matter",
+      "key": "00: front matter"
+    },
+    {
+      "url": "https://bio.libretexts.org/Courses/CT_State_Northwestern/Introduction_to_Environmental_Science/00:_Front_Matter/01:_TitlePage",
+      "key": "01: titlepage"
+    },
+    {
+      "url": "https://bio.libretexts.org/Courses/CT_State_Northwestern/Introduction_to_Environmental_Science/00:_Front_Matter/02:_InfoPage",
+      "key": "02: infopage"
+    },
+    {
+      "url": "https://bio.libretexts.org/Courses/CT_State_Northwestern/Introduction_to_Environmental_Science/00:_Front_Matter/03:_Table_of_Contents",
+      "key": "03: table of contents"
+    },
+    {
+      "url": "https://bio.libretexts.org/Courses/CT_State_Northwestern/Introduction_to_Environmental_Science/00:_Front_Matter/04:_Licensing",
+      "key": "04: licensing"
+    },
+    {
+      "url": "https://bio.libretexts.org/Courses/CT_State_Northwestern/Introduction_to_Environmental_Science/11:_Air_Pollution_Climate_Change_and_Ozone_Depletion",
+      "key": "11: air pollution climate change and ozone depletion"
+    },
+    {
+      "url": "https://bio.libretexts.org/Courses/CT_State_Northwestern/Introduction_to_Environmental_Science/11:_Air_Pollution_Climate_Change_and_Ozone_Depletion/11.1:_Atmospheric_Pollution",
+      "key": "11.1: atmospheric pollution"
+    },
+    {
+      "url": "https://bio.libretexts.org/Courses/CT_State_Northwestern/Introduction_to_Environmental_Science/11:_Air_Pollution_Climate_Change_and_Ozone_Depletion/11.2:_Ozone_Depletion",
+      "key": "11.2: ozone depletion"
+    },
+    {
+      "url": "https://bio.libretexts.org/Courses/CT_State_Northwestern/Introduction_to_Environmental_Science/11:_Air_Pollution_Climate_Change_and_Ozone_Depletion/11.3:_Acid_Rain",
+      "key": "11.3: acid rain"
+    },
+    {
+      "url": "https://bio.libretexts.org/Courses/CT_State_Northwestern/Introduction_to_Environmental_Science/11:_Air_Pollution_Climate_Change_and_Ozone_Depletion/11.4:_Revisiting_Climate_Change",
+      "key": "11.4: revisiting climate change"
+    },
+    {
+      "url": "https://bio.libretexts.org/Courses/CT_State_Northwestern/Introduction_to_Environmental_Science/11:_Air_Pollution_Climate_Change_and_Ozone_Depletion/11.5:_Chapter_Resources",
+      "key": "11.5: chapter resources"
+    },
+    {
+      "url": "https://bio.libretexts.org/Courses/CT_State_Northwestern/Introduction_to_Environmental_Science/11:_Conventional_and_Sustainable_Energy",
+      "key": "11: conventional and sustainable energy"
+    },
+    {
+      "url": "https://bio.libretexts.org/Courses/CT_State_Northwestern/Introduction_to_Environmental_Science/11:_Conventional_and_Sustainable_Energy/10.1:_Mineral_Resources_and_Extraction",
+      "key": "10.1: mineral resources and extraction"
+    },
+    {
+      "url": "https://bio.libretexts.org/Courses/CT_State_Northwestern/Introduction_to_Environmental_Science/11:_Conventional_and_Sustainable_Energy/10.2:_Forms_of_Energy",
+      "key": "10.2: forms of energy"
+    },
+    {
+      "url": "https://bio.libretexts.org/Courses/CT_State_Northwestern/Introduction_to_Environmental_Science/11:_Conventional_and_Sustainable_Energy/10.3:_Challenges_and_Impacts_of_Energy_Use",
+      "key": "10.3: challenges and impacts of energy use"
+    },
+    {
+      "url": "https://bio.libretexts.org/Courses/CT_State_Northwestern/Introduction_to_Environmental_Science/11:_Conventional_and_Sustainable_Energy/10.4:_Non-Renewable_Energy_Sources",
+      "key": "10.4: non renewable energy sources"
+    },
+    {
+      "url": "https://bio.libretexts.org/Courses/CT_State_Northwestern/Introduction_to_Environmental_Science/11:_Conventional_and_Sustainable_Energy/10.5:_Renewable_Energy_Sources",
+      "key": "10.5: renewable energy sources"
+    },
+    {
+      "url": "https://bio.libretexts.org/Courses/CT_State_Northwestern/Introduction_to_Environmental_Science/11:_Conventional_and_Sustainable_Energy/10.S:_Chapter_Resources",
+      "key": "10.s: chapter resources"
+    },
+    {
+      "url": "https://bio.libretexts.org/Courses/CT_State_Northwestern/Introduction_to_Environmental_Science/12:_Water_Availability_and_Use",
+      "key": "12: water availability and use"
+    },
+    {
+      "url": "https://bio.libretexts.org/Courses/CT_State_Northwestern/Introduction_to_Environmental_Science/12:_Water_Availability_and_Use/12.1:_Water_Cycle_and_Fresh_Water_Supply",
+      "key": "12.1: water cycle and fresh water supply"
+    },
+    {
+      "url": "https://bio.libretexts.org/Courses/CT_State_Northwestern/Introduction_to_Environmental_Science/12:_Water_Availability_and_Use/12.2:_Water_Supply_Problems_and_Solutions",
+      "key": "12.2: water supply problems and solutions"
+    },
+    {
+      "url": "https://bio.libretexts.org/Courses/CT_State_Northwestern/Introduction_to_Environmental_Science/12:_Water_Availability_and_Use/12.3:_Case_Study_-_The_Aral_Sea_-_Going_Going_Gone",
+      "key": "12.3: case study the aral sea going going gone"
+    },
+    {
+      "url": "https://bio.libretexts.org/Courses/CT_State_Northwestern/Introduction_to_Environmental_Science/12:_Water_Availability_and_Use/12.4:_Water_Pollution",
+      "key": "12.4: water pollution"
+    },
+    {
+      "url": "https://bio.libretexts.org/Courses/CT_State_Northwestern/Introduction_to_Environmental_Science/12:_Water_Availability_and_Use/12.5:_Water_Treatment",
+      "key": "12.5: water treatment"
+    },
+    {
+      "url": "https://bio.libretexts.org/Courses/CT_State_Northwestern/Introduction_to_Environmental_Science/12:_Water_Availability_and_Use/12.6:_Chapter_Resources",
+      "key": "12.6: chapter resources"
+    },
+    {
+      "url": "https://bio.libretexts.org/Courses/CT_State_Northwestern/Introduction_to_Environmental_Science/13:_Solid_Toxic_and_Hazardous_Waste",
+      "key": "13: solid toxic and hazardous waste"
+    },
+    {
+      "url": "https://bio.libretexts.org/Courses/CT_State_Northwestern/Introduction_to_Environmental_Science/13:_Solid_Toxic_and_Hazardous_Waste/13.1:_Waste_Generation",
+      "key": "13.1: waste generation"
+    },
+    {
+      "url": "https://bio.libretexts.org/Courses/CT_State_Northwestern/Introduction_to_Environmental_Science/13:_Solid_Toxic_and_Hazardous_Waste/13.2:_Waste_Disposal",
+      "key": "13.2: waste disposal"
+    },
+    {
+      "url": "https://bio.libretexts.org/Courses/CT_State_Northwestern/Introduction_to_Environmental_Science/13:_Solid_Toxic_and_Hazardous_Waste/13.3:_Solid_Waste_and_Marine_Life",
+      "key": "13.3: solid waste and marine life"
+    },
+    {
+      "url": "https://bio.libretexts.org/Courses/CT_State_Northwestern/Introduction_to_Environmental_Science/13:_Solid_Toxic_and_Hazardous_Waste/13.4:_Waste_Reduction",
+      "key": "13.4: waste reduction"
+    },
+    {
+      "url": "https://bio.libretexts.org/Courses/CT_State_Northwestern/Introduction_to_Environmental_Science/13:_Solid_Toxic_and_Hazardous_Waste/13.S:_Review",
+      "key": "13.s: review"
+    },
+    {
+      "url": "https://bio.libretexts.org/Courses/CT_State_Northwestern/Introduction_to_Environmental_Science/14:_Urbanization_and_Sustainable_Cities",
+      "key": "14: urbanization and sustainable cities"
+    },
+    {
+      "url": "https://bio.libretexts.org/Courses/CT_State_Northwestern/Introduction_to_Environmental_Science/14:_Urbanization_and_Sustainable_Cities/14.1:_Sustainable_Cities",
+      "key": "14.1: sustainable cities"
+    },
+    {
+      "url": "https://bio.libretexts.org/Courses/CT_State_Northwestern/Introduction_to_Environmental_Science/14:_Urbanization_and_Sustainable_Cities/14.2:_Cultural_and_Aesthetic_Considerations",
+      "key": "14.2: cultural and aesthetic considerations"
+    },
+    {
+      "url": "https://bio.libretexts.org/Courses/CT_State_Northwestern/Introduction_to_Environmental_Science/15:_Our_Environmental_Future",
+      "key": "15: our environmental future"
+    },
+    {
+      "url": "https://bio.libretexts.org/Courses/CT_State_Northwestern/Introduction_to_Environmental_Science/15:_Our_Environmental_Future/15.01:_Revisiting_Sustainability",
+      "key": "15.01: revisiting sustainability"
+    },
+    {
+      "url": "https://bio.libretexts.org/Courses/CT_State_Northwestern/Introduction_to_Environmental_Science/15:_Our_Environmental_Future/15.02:_History_of_Sustainability",
+      "key": "15.02: history of sustainability"
+    },
+    {
+      "url": "https://bio.libretexts.org/Courses/CT_State_Northwestern/Introduction_to_Environmental_Science/15:_Our_Environmental_Future/15.3:_Environmental_Ethics_and_Justice",
+      "key": "15.3: environmental ethics and justice"
+    },
+    {
+      "url": "https://bio.libretexts.org/Courses/CT_State_Northwestern/Introduction_to_Environmental_Science/15:_Our_Environmental_Future/15.4:_Ecological_Economics",
+      "key": "15.4: ecological economics"
+    },
+    {
+      "url": "https://bio.libretexts.org/Courses/CT_State_Northwestern/Introduction_to_Environmental_Science/15:_Our_Environmental_Future/15.5:_Environmental_Policy",
+      "key": "15.5: environmental policy"
+    },
+    {
+      "url": "https://bio.libretexts.org/Courses/CT_State_Northwestern/Introduction_to_Environmental_Science/15:_Our_Environmental_Future/15.6:_Sustainability_and_the_Future",
+      "key": "15.6: sustainability and the future"
+    },
+    {
+      "url": "https://bio.libretexts.org/Courses/CT_State_Northwestern/Introduction_to_Environmental_Science/15:_Our_Environmental_Future/15.S:_Summary",
+      "key": "15.s: summary"
+    },
+    {
+      "url": "https://bio.libretexts.org/Courses/CT_State_Northwestern/Introduction_to_Environmental_Science/15:_Our_Environmental_Future/5.4.1:_Introduction_to_Sustainability",
+      "key": "5.4.1: introduction to sustainability"
+    },
+    {
+      "url": "https://bio.libretexts.org/Courses/CT_State_Northwestern/Introduction_to_Environmental_Science/15:_Our_Environmental_Future/5.4.2:_Sustainability_Ethics_and_Environmental_Justice",
+      "key": "5.4.2: sustainability ethics and environmental justice"
+    },
+    {
+      "url": "https://bio.libretexts.org/Courses/CT_State_Northwestern/Introduction_to_Environmental_Science/15:_Our_Environmental_Future/5.4.3:_Environmental_Policy,_Monitoring,_and_Impact_Assessments",
+      "key": "5.4.3: environmental policy, monitoring, and impact assessments"
+    },
+    {
+      "url": "https://bio.libretexts.org/Courses/CT_State_Northwestern/Introduction_to_Environmental_Science/15:_Our_Environmental_Future/5.4.4:_Sustainability_and_the_Future",
+      "key": "5.4.4: sustainability and the future"
+    },
+    {
+      "url": "https://bio.libretexts.org/Courses/CT_State_Northwestern/Introduction_to_Environmental_Science/1:_Framing_Our_Study_of_Environmental_Science",
+      "key": "1: framing our study of environmental science"
+    },
+    {
+      "url": "https://bio.libretexts.org/Courses/CT_State_Northwestern/Introduction_to_Environmental_Science/1:_Framing_Our_Study_of_Environmental_Science/1.1:_The_Earth_Humans_and_the_Environment",
+      "key": "1.1: the earth humans and the environment"
+    },
+    {
+      "url": "https://bio.libretexts.org/Courses/CT_State_Northwestern/Introduction_to_Environmental_Science/1:_Framing_Our_Study_of_Environmental_Science/1.2:_Environmental_Laws_and_Regulations",
+      "key": "1.2: environmental laws and regulations"
+    },
+    {
+      "url": "https://bio.libretexts.org/Courses/CT_State_Northwestern/Introduction_to_Environmental_Science/1:_Framing_Our_Study_of_Environmental_Science/1.3:_The_Process_of_Science",
+      "key": "1.3: the process of science"
+    },
+    {
+      "url": "https://bio.libretexts.org/Courses/CT_State_Northwestern/Introduction_to_Environmental_Science/1:_Framing_Our_Study_of_Environmental_Science/1.4:_Pseudoscience_and_Other_Misuses_of_Science",
+      "key": "1.4: pseudoscience and other misuses of science"
+    },
+    {
+      "url": "https://bio.libretexts.org/Courses/CT_State_Northwestern/Introduction_to_Environmental_Science/1:_Framing_Our_Study_of_Environmental_Science/1.5:_Environment_and_Sustainability",
+      "key": "1.5: environment and sustainability"
+    },
+    {
+      "url": "https://bio.libretexts.org/Courses/CT_State_Northwestern/Introduction_to_Environmental_Science/1:_Framing_Our_Study_of_Environmental_Science/1.6:_Environmental_Ethics",
+      "key": "1.6: environmental ethics"
+    },
+    {
+      "url": "https://bio.libretexts.org/Courses/CT_State_Northwestern/Introduction_to_Environmental_Science/1:_Framing_Our_Study_of_Environmental_Science/1.7:_Environmental_Justice_and_Indigenous_Struggles",
+      "key": "1.7: environmental justice and indigenous struggles"
+    },
+    {
+      "url": "https://bio.libretexts.org/Courses/CT_State_Northwestern/Introduction_to_Environmental_Science/1:_Framing_Our_Study_of_Environmental_Science/1.S:__Environmental_Science_(Summary)",
+      "key": "1.s: environmental science (summary)"
+    },
+    {
+      "url": "https://bio.libretexts.org/Courses/CT_State_Northwestern/Introduction_to_Environmental_Science/2:_The_Physical_Environment",
+      "key": "2: the physical environment"
+    },
+    {
+      "url": "https://bio.libretexts.org/Courses/CT_State_Northwestern/Introduction_to_Environmental_Science/2:_The_Physical_Environment/2.1:_The_Lithosphere",
+      "key": "2.1: the lithosphere"
+    },
+    {
+      "url": "https://bio.libretexts.org/Courses/CT_State_Northwestern/Introduction_to_Environmental_Science/2:_The_Physical_Environment/2.2:_The_Atmosphere",
+      "key": "2.2: the atmosphere"
+    },
+    {
+      "url": "https://bio.libretexts.org/Courses/CT_State_Northwestern/Introduction_to_Environmental_Science/2:_The_Physical_Environment/2.3:_The_Hydrosphere",
+      "key": "2.3: the hydrosphere"
+    },
+    {
+      "url": "https://bio.libretexts.org/Courses/CT_State_Northwestern/Introduction_to_Environmental_Science/3:_Matter_Energy_and_Life",
+      "key": "3: matter energy and life"
+    },
+    {
+      "url": "https://bio.libretexts.org/Courses/CT_State_Northwestern/Introduction_to_Environmental_Science/3:_Matter_Energy_and_Life/3.1:_Matter",
+      "key": "3.1: matter"
+    },
+    {
+      "url": "https://bio.libretexts.org/Courses/CT_State_Northwestern/Introduction_to_Environmental_Science/3:_Matter_Energy_and_Life/3.2:_Energy",
+      "key": "3.2: energy"
+    },
+    {
+      "url": "https://bio.libretexts.org/Courses/CT_State_Northwestern/Introduction_to_Environmental_Science/3:_Matter_Energy_and_Life/3.3:_A_Cell_is_the_Smallest_Unit_of_Life",
+      "key": "3.3: a cell is the smallest unit of life"
+    },
+    {
+      "url": "https://bio.libretexts.org/Courses/CT_State_Northwestern/Introduction_to_Environmental_Science/3:_Matter_Energy_and_Life/3.4:_Energy_Enters_Ecosystems_Through_Photosynthesis",
+      "key": "3.4: energy enters ecosystems through photosynthesis"
+    },
+    {
+      "url": "https://bio.libretexts.org/Courses/CT_State_Northwestern/Introduction_to_Environmental_Science/3:_Matter_Energy_and_Life/3.S:__Matter_Energy_and_Life_(Summary)",
+      "key": "3.s: matter energy and life (summary)"
+    },
+    {
+      "url": "https://bio.libretexts.org/Courses/CT_State_Northwestern/Introduction_to_Environmental_Science/4:_Ecosystems_and_the_Biosphere",
+      "key": "4: ecosystems and the biosphere"
+    },
+    {
+      "url": "https://bio.libretexts.org/Courses/CT_State_Northwestern/Introduction_to_Environmental_Science/4:_Ecosystems_and_the_Biosphere/4.1:_Energy_Flow_through_Ecosystems",
+      "key": "4.1: energy flow through ecosystems"
+    },
+    {
+      "url": "https://bio.libretexts.org/Courses/CT_State_Northwestern/Introduction_to_Environmental_Science/4:_Ecosystems_and_the_Biosphere/4.2:_Biogeochemical_Cycles",
+      "key": "4.2: biogeochemical cycles"
+    },
+    {
+      "url": "https://bio.libretexts.org/Courses/CT_State_Northwestern/Introduction_to_Environmental_Science/4:_Ecosystems_and_the_Biosphere/4.3:_Terrestrial_Biomes",
+      "key": "4.3: terrestrial biomes"
+    },
+    {
+      "url": "https://bio.libretexts.org/Courses/CT_State_Northwestern/Introduction_to_Environmental_Science/4:_Ecosystems_and_the_Biosphere/4.4:_Aquatic_Biomes",
+      "key": "4.4: aquatic biomes"
+    },
+    {
+      "url": "https://bio.libretexts.org/Courses/CT_State_Northwestern/Introduction_to_Environmental_Science/4:_Ecosystems_and_the_Biosphere/4.5:_Chapter_Resources",
+      "key": "4.5: chapter resources"
+    },
+    {
+      "url": "https://bio.libretexts.org/Courses/CT_State_Northwestern/Introduction_to_Environmental_Science/5:_Human_Population_and_Resources",
+      "key": "5: human population and resources"
+    },
+    {
+      "url": "https://bio.libretexts.org/Courses/CT_State_Northwestern/Introduction_to_Environmental_Science/5:_Human_Population_and_Resources/5.1:_History_and_Global_Distribution",
+      "key": "5.1: history and global distribution"
+    },
+    {
+      "url": "https://bio.libretexts.org/Courses/CT_State_Northwestern/Introduction_to_Environmental_Science/5:_Human_Population_and_Resources/5.2:_Carrying_Capacity",
+      "key": "5.2: carrying capacity"
+    },
+    {
+      "url": "https://bio.libretexts.org/Courses/CT_State_Northwestern/Introduction_to_Environmental_Science/5:_Human_Population_and_Resources/5.3:_Population_Growth",
+      "key": "5.3: population growth"
+    },
+    {
+      "url": "https://bio.libretexts.org/Courses/CT_State_Northwestern/Introduction_to_Environmental_Science/6:_Climate_Change",
+      "key": "6: climate change"
+    },
+    {
+      "url": "https://bio.libretexts.org/Courses/CT_State_Northwestern/Introduction_to_Environmental_Science/6:_Climate_Change/6.1:_Introduction_to_Climate_Change",
+      "key": "6.1: introduction to climate change"
+    },
+    {
+      "url": "https://bio.libretexts.org/Courses/CT_State_Northwestern/Introduction_to_Environmental_Science/6:_Climate_Change/6.2:_Anthropogenic_Climate_Change",
+      "key": "6.2: anthropogenic climate change"
+    },
+    {
+      "url": "https://bio.libretexts.org/Courses/CT_State_Northwestern/Introduction_to_Environmental_Science/6:_Climate_Change/6.3:_Current_and_Future_Climate_Change_Impacts",
+      "key": "6.3: current and future climate change impacts"
+    },
+    {
+      "url": "https://bio.libretexts.org/Courses/CT_State_Northwestern/Introduction_to_Environmental_Science/6:_Climate_Change/6.4:_Climate_Strategies",
+      "key": "6.4: climate strategies"
+    },
+    {
+      "url": "https://bio.libretexts.org/Courses/CT_State_Northwestern/Introduction_to_Environmental_Science/6:_Environmental_Hazards_and_Human_Health",
+      "key": "6: environmental hazards and human health"
+    },
+    {
+      "url": "https://bio.libretexts.org/Courses/CT_State_Northwestern/Introduction_to_Environmental_Science/6:_Environmental_Hazards_and_Human_Health/8.1:_The_Impacts_of_Environmental_Conditions",
+      "key": "8.1: the impacts of environmental conditions"
+    },
+    {
+      "url": "https://bio.libretexts.org/Courses/CT_State_Northwestern/Introduction_to_Environmental_Science/6:_Environmental_Hazards_and_Human_Health/8.2:_Environmental_Health",
+      "key": "8.2: environmental health"
+    },
+    {
+      "url": "https://bio.libretexts.org/Courses/CT_State_Northwestern/Introduction_to_Environmental_Science/6:_Environmental_Hazards_and_Human_Health/8.3:_Environmental_Toxicology",
+      "key": "8.3: environmental toxicology"
+    },
+    {
+      "url": "https://bio.libretexts.org/Courses/CT_State_Northwestern/Introduction_to_Environmental_Science/6:_Environmental_Hazards_and_Human_Health/8.4:_Bioremediation",
+      "key": "8.4: bioremediation"
+    },
+    {
+      "url": "https://bio.libretexts.org/Courses/CT_State_Northwestern/Introduction_to_Environmental_Science/6:_Environmental_Hazards_and_Human_Health/8.5:_Case_Study_-_The_Love_Canal_Disaster",
+      "key": "8.5: case study the love canal disaster"
+    },
+    {
+      "url": "https://bio.libretexts.org/Courses/CT_State_Northwestern/Introduction_to_Environmental_Science/6:_Environmental_Hazards_and_Human_Health/8.S:_Environmental_Hazards_and_Human_Health_(Summary)",
+      "key": "8.s: environmental hazards and human health (summary)"
+    },
+    {
+      "url": "https://bio.libretexts.org/Courses/CT_State_Northwestern/Introduction_to_Environmental_Science/7:_Biodiversity_and_HIPPPOC",
+      "key": "7: biodiversity and hipppoc"
+    },
+    {
+      "url": "https://bio.libretexts.org/Courses/CT_State_Northwestern/Introduction_to_Environmental_Science/7:_Biodiversity_and_HIPPPOC/7.1:_Introduction_to_Biodiversity",
+      "key": "7.1: introduction to biodiversity"
+    },
+    {
+      "url": "https://bio.libretexts.org/Courses/CT_State_Northwestern/Introduction_to_Environmental_Science/7:_Biodiversity_and_HIPPPOC/7.2:_Importance_of_Biodiversity",
+      "key": "7.2: importance of biodiversity"
+    },
+    {
+      "url": "https://bio.libretexts.org/Courses/CT_State_Northwestern/Introduction_to_Environmental_Science/7:_Biodiversity_and_HIPPPOC/7.3:_The_Biodiversity_Crisis_-_HIPPPOC",
+      "key": "7.3: the biodiversity crisis hipppoc"
+    },
+    {
+      "url": "https://bio.libretexts.org/Courses/CT_State_Northwestern/Introduction_to_Environmental_Science/7:_Biodiversity_and_HIPPPOC/7.4:_Preserving_Biodiversity",
+      "key": "7.4: preserving biodiversity"
+    },
+    {
+      "url": "https://bio.libretexts.org/Courses/CT_State_Northwestern/Introduction_to_Environmental_Science/9:_Food_Security_and_Agriculture",
+      "key": "9: food security and agriculture"
+    },
+    {
+      "url": "https://bio.libretexts.org/Courses/CT_State_Northwestern/Introduction_to_Environmental_Science/9:_Food_Security_and_Agriculture/9.01:_Conventional_Agriculture",
+      "key": "9.01: conventional agriculture"
+    },
+    {
+      "url": "https://bio.libretexts.org/Courses/CT_State_Northwestern/Introduction_to_Environmental_Science/9:_Food_Security_and_Agriculture/9.02:_Soil_Profiles_Processes_and_Plant_Interactions",
+      "key": "9.02: soil profiles processes and plant interactions"
+    },
+    {
+      "url": "https://bio.libretexts.org/Courses/CT_State_Northwestern/Introduction_to_Environmental_Science/9:_Food_Security_and_Agriculture/9.03:_Pests_and_Pesticides",
+      "key": "9.03: pests and pesticides"
+    },
+    {
+      "url": "https://bio.libretexts.org/Courses/CT_State_Northwestern/Introduction_to_Environmental_Science/9:_Food_Security_and_Agriculture/9.04:_Biotechnology_and_Genetic_Engineering",
+      "key": "9.04: biotechnology and genetic engineering"
+    },
+    {
+      "url": "https://bio.libretexts.org/Courses/CT_State_Northwestern/Introduction_to_Environmental_Science/9:_Food_Security_and_Agriculture/9.05:_Sustainable_Agriculture",
+      "key": "9.05: sustainable agriculture"
+    },
+    {
+      "url": "https://bio.libretexts.org/Courses/CT_State_Northwestern/Introduction_to_Environmental_Science/9:_Food_Security_and_Agriculture/9.06:_Food_Security",
+      "key": "9.06: food security"
+    },
+    {
+      "url": "https://bio.libretexts.org/Courses/CT_State_Northwestern/Introduction_to_Environmental_Science/9:_Food_Security_and_Agriculture/9.S:_Food_and_Agriculture_(Summary)",
+      "key": "9.s: food and agriculture (summary)"
+    },
+    {
+      "url": "https://bio.libretexts.org/Courses/CT_State_Northwestern/Introduction_to_Environmental_Science/zz:_Back_Matter",
+      "key": "zz: back matter"
+    },
+    {
+      "url": "https://bio.libretexts.org/Courses/CT_State_Northwestern/Introduction_to_Environmental_Science/zz:_Back_Matter/10:_Index",
+      "key": "10: index"
+    },
+    {
+      "url": "https://bio.libretexts.org/Courses/CT_State_Northwestern/Introduction_to_Environmental_Science/zz:_Back_Matter/20:_Glossary",
+      "key": "20: glossary"
+    },
+    {
+      "url": "https://bio.libretexts.org/Courses/CT_State_Northwestern/Introduction_to_Environmental_Science/zz:_Back_Matter/30:_Detailed_Licensing",
+      "key": "30: detailed licensing"
+    },
+    {
+      "url": "https://commons.libretexts.org/api/v1/auth/login",
+      "key": "login"
+    },
+    {
+      "url": "https://commons.libretexts.org/store/product/bio-79686",
+      "key": "bio 79686"
+    }
+  ]
+}

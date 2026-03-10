@@ -1,0 +1,1968 @@
+{
+  "topic": "Eukaryotic cell",
+  "models_used": {
+    "timeline": "gpt-5-mini",
+    "speech": [
+      "gpt-5-mini",
+      "gpt-5-mini",
+      "gpt-5-mini"
+    ],
+    "images": [
+      "gpt-5-mini",
+      "gpt-5-mini",
+      "gpt-5-mini"
+    ]
+  },
+  "timeline_raw": "CHAPTER: Lesson setup, goals, and hook\n1. Greet the learners and state clear lesson objectives aloud: \"By the end of this lesson you will be able to (a) name major eukaryotic organelles, (b) describe their structure and primary functions, (c) explain how they cooperate in key processes (protein production, energy conversion, transport), and (d) relate organelle dysfunction to cell-level consequences.\" (pace: slow)\n2. Frame the lesson scope: say, \"We will focus on typical animal/plant eukaryotic cells — common organelles and processes — not specialized exceptions (e.g., giant algae) unless noted.\" (pace: slow)\n3. Provide a 1-minute visual hook: show or ask learners to imagine a factory with departments (reception, offices, power plant, shipping). Tell them you'll map each organelle to a department. (pace: medium)\n4. Quick pre-check question to activate prior knowledge: Ask learners, \"What makes a eukaryotic cell different from a prokaryotic cell?\" Wait for responses or have learners write one sentence. If no response, prompt with: \"Nucleus and membrane-bound organelles.\" (pace: slow)\n5. Give an explicit roadmap for the lesson timeline: \"We will proceed in three parts: (A) identify and examine organelles, (B) trace three core processes across organelles (protein flow, energy conversion, intracellular transport), and (C) integrate by applying to real examples and a short recap/quiz.\" (pace: medium)\n6. Transition to Chapter 2 with a signpost: say, \"Let's open the cell and inspect each organelle in detail, starting at the perimeter and moving inward.\" (pace: medium)\n\n|\n\nCHAPTER: Organelles, structure, and functions (systematic walkthrough)\n1. Start at the cell boundary — plasma membrane:\n   - Describe composition: phospholipid bilayer with embedded proteins, cholesterol (in animals), and carbohydrates. Explain hydrophobic tails and hydrophilic heads briefly. (pace: slow)\n   - Teach key functions: selective barrier, signal reception, cell recognition, and anchor for cytoskeleton. Provide a one-sentence factory analogy: \"security gate controlling entry and communications.\" (pace: medium)\n   - Mini-check: Ask learners to name two functions of the plasma membrane; confirm correct answers.\n2. Move to the cell exterior features (if applicable): cell wall and extracellular matrix:\n   - Explain plant/fungal cell wall composition (cellulose/chitin) and function (rigidity, protection). For animal cells, describe extracellular matrix (collagen, proteoglycans) role in support and signaling. (pace: medium)\n   - Example: show how a plant cell resists turgor pressure because of the cell wall. (pace: slow)\n3. Nucleus and nuclear envelope:\n   - Describe nucleus structure: double membrane with nuclear pores, nucleoplasm, nucleolus. Explain chromatin vs chromosomes and nucleolus role in rRNA/ribosome assembly. (pace: slow)\n   - Explain function: storage and regulation of genetic information, transcription control. Add factory analogy: \"main office with blueprints.\" (pace: medium)\n   - Mini-check: Ask \"Where are ribosomal subunits assembled?\" Expected answer: nucleolus.\n4. Endomembrane system overview, then detailed nodes:\n   - Give a short linking sentence: \"The endomembrane system handles production, processing, and shipping of molecules.\" (pace: medium)\n   - Endoplasmic reticulum (ER):\n     a. Rough ER: Describe membrane-studded ribosomes, role in co-translational insertion and modification of secreted/membrane proteins, initial glycosylation; factory analogy: assembly line with workers inserting tags. (pace: slow)\n     b. Smooth ER: Describe lipid synthesis, detoxification, Ca2+ storage (in muscle — sarcoplasmic reticulum). (pace: medium)\n     c. Mini-activity: Give a short example: insulin synthesis enters RER ⇒ processed in Golgi ⇒ secreted. Ask learners to sequence the organelles for insulin production; confirm sequence RER → Golgi → vesicle → plasma membrane. (pace: medium)\n5. Golgi apparatus:\n   - Describe cis/trans orientation, cisternae, and function: sorting/packaging/modifying glycosylation and adding molecular 'address labels'. (pace: slow)\n   - Show the stepwise movement: receiving vesicles at cis face, modifying through medial cisternae, shipping from trans face. (pace: medium)\n   - Mini-check: Ask \"Which organelle adds shipping labels to proteins?\" Expected answer: Golgi.\n6. Lysosomes and vacuoles:\n   - Define lysosomes (animal): acidic compartments with hydrolytic enzymes, role in digestion of macromolecules and autophagy. (pace: slow)\n   - Define central vacuole (plant): storage, turgor maintenance, degradation roles; contrast with animal small vacuoles/vesicles. (pace: medium)\n   - Example: explain how phagocytosed bacteria are digested in a lysosome; pose question: \"What happens if a lysosomal enzyme is missing?\" Expect discussion of storage diseases. (pace: slow)\n7. Peroxisomes:\n   - Describe single-membrane organelles with oxidative enzymes that break down fatty acids and detoxify H2O2 using catalase. (pace: medium)\n   - Give an example: beta-oxidation and the role in liver cells detoxifying alcohol byproducts. (pace: medium)\n8. Mitochondria:\n   - Structure: double membrane, intermembrane space, inner membrane with cristae, matrix. Highlight own DNA and ribosomes (endosymbiotic origin). (pace: slow)\n   - Function: ATP production via oxidative phosphorylation, TCA cycle; explain gradient-driven ATP synthase. Use factory analogy: power plant with turbines. (pace: slow)\n   - Mini-check: Ask \"Where does the electron transport chain reside?\" Expected answer: inner mitochondrial membrane.\n9. Chloroplasts (plants and algae):\n   - Structure: double membrane, thylakoids, granum, stroma; own DNA. (pace: slow)\n   - Function: photosynthesis—light reactions in thylakoid membranes, Calvin cycle in stroma. Compare to mitochondria as energy converters for sunlight. (pace: medium)\n10. Cytoskeleton and motor proteins:\n    - Describe microtubules, microfilaments (actin), and intermediate filaments: composition, polarity, and general functions (shape, transport tracks, division). (pace: medium)\n    - Explain motor proteins: kinesin and dynein on microtubules, myosin on actin — role in vesicle transport and muscle contraction. (pace: medium)\n    - Mini-activity: Have learners trace a vesicle route from Golgi to plasma membrane and name the motor protein type typically involved (kinesin for anterograde along microtubules). (pace: medium)\n11. Ribosomes (cytosolic and bound):\n    - Explain composition (rRNA + proteins), sizes in eukaryotes (80S), and distinction between free and ER-bound ribosomes with their product destinations. (pace: slow)\n    - Example: cytosolic ribosomes make cytosolic proteins or proteins targeted to mitochondria/nucleus; bound ribosomes make secreted/membrane proteins. (pace: medium)\n12. Short recap of organelles: verbally summarize each organelle with a one-line function; pause for questions. (pace: slow)\n\n|\n\nCHAPTER: Integrated processes, application, checks, and recap\n1. Introduce integrative goal: \"We will trace three core processes across organelles to see cooperation: protein production and trafficking, energy conversion, and cell division/mitosis.\" (pace: medium)\n2. Protein production and secretory pathway — stepwise trace:\n   - Step 1: Transcription in nucleus: DNA → pre-mRNA; processing (splicing, 5' cap, poly-A tail) in nucleus. (pace: slow)\n   - Step 2: Translation initiation where ribosomes begin synthesis on RER for secreted/membrane proteins; signal peptide directs ribosome to RER via signal recognition particle (SRP). (pace: slow)\n   - Step 3: Co-translational translocation into RER lumen or insertion into membrane; initial glycosylation and folding with chaperones. (pace: medium)\n   - Step 4: Vesicle budding from RER to Golgi; explain coat proteins (COPII for ER→Golgi) as an aside. (pace: medium)\n   - Step 5: Golgi processing, sorting, and packaging into secretory vesicles; targeted transport along cytoskeleton. (pace: medium)\n   - Step 6: Exocytosis at plasma membrane or delivery to lysosome. (pace: medium)\n   - Mini-check sequence quiz: Provide a scrambled sequence and ask learners to reorder: Golgi → RER → Nucleus → Plasma membrane. Correct order: Nucleus → RER → Golgi → Plasma membrane. (pace: medium)\n3. Energy conversion across organelles:\n   - Explain glycolysis in cytosol (briefly), pyruvate import into mitochondria, and the TCA cycle in matrix producing NADH/FADH2. (pace: slow)\n   - Describe electron transport chain on inner mitochondrial membrane creating proton gradient and ATP synthesis by ATP synthase. (pace: slow)\n   - For photosynthetic cells, trace light-driven electron flow in thylakoid membranes producing ATP and NADPH and Calvin cycle in stroma fixing CO2 into sugars. (pace: medium)\n   - Mini-check calculation thought: \"If oxygen is limiting, where will ATP production drop most and what pathway compensates temporarily?\" Expected reasoning: oxidative phosphorylation drops; glycolysis + fermentation increases. (pace: medium)\n4. Intracellular transport and cytoskeleton coordination:\n   - Show how vesicles use motor proteins on microtubules for long-distance transport and actin for short-range positioning; emphasize polarity (microtubule minus vs plus ends). (pace: medium)\n   - Example: neuronal axonal transport: kinesin moves vesicles anterograde to synapse, dynein mediates retrograde transport. (pace: medium)\n   - Mini-check: Ask \"Which motor moves cargo toward the plus end of microtubules?\" Expected answer: kinesin.\n5. Cell cycle and division (overview with organelle considerations):\n   - Outline phases: G1 (growth), S (DNA replication), G2 (prep), M (mitosis), cytokinesis. (pace: slow)\n   - Explain chromosome condensation, nuclear envelope breakdown, spindle assembly from microtubules and centrosomes, chromosome segregation, and reformation of nuclei. (pace: medium)\n   - Note organelle fates: mitochondria/chloroplasts are distributed by fission and partitioning; ER and Golgi fragments and reassemble. (pace: medium)\n   - Mini-check: Ask \"What organizes the mitotic spindle in animal cells?\" Expected answer: centrosomes (microtubule organizing centers).\n6. Clinical and biological applications (brief):\n   - Give examples linking organelle dysfunction to disease: mitochondrial myopathies (ATP shortage), lysosomal storage diseases (e.g., Tay–Sachs), defective CFTR trafficking in cystic fibrosis (protein misfolding/ER retention). (pace: slow)\n   - Prompt learners to think: \"If a secreted enzyme fails to be glycosylated in the Golgi, what cellular problem can result?\" Encourage short responses about mis-sorting or degradation. (pace: medium)\n7. Formative assessment: 6-question rapid quiz (written or verbal), for example:\n   - Q1: Where is rRNA transcribed? (nucleolus)\n   - Q2: Which organelle has cristae? (mitochondrion)\n   - Q3: Sequence: transcription → ? → Golgi. (translation at RER)\n   - Q4: Motor for retrograde microtubule transport? (dynein)\n   - Q5: Organelle that degrades worn-out organelles? (lysosome/autophagy)\n   - Q6: Site of Calvin cycle? (chloroplast stroma)\n   Provide immediate feedback or model answers after each question. (pace: medium)\n8. Summative recap and synthesis:\n   - Verbally summarize: revisit the roadmap and confirm that each objective was met: naming organelles, their structures/functions, core processes, and linking dysfunction to disease. (pace: slow)\n   - Provide one integrated metaphor tying the cell to the factory again, mapping each organelle to its department in one sentence. (pace: medium)\n9. Closing activities and transitions:\n   - Assign a short homework/application: sketch a eukaryotic cell and label organelles, then write two sentences describing an integrated path (e.g., insulin secretion). (pace: slow)\n   - Offer optional extension: read a paper/summary about endosymbiotic theory or a clinical case about lysosomal storage disease. (pace: fast)\n10. Final quick reflection prompt and exit mini-check: Ask learners to state one new thing they learned and one question they still have; collect responses for next lesson planning. (pace: slow)",
+  "chapters": [
+    {
+      "chapter_index": 1,
+      "timeline_chunk": "CHAPTER: Lesson setup, goals, and hook\n1. Greet the learners and state clear lesson objectives aloud: \"By the end of this lesson you will be able to (a) name major eukaryotic organelles, (b) describe their structure and primary functions, (c) explain how they cooperate in key processes (protein production, energy conversion, transport), and (d) relate organelle dysfunction to cell-level consequences.\" (pace: slow)\n2. Frame the lesson scope: say, \"We will focus on typical animal/plant eukaryotic cells — common organelles and processes — not specialized exceptions (e.g., giant algae) unless noted.\" (pace: slow)\n3. Provide a 1-minute visual hook: show or ask learners to imagine a factory with departments (reception, offices, power plant, shipping). Tell them you'll map each organelle to a department. (pace: medium)\n4. Quick pre-check question to activate prior knowledge: Ask learners, \"What makes a eukaryotic cell different from a prokaryotic cell?\" Wait for responses or have learners write one sentence. If no response, prompt with: \"Nucleus and membrane-bound organelles.\" (pace: slow)\n5. Give an explicit roadmap for the lesson timeline: \"We will proceed in three parts: (A) identify and examine organelles, (B) trace three core processes across organelles (protein flow, energy conversion, intracellular transport), and (C) integrate by applying to real examples and a short recap/quiz.\" (pace: medium)\n6. Transition to Chapter 2 with a signpost: say, \"Let's open the cell and inspect each organelle in detail, starting at the perimeter and moving inward.\" (pace: medium)",
+      "speech": "Hello everyone, welcome—let's get started. >1.5 By the end of this lesson you will be able to (a) name major eukaryotic organelles, (b) describe their structure and primary functions, (c) explain how they cooperate in key processes (protein production, energy conversion, transport), and (d) relate organelle dysfunction to cell-level consequences. >2.0 We'll focus on typical animal and plant eukaryotic cells — common organelles and processes — not specialized exceptions like giant algae unless I point them out. >1.5 Now I want you to imagine a factory for one minute: picture a reception desk, office suites, a power plant, and shipping and receiving. >2.0 Keep that image in mind because I will map each organelle to one of those departments as we go. >1.5 Quick check: what makes a eukaryotic cell different from a prokaryotic cell? >2.0 Take a moment to answer or write one sentence. >2.0 If you’re stuck, remember: nucleus and membrane-bound organelles. >1.5 Here’s the roadmap for today: we will proceed in three parts — first, identify and examine organelles; second, trace three core processes across organelles (protein flow, energy conversion, intracellular transport); and third, integrate with real examples and finish with a short recap and quiz. >2.0 Let’s open the cell and inspect each organelle in detail, starting at the perimeter and moving inward. >1.5",
+      "image_plan": {
+        "word_index_base": 0,
+        "end_index_inclusive": true,
+        "images": [
+          {
+            "content": "Learning objectives: (a) name major eukaryotic organelles; (b) describe structure & primary functions; (c) explain cooperation in protein production, energy conversion, transport; (d) relate organelle dysfunction to cell-level consequences",
+            "topic": "Cell Biology - Lesson Overview",
+            "diagram": 0,
+            "text": 1,
+            "diagram_required_objects": [],
+            "range_start": 7,
+            "range_end": 50
+          },
+          {
+            "content": "Typical animal and plant eukaryotic cells — common organelles and processes",
+            "topic": "Cell Biology - Scope",
+            "diagram": 0,
+            "text": 1,
+            "diagram_required_objects": [],
+            "range_start": 52,
+            "range_end": 61
+          },
+          {
+            "content": "Factory analogy: reception desk, office suites, power plant, shipping & receiving",
+            "topic": "Analogy - Factory mapping",
+            "diagram": 0,
+            "text": 1,
+            "diagram_required_objects": [],
+            "range_start": 86,
+            "range_end": 102
+          },
+          {
+            "content": "Cartoon reception desk with a receptionist (labelled 'Reception') and small sign-in clipboard",
+            "topic": "Analogy - Factory",
+            "diagram": 0,
+            "text": 0,
+            "diagram_required_objects": [],
+            "range_start": 91,
+            "range_end": 93
+          },
+          {
+            "content": "Cartoon office suites: desks, computers, filing cabinets (labelled 'Offices')",
+            "topic": "Analogy - Factory",
+            "diagram": 0,
+            "text": 0,
+            "diagram_required_objects": [],
+            "range_start": 94,
+            "range_end": 96
+          },
+          {
+            "content": "Cartoon power plant with smokestack and generator (labelled 'Power')",
+            "topic": "Analogy - Factory",
+            "diagram": 0,
+            "text": 0,
+            "diagram_required_objects": [],
+            "range_start": 97,
+            "range_end": 98
+          },
+          {
+            "content": "Cartoon shipping & receiving dock with boxes and truck (labelled 'Shipping/Receiving')",
+            "topic": "Analogy - Factory",
+            "diagram": 0,
+            "text": 0,
+            "diagram_required_objects": [],
+            "range_start": 99,
+            "range_end": 102
+          },
+          {
+            "content": "Cell vs Prokaryote check: What makes a eukaryotic cell different from a prokaryotic cell? (write one sentence)",
+            "topic": "Cell Biology - Quick Check",
+            "diagram": 0,
+            "text": 1,
+            "diagram_required_objects": [],
+            "range_start": 124,
+            "range_end": 145
+          },
+          {
+            "content": "Simple sketch comparing: Eukaryotic cell (with nucleus and membrane-bound organelles) vs Prokaryotic cell (no nucleus)",
+            "topic": "Cell Biology - Comparison",
+            "diagram": 1,
+            "text": 0,
+            "diagram_required_objects": [
+              "eukaryotic cell",
+              "nucleus",
+              "membrane-bound organelles",
+              "prokaryotic cell",
+              "cell membrane"
+            ],
+            "range_start": 124,
+            "range_end": 154
+          },
+          {
+            "content": "Hint: nucleus and membrane-bound organelles",
+            "topic": "Cell Biology - Hint",
+            "diagram": 0,
+            "text": 1,
+            "diagram_required_objects": [],
+            "range_start": 147,
+            "range_end": 154
+          },
+          {
+            "content": "Roadmap: Part 1 identify organelles; Part 2 trace protein flow, energy conversion, intracellular transport; Part 3 examples, recap, quiz",
+            "topic": "Cell Biology - Roadmap",
+            "diagram": 0,
+            "text": 1,
+            "diagram_required_objects": [],
+            "range_start": 156,
+            "range_end": 199
+          },
+          {
+            "content": "Diagram: cross-section of a typical eukaryotic cell with labeled organelles and factory-mapping labels (reception desk → plasma membrane, offices → nucleus/ER, power plant → mitochondrion/chloroplast, shipping → Golgi/vesicles)",
+            "topic": "Cell Biology - Organelles Map",
+            "diagram": 1,
+            "text": 0,
+            "diagram_required_objects": [
+              "cell outline",
+              "plasma membrane (reception)",
+              "nucleus (offices)",
+              "rough ER (protein production desks)",
+              "smooth ER",
+              "Golgi apparatus (shipping)",
+              "vesicles (packages)",
+              "mitochondrion (power)",
+              "chloroplast (power - plant)",
+              "lysosome (waste)",
+              "cytoskeleton (conveyor/roads)"
+            ],
+            "range_start": 104,
+            "range_end": 122
+          },
+          {
+            "content": "Let’s open the cell and inspect each organelle: start at the perimeter and move inward",
+            "topic": "Cell Biology - Transition",
+            "diagram": 0,
+            "text": 1,
+            "diagram_required_objects": [],
+            "range_start": 201,
+            "range_end": 217
+          }
+        ]
+      },
+      "image_text_maps": [
+        {
+          "content": "Learning objectives: (a) name major eukaryotic organelles; (b) describe structure & primary functions; (c) explain cooperation in protein production, energy conversion, transport; (d) relate organelle dysfunction to cell-level consequences",
+          "topic": "Cell Biology - Lesson Overview",
+          "query": "",
+          "span_text": "the end of this lesson you will be able to (a) name major eukaryotic organelles, (b) describe their structure and primary functions, (c) explain how they cooperate in key processes (protein production, energy conversion, transport), and (d) relate organelle dysfunction to cell-level consequences. >2.0",
+          "range_start": 7,
+          "range_end": 50,
+          "diagram": 0,
+          "diagram_required_objects": [],
+          "text_tag": 1,
+          "write_text": "Learning objectives: (a) name major eukaryotic organelles; (b) describe structure & primary functions; (c) explain cooperation in protein production, energy conversion, transport; (d) relate organelle dysfunction to cell-level consequences"
+        },
+        {
+          "content": "Typical animal and plant eukaryotic cells — common organelles and processes",
+          "topic": "Cell Biology - Scope",
+          "query": "",
+          "span_text": "focus on typical animal and plant eukaryotic cells — common",
+          "range_start": 52,
+          "range_end": 61,
+          "diagram": 0,
+          "diagram_required_objects": [],
+          "text_tag": 1,
+          "write_text": "Typical animal and plant eukaryotic cells — common organelles and processes"
+        },
+        {
+          "content": "Factory analogy: reception desk, office suites, power plant, shipping & receiving",
+          "topic": "Analogy - Factory mapping",
+          "query": "",
+          "span_text": "for one minute: picture a reception desk, office suites, a power plant, and shipping and receiving. >2.0",
+          "range_start": 86,
+          "range_end": 102,
+          "diagram": 0,
+          "diagram_required_objects": [],
+          "text_tag": 1,
+          "write_text": "Factory analogy: reception desk, office suites, power plant, shipping & receiving"
+        },
+        {
+          "content": "Cartoon reception desk with a receptionist (labelled 'Reception') and small sign-in clipboard",
+          "topic": "Analogy - Factory",
+          "query": "Cartoon reception desk with a receptionist (labelled 'Reception') and small sign-in clipboard",
+          "span_text": "reception desk, office",
+          "range_start": 91,
+          "range_end": 93,
+          "diagram": 0,
+          "diagram_required_objects": [],
+          "text_tag": 0,
+          "write_text": "",
+          "processed_ids": [],
+          "refined_labels_file": null,
+          "bbox_px": null,
+          "objects_that_comprise_image": []
+        },
+        {
+          "content": "Cartoon office suites: desks, computers, filing cabinets (labelled 'Offices')",
+          "topic": "Analogy - Factory",
+          "query": "Cartoon office suites: desks, computers, filing cabinets (labelled 'Offices')",
+          "span_text": "suites, a power",
+          "range_start": 94,
+          "range_end": 96,
+          "diagram": 0,
+          "diagram_required_objects": [],
+          "text_tag": 0,
+          "write_text": "",
+          "processed_ids": [],
+          "refined_labels_file": null,
+          "bbox_px": null,
+          "objects_that_comprise_image": []
+        },
+        {
+          "content": "Cartoon power plant with smokestack and generator (labelled 'Power')",
+          "topic": "Analogy - Factory",
+          "query": "Cartoon power plant with smokestack and generator (labelled 'Power')",
+          "span_text": "plant, and",
+          "range_start": 97,
+          "range_end": 98,
+          "diagram": 0,
+          "diagram_required_objects": [],
+          "text_tag": 0,
+          "write_text": "",
+          "processed_ids": [],
+          "refined_labels_file": null,
+          "bbox_px": null,
+          "objects_that_comprise_image": []
+        },
+        {
+          "content": "Cartoon shipping & receiving dock with boxes and truck (labelled 'Shipping/Receiving')",
+          "topic": "Analogy - Factory",
+          "query": "Cartoon shipping & receiving dock with boxes and truck (labelled 'Shipping/Receiving')",
+          "span_text": "shipping and receiving. >2.0",
+          "range_start": 99,
+          "range_end": 102,
+          "diagram": 0,
+          "diagram_required_objects": [],
+          "text_tag": 0,
+          "write_text": "",
+          "processed_ids": [],
+          "refined_labels_file": null,
+          "bbox_px": null,
+          "objects_that_comprise_image": []
+        },
+        {
+          "content": "Cell vs Prokaryote check: What makes a eukaryotic cell different from a prokaryotic cell? (write one sentence)",
+          "topic": "Cell Biology - Quick Check",
+          "query": "",
+          "span_text": "check: what makes a eukaryotic cell different from a prokaryotic cell? >2.0 Take a moment to answer or write one sentence. >2.0",
+          "range_start": 124,
+          "range_end": 145,
+          "diagram": 0,
+          "diagram_required_objects": [],
+          "text_tag": 1,
+          "write_text": "Cell vs Prokaryote check: What makes a eukaryotic cell different from a prokaryotic cell? (write one sentence)"
+        },
+        {
+          "content": "Simple sketch comparing: Eukaryotic cell (with nucleus and membrane-bound organelles) vs Prokaryotic cell (no nucleus)",
+          "topic": "Cell Biology - Comparison",
+          "query": "Simple sketch comparing: Eukaryotic cell (with nucleus and membrane-bound organelles) vs Prokaryotic cell (no nucleus)",
+          "span_text": "check: what makes a eukaryotic cell different from a prokaryotic cell? >2.0 Take a moment to answer or write one sentence. >2.0 If you’re stuck, remember: nucleus and membrane-bound organelles. >1.5",
+          "range_start": 124,
+          "range_end": 154,
+          "diagram": 1,
+          "diagram_required_objects": [
+            "eukaryotic cell",
+            "nucleus",
+            "membrane-bound organelles",
+            "prokaryotic cell",
+            "cell membrane"
+          ],
+          "text_tag": 0,
+          "write_text": "",
+          "processed_ids": [],
+          "refined_labels_file": null,
+          "bbox_px": null,
+          "objects_that_comprise_image": []
+        },
+        {
+          "content": "Hint: nucleus and membrane-bound organelles",
+          "topic": "Cell Biology - Hint",
+          "query": "",
+          "span_text": "you’re stuck, remember: nucleus and membrane-bound organelles. >1.5",
+          "range_start": 147,
+          "range_end": 154,
+          "diagram": 0,
+          "diagram_required_objects": [],
+          "text_tag": 1,
+          "write_text": "Hint: nucleus and membrane-bound organelles"
+        },
+        {
+          "content": "Roadmap: Part 1 identify organelles; Part 2 trace protein flow, energy conversion, intracellular transport; Part 3 examples, recap, quiz",
+          "topic": "Cell Biology - Roadmap",
+          "query": "",
+          "span_text": "the roadmap for today: we will proceed in three parts — first, identify and examine organelles; second, trace three core processes across organelles (protein flow, energy conversion, intracellular transport); and third, integrate with real examples and finish with a short recap and quiz. >2.0",
+          "range_start": 156,
+          "range_end": 199,
+          "diagram": 0,
+          "diagram_required_objects": [],
+          "text_tag": 1,
+          "write_text": "Roadmap: Part 1 identify organelles; Part 2 trace protein flow, energy conversion, intracellular transport; Part 3 examples, recap, quiz"
+        },
+        {
+          "content": "Diagram: cross-section of a typical eukaryotic cell with labeled organelles and factory-mapping labels (reception desk → plasma membrane, offices → nucleus/ER, power plant → mitochondrion/chloroplast, shipping → Golgi/vesicles)",
+          "topic": "Cell Biology - Organelles Map",
+          "query": "Diagram: cross-section of a typical eukaryotic cell with labeled organelles and factory-mapping labels (reception desk → plasma membrane, offices → nucleus/ER, power plant → mitochondrion/chloroplast, shipping → Golgi/vesicles)",
+          "span_text": "that image in mind because I will map each organelle to one of those departments as we go. >1.5",
+          "range_start": 104,
+          "range_end": 122,
+          "diagram": 1,
+          "diagram_required_objects": [
+            "cell outline",
+            "plasma membrane (reception)",
+            "nucleus (offices)",
+            "rough ER (protein production desks)",
+            "smooth ER",
+            "Golgi apparatus (shipping)",
+            "vesicles (packages)",
+            "mitochondrion (power)",
+            "chloroplast (power - plant)",
+            "lysosome (waste)",
+            "cytoskeleton (conveyor/roads)"
+          ],
+          "text_tag": 0,
+          "write_text": "",
+          "processed_ids": [],
+          "refined_labels_file": null,
+          "bbox_px": null,
+          "objects_that_comprise_image": []
+        },
+        {
+          "content": "Let’s open the cell and inspect each organelle: start at the perimeter and move inward",
+          "topic": "Cell Biology - Transition",
+          "query": "",
+          "span_text": "open the cell and inspect each organelle in detail, starting at the perimeter and moving inward. >1.5",
+          "range_start": 201,
+          "range_end": 217,
+          "diagram": 0,
+          "diagram_required_objects": [],
+          "text_tag": 1,
+          "write_text": "Let’s open the cell and inspect each organelle: start at the perimeter and move inward"
+        }
+      ]
+    },
+    {
+      "chapter_index": 2,
+      "timeline_chunk": "CHAPTER: Organelles, structure, and functions (systematic walkthrough)\n1. Start at the cell boundary — plasma membrane:\n   - Describe composition: phospholipid bilayer with embedded proteins, cholesterol (in animals), and carbohydrates. Explain hydrophobic tails and hydrophilic heads briefly. (pace: slow)\n   - Teach key functions: selective barrier, signal reception, cell recognition, and anchor for cytoskeleton. Provide a one-sentence factory analogy: \"security gate controlling entry and communications.\" (pace: medium)\n   - Mini-check: Ask learners to name two functions of the plasma membrane; confirm correct answers.\n2. Move to the cell exterior features (if applicable): cell wall and extracellular matrix:\n   - Explain plant/fungal cell wall composition (cellulose/chitin) and function (rigidity, protection). For animal cells, describe extracellular matrix (collagen, proteoglycans) role in support and signaling. (pace: medium)\n   - Example: show how a plant cell resists turgor pressure because of the cell wall. (pace: slow)\n3. Nucleus and nuclear envelope:\n   - Describe nucleus structure: double membrane with nuclear pores, nucleoplasm, nucleolus. Explain chromatin vs chromosomes and nucleolus role in rRNA/ribosome assembly. (pace: slow)\n   - Explain function: storage and regulation of genetic information, transcription control. Add factory analogy: \"main office with blueprints.\" (pace: medium)\n   - Mini-check: Ask \"Where are ribosomal subunits assembled?\" Expected answer: nucleolus.\n4. Endomembrane system overview, then detailed nodes:\n   - Give a short linking sentence: \"The endomembrane system handles production, processing, and shipping of molecules.\" (pace: medium)\n   - Endoplasmic reticulum (ER):\n     a. Rough ER: Describe membrane-studded ribosomes, role in co-translational insertion and modification of secreted/membrane proteins, initial glycosylation; factory analogy: assembly line with workers inserting tags. (pace: slow)\n     b. Smooth ER: Describe lipid synthesis, detoxification, Ca2+ storage (in muscle — sarcoplasmic reticulum). (pace: medium)\n     c. Mini-activity: Give a short example: insulin synthesis enters RER ⇒ processed in Golgi ⇒ secreted. Ask learners to sequence the organelles for insulin production; confirm sequence RER → Golgi → vesicle → plasma membrane. (pace: medium)\n5. Golgi apparatus:\n   - Describe cis/trans orientation, cisternae, and function: sorting/packaging/modifying glycosylation and adding molecular 'address labels'. (pace: slow)\n   - Show the stepwise movement: receiving vesicles at cis face, modifying through medial cisternae, shipping from trans face. (pace: medium)\n   - Mini-check: Ask \"Which organelle adds shipping labels to proteins?\" Expected answer: Golgi.\n6. Lysosomes and vacuoles:\n   - Define lysosomes (animal): acidic compartments with hydrolytic enzymes, role in digestion of macromolecules and autophagy. (pace: slow)\n   - Define central vacuole (plant): storage, turgor maintenance, degradation roles; contrast with animal small vacuoles/vesicles. (pace: medium)\n   - Example: explain how phagocytosed bacteria are digested in a lysosome; pose question: \"What happens if a lysosomal enzyme is missing?\" Expect discussion of storage diseases. (pace: slow)\n7. Peroxisomes:\n   - Describe single-membrane organelles with oxidative enzymes that break down fatty acids and detoxify H2O2 using catalase. (pace: medium)\n   - Give an example: beta-oxidation and the role in liver cells detoxifying alcohol byproducts. (pace: medium)\n8. Mitochondria:\n   - Structure: double membrane, intermembrane space, inner membrane with cristae, matrix. Highlight own DNA and ribosomes (endosymbiotic origin). (pace: slow)\n   - Function: ATP production via oxidative phosphorylation, TCA cycle; explain gradient-driven ATP synthase. Use factory analogy: power plant with turbines. (pace: slow)\n   - Mini-check: Ask \"Where does the electron transport chain reside?\" Expected answer: inner mitochondrial membrane.\n9. Chloroplasts (plants and algae):\n   - Structure: double membrane, thylakoids, granum, stroma; own DNA. (pace: slow)\n   - Function: photosynthesis—light reactions in thylakoid membranes, Calvin cycle in stroma. Compare to mitochondria as energy converters for sunlight. (pace: medium)\n10. Cytoskeleton and motor proteins:\n    - Describe microtubules, microfilaments (actin), and intermediate filaments: composition, polarity, and general functions (shape, transport tracks, division). (pace: medium)\n    - Explain motor proteins: kinesin and dynein on microtubules, myosin on actin — role in vesicle transport and muscle contraction. (pace: medium)\n    - Mini-activity: Have learners trace a vesicle route from Golgi to plasma membrane and name the motor protein type typically involved (kinesin for anterograde along microtubules). (pace: medium)\n11. Ribosomes (cytosolic and bound):\n    - Explain composition (rRNA + proteins), sizes in eukaryotes (80S), and distinction between free and ER-bound ribosomes with their product destinations. (pace: slow)\n    - Example: cytosolic ribosomes make cytosolic proteins or proteins targeted to mitochondria/nucleus; bound ribosomes make secreted/membrane proteins. (pace: medium)\n12. Short recap of organelles: verbally summarize each organelle with a one-line function; pause for questions. (pace: slow)",
+      "speech": "We begin at the cell boundary, the plasma membrane, which is a phospholipid bilayer with embedded proteins, cholesterol in animal cells, and carbohydrates on the outside; the phospholipids have hydrophilic heads facing the water and hydrophobic tails tucked inside. >2.0\nIts key jobs are as a selective barrier, a site for signal reception, a means for cell recognition, and an anchor for the cytoskeleton — think of it as a security gate controlling entry and communications. >2.0\nQuick check: name two functions of the plasma membrane — what did you pick? selective barrier and signal reception are correct. >2.0\nOutside the membrane some cells have a rigid cell wall made of cellulose or chitin for protection and rigidity, while animal cells are surrounded by an extracellular matrix of collagen and proteoglycans that supports and signals to cells. >2.0\nFor example, the plant cell wall lets a plant cell resist turgor pressure so it doesn’t burst. >2.0\nThe nucleus is a double-membrane organelle with nuclear pores, nucleoplasm, and a nucleolus; chromatin is the DNA–protein complex and condensed chromosomes form during division, while the nucleolus assembles rRNA and ribosomal subunits. >2.0\nIts function is storage and regulation of genetic information and control of transcription — the main office with the blueprints. Where are ribosomal subunits assembled? In the nucleolus. >2.0\nThe endomembrane system handles production, processing, and shipping of molecules. >2.0\nRough ER has membrane-bound ribosomes that insert and modify secreted and membrane proteins and start glycosylation — like an assembly line putting tags on products; smooth ER makes lipids, detoxifies, and stores Ca2+ (sarcoplasmic reticulum in muscle). >2.0\nSequence activity: insulin is synthesized in the RER, processed in the Golgi, packed in vesicles, and secreted at the plasma membrane — RER → Golgi → vesicle → plasma membrane. >2.0\nThe Golgi has cis and trans faces and cisternae that modify and add molecular address labels, receiving at cis, processing in medial cisternae, and shipping from trans; which organelle adds shipping labels? The Golgi. >2.0\nLysosomes are acidic enzyme-filled compartments for digestion and autophagy; plants have a central vacuole for storage and turgor, while animals have smaller vesicles — if a lysosomal enzyme is missing, storage diseases can result. >2.0\nPeroxisomes are single-membrane organelles with oxidative enzymes that break down fatty acids and detoxify H2O2 using catalase, important in liver cells for alcohol byproduct detox. >2.0\nMitochondria have double membranes, cristae, matrix, their own DNA and ribosomes, and produce ATP by oxidative phosphorylation using an electrochemical gradient — the electron transport chain sits on the inner mitochondrial membrane; think power plant with turbines. >2.0\nChloroplasts in plants and algae have thylakoids, grana, and stroma with their own DNA; light reactions occur in thylakoid membranes and the Calvin cycle in the stroma, converting sunlight to chemical energy. >2.0\nThe cytoskeleton — microtubules, actin microfilaments, and intermediate filaments — gives shape, makes tracks for transport, and enables division; kinesin and dynein move on microtubules and myosin works on actin for transport and contraction — trace a Golgi→plasma membrane vesicle route and the motor is typically kinesin. >2.0\nRibosomes are rRNA plus proteins, 80S in eukaryotes; free ribosomes make cytosolic or organelle-targeted proteins while ER-bound ribosomes make secreted and membrane proteins. >2.0\nTo recap briefly: plasma membrane controls entry and signaling, cell wall/ECM support, nucleus stores blueprints, ER and Golgi make and ship proteins, lysosomes and vacuoles handle digestion and storage, peroxisomes detoxify, mitochondria and chloroplasts power the cell, cytoskeleton provides structure and transport, and ribosomes make proteins — any questions? >2.5",
+      "image_plan": {
+        "word_index_base": 0,
+        "end_index_inclusive": true,
+        "images": [
+          {
+            "content": "plasma membrane",
+            "topic": "Cell Biology - Membrane Structure",
+            "diagram": 0,
+            "text": 1,
+            "diagram_required_objects": [],
+            "range_start": 2,
+            "range_end": 2
+          },
+          {
+            "content": "phospholipid bilayer with embedded proteins, cholesterol, carbohydrates",
+            "topic": "Cell Biology - Membrane Structure",
+            "diagram": 1,
+            "text": 0,
+            "diagram_required_objects": [
+              "phospholipid heads",
+              "phospholipid tails",
+              "integral membrane protein",
+              "peripheral protein",
+              "cholesterol molecule",
+              "carbohydrate chain (glycoprotein/glycolipid)",
+              "extracellular side",
+              "cytosolic side"
+            ],
+            "range_start": 3,
+            "range_end": 16
+          },
+          {
+            "content": "hydrophilic heads",
+            "topic": "Cell Biology - Membrane Structure",
+            "diagram": 0,
+            "text": 1,
+            "diagram_required_objects": [],
+            "range_start": 17,
+            "range_end": 18
+          },
+          {
+            "content": "hydrophobic tails",
+            "topic": "Cell Biology - Membrane Structure",
+            "diagram": 0,
+            "text": 1,
+            "diagram_required_objects": [],
+            "range_start": 20,
+            "range_end": 21
+          },
+          {
+            "content": "selective barrier; site for signal reception; cell recognition; cytoskeleton anchor",
+            "topic": "Cell Biology - Membrane Function",
+            "diagram": 0,
+            "text": 1,
+            "diagram_required_objects": [],
+            "range_start": 29,
+            "range_end": 37
+          },
+          {
+            "content": "security gate controlling entry and communications (visual: gate with guards and signal icons)",
+            "topic": "Cell Biology - Membrane Function",
+            "diagram": 0,
+            "text": 0,
+            "diagram_required_objects": [],
+            "range_start": 41,
+            "range_end": 48
+          },
+          {
+            "content": "cell wall (cellulose/chitin) and extracellular matrix (collagen, proteoglycans)",
+            "topic": "Cell Biology - Extracellular Structures",
+            "diagram": 0,
+            "text": 1,
+            "diagram_required_objects": [],
+            "range_start": 54,
+            "range_end": 61
+          },
+          {
+            "content": "plant cell wall resisting turgor pressure (visual: plant cell swollen but intact)",
+            "topic": "Plant Cell Biology",
+            "diagram": 0,
+            "text": 0,
+            "diagram_required_objects": [],
+            "range_start": 69,
+            "range_end": 77
+          },
+          {
+            "content": "eukaryotic cell cross-section with nucleus, RER, SER, Golgi, lysosome, peroxisome, mitochondrion, chloroplast, vacuole, cytoskeleton, ribosomes",
+            "topic": "Cell Biology - Organelle Overview",
+            "diagram": 1,
+            "text": 0,
+            "diagram_required_objects": [
+              "nucleus",
+              "nuclear envelope with pores",
+              "nucleolus",
+              "chromatin",
+              "rough endoplasmic reticulum (RER)",
+              "ribosomes (on RER)",
+              "smooth endoplasmic reticulum (SER)",
+              "Golgi apparatus (cis, medial, trans)",
+              "transport vesicle",
+              "lysosome",
+              "peroxisome",
+              "mitochondrion (cristae, matrix)",
+              "chloroplast (thylakoid, grana, stroma)",
+              "central vacuole",
+              "cytoskeleton (microtubules, microfilaments, intermediate filaments)",
+              "plasma membrane"
+            ],
+            "range_start": 78,
+            "range_end": 125
+          },
+          {
+            "content": "nucleus: double membrane, nuclear pores, nucleoplasm, nucleolus, chromatin",
+            "topic": "Cell Biology - Nucleus",
+            "diagram": 0,
+            "text": 1,
+            "diagram_required_objects": [],
+            "range_start": 80,
+            "range_end": 88
+          },
+          {
+            "content": "nucleolus assembles rRNA and ribosomal subunits",
+            "topic": "Cell Biology - Nucleus",
+            "diagram": 0,
+            "text": 1,
+            "diagram_required_objects": [],
+            "range_start": 92,
+            "range_end": 97
+          },
+          {
+            "content": "endomembrane system: production, processing, shipping of molecules",
+            "topic": "Cell Biology - Endomembrane System",
+            "diagram": 0,
+            "text": 1,
+            "diagram_required_objects": [],
+            "range_start": 103,
+            "range_end": 110
+          },
+          {
+            "content": "rough ER with ribosomes inserting/modifying secreted & membrane proteins (assembly line visual)",
+            "topic": "Cell Biology - Endoplasmic Reticulum",
+            "diagram": 0,
+            "text": 0,
+            "diagram_required_objects": [],
+            "range_start": 111,
+            "range_end": 121
+          },
+          {
+            "content": "smooth ER: lipid synthesis, detoxification, Ca2+ storage (sarcoplasmic reticulum)",
+            "topic": "Cell Biology - Endoplasmic Reticulum",
+            "diagram": 0,
+            "text": 1,
+            "diagram_required_objects": [],
+            "range_start": 122,
+            "range_end": 131
+          },
+          {
+            "content": "sequence: RER → Golgi → vesicle → plasma membrane",
+            "topic": "Cell Biology - Protein Trafficking",
+            "diagram": 0,
+            "text": 0,
+            "diagram_required_objects": [],
+            "range_start": 132,
+            "range_end": 140
+          },
+          {
+            "content": "Golgi: cis face, medial cisternae, trans face (adds shipping labels)",
+            "topic": "Cell Biology - Golgi Apparatus",
+            "diagram": 0,
+            "text": 1,
+            "diagram_required_objects": [],
+            "range_start": 141,
+            "range_end": 149
+          },
+          {
+            "content": "lysosome: acidic digestive compartment; vacuole in plants for storage and turgor",
+            "topic": "Cell Biology - Lysosomes & Vacuoles",
+            "diagram": 0,
+            "text": 1,
+            "diagram_required_objects": [],
+            "range_start": 150,
+            "range_end": 160
+          },
+          {
+            "content": "peroxisome with catalase breaking down H2O2; oxidative enzymes",
+            "topic": "Cell Biology - Peroxisomes",
+            "diagram": 0,
+            "text": 1,
+            "diagram_required_objects": [],
+            "range_start": 161,
+            "range_end": 169
+          },
+          {
+            "content": "mitochondrion: double membrane, cristae, matrix, own DNA, electron transport chain on inner membrane, ATP production (power plant visual)",
+            "topic": "Cell Biology - Mitochondria",
+            "diagram": 0,
+            "text": 1,
+            "diagram_required_objects": [],
+            "range_start": 170,
+            "range_end": 181
+          },
+          {
+            "content": "chloroplast: thylakoids, grana, stroma; light reactions in thylakoid membranes; Calvin cycle in stroma",
+            "topic": "Plant Cell Biology - Chloroplast",
+            "diagram": 0,
+            "text": 1,
+            "diagram_required_objects": [],
+            "range_start": 182,
+            "range_end": 192
+          },
+          {
+            "content": "cytoskeleton: microtubules, actin microfilaments, intermediate filaments; motors kinesin, dynein, myosin",
+            "topic": "Cell Biology - Cytoskeleton",
+            "diagram": 0,
+            "text": 1,
+            "diagram_required_objects": [],
+            "range_start": 193,
+            "range_end": 204
+          },
+          {
+            "content": "trace route: Golgi → plasma membrane vesicle moved by kinesin on microtubules (visual: vesicle with kinesin walking)",
+            "topic": "Cell Biology - Intracellular Transport",
+            "diagram": 0,
+            "text": 0,
+            "diagram_required_objects": [],
+            "range_start": 205,
+            "range_end": 213
+          },
+          {
+            "content": "ribosomes: rRNA + proteins; 80S in eukaryotes; free vs ER-bound ribosomes",
+            "topic": "Cell Biology - Ribosomes",
+            "diagram": 0,
+            "text": 1,
+            "diagram_required_objects": [],
+            "range_start": 214,
+            "range_end": 224
+          },
+          {
+            "content": "recap: plasma membrane, cell wall/ECM, nucleus, ER & Golgi, lysosomes/vacuoles, peroxisomes, mitochondria/chloroplasts, cytoskeleton, ribosomes",
+            "topic": "Cell Biology - Summary",
+            "diagram": 0,
+            "text": 1,
+            "diagram_required_objects": [],
+            "range_start": 225,
+            "range_end": 243
+          },
+          {
+            "content": "Question prompt: Any questions?",
+            "topic": "Lesson Interaction",
+            "diagram": 0,
+            "text": 1,
+            "diagram_required_objects": [],
+            "range_start": 244,
+            "range_end": 246
+          }
+        ]
+      },
+      "image_text_maps": [
+        {
+          "content": "plasma membrane",
+          "topic": "Cell Biology - Membrane Structure",
+          "query": "",
+          "span_text": "at",
+          "range_start": 2,
+          "range_end": 2,
+          "diagram": 0,
+          "diagram_required_objects": [],
+          "text_tag": 1,
+          "write_text": "plasma membrane"
+        },
+        {
+          "content": "phospholipid bilayer with embedded proteins, cholesterol, carbohydrates",
+          "topic": "Cell Biology - Membrane Structure",
+          "query": "phospholipid bilayer with embedded proteins, cholesterol, carbohydrates",
+          "span_text": "the cell boundary, the plasma membrane, which is a phospholipid bilayer with embedded proteins,",
+          "range_start": 3,
+          "range_end": 16,
+          "diagram": 1,
+          "diagram_required_objects": [
+            "phospholipid heads",
+            "phospholipid tails",
+            "integral membrane protein",
+            "peripheral protein",
+            "cholesterol molecule",
+            "carbohydrate chain (glycoprotein/glycolipid)",
+            "extracellular side",
+            "cytosolic side"
+          ],
+          "text_tag": 0,
+          "write_text": "",
+          "processed_ids": [],
+          "refined_labels_file": null,
+          "bbox_px": null,
+          "objects_that_comprise_image": []
+        },
+        {
+          "content": "hydrophilic heads",
+          "topic": "Cell Biology - Membrane Structure",
+          "query": "",
+          "span_text": "cholesterol in",
+          "range_start": 17,
+          "range_end": 18,
+          "diagram": 0,
+          "diagram_required_objects": [],
+          "text_tag": 1,
+          "write_text": "hydrophilic heads"
+        },
+        {
+          "content": "hydrophobic tails",
+          "topic": "Cell Biology - Membrane Structure",
+          "query": "",
+          "span_text": "cells, and",
+          "range_start": 20,
+          "range_end": 21,
+          "diagram": 0,
+          "diagram_required_objects": [],
+          "text_tag": 1,
+          "write_text": "hydrophobic tails"
+        },
+        {
+          "content": "selective barrier; site for signal reception; cell recognition; cytoskeleton anchor",
+          "topic": "Cell Biology - Membrane Function",
+          "query": "",
+          "span_text": "hydrophilic heads facing the water and hydrophobic tails tucked",
+          "range_start": 29,
+          "range_end": 37,
+          "diagram": 0,
+          "diagram_required_objects": [],
+          "text_tag": 1,
+          "write_text": "selective barrier; site for signal reception; cell recognition; cytoskeleton anchor"
+        },
+        {
+          "content": "security gate controlling entry and communications (visual: gate with guards and signal icons)",
+          "topic": "Cell Biology - Membrane Function",
+          "query": "security gate controlling entry and communications (visual: gate with guards and signal icons)",
+          "span_text": "key jobs are as a selective barrier, a",
+          "range_start": 41,
+          "range_end": 48,
+          "diagram": 0,
+          "diagram_required_objects": [],
+          "text_tag": 0,
+          "write_text": "",
+          "processed_ids": [],
+          "refined_labels_file": null,
+          "bbox_px": null,
+          "objects_that_comprise_image": []
+        },
+        {
+          "content": "cell wall (cellulose/chitin) and extracellular matrix (collagen, proteoglycans)",
+          "topic": "Cell Biology - Extracellular Structures",
+          "query": "",
+          "span_text": "means for cell recognition, and an anchor for",
+          "range_start": 54,
+          "range_end": 61,
+          "diagram": 0,
+          "diagram_required_objects": [],
+          "text_tag": 1,
+          "write_text": "cell wall (cellulose/chitin) and extracellular matrix (collagen, proteoglycans)"
+        },
+        {
+          "content": "plant cell wall resisting turgor pressure (visual: plant cell swollen but intact)",
+          "topic": "Plant Cell Biology",
+          "query": "plant cell wall resisting turgor pressure (visual: plant cell swollen but intact)",
+          "span_text": "a security gate controlling entry and communications. >2.0 Quick",
+          "range_start": 69,
+          "range_end": 77,
+          "diagram": 0,
+          "diagram_required_objects": [],
+          "text_tag": 0,
+          "write_text": "",
+          "processed_ids": [],
+          "refined_labels_file": null,
+          "bbox_px": null,
+          "objects_that_comprise_image": []
+        },
+        {
+          "content": "eukaryotic cell cross-section with nucleus, RER, SER, Golgi, lysosome, peroxisome, mitochondrion, chloroplast, vacuole, cytoskeleton, ribosomes",
+          "topic": "Cell Biology - Organelle Overview",
+          "query": "eukaryotic cell cross-section with nucleus, RER, SER, Golgi, lysosome, peroxisome, mitochondrion, chloroplast, vacuole, cytoskeleton, ribosomes",
+          "span_text": "check: name two functions of the plasma membrane — what did you pick? selective barrier and signal reception are correct. >2.0 Outside the membrane some cells have a rigid cell wall made of cellulose or chitin for protection and rigidity, while animal cells are surrounded by an extracellular",
+          "range_start": 78,
+          "range_end": 125,
+          "diagram": 1,
+          "diagram_required_objects": [
+            "nucleus",
+            "nuclear envelope with pores",
+            "nucleolus",
+            "chromatin",
+            "rough endoplasmic reticulum (RER)",
+            "ribosomes (on RER)",
+            "smooth endoplasmic reticulum (SER)",
+            "Golgi apparatus (cis, medial, trans)",
+            "transport vesicle",
+            "lysosome",
+            "peroxisome",
+            "mitochondrion (cristae, matrix)",
+            "chloroplast (thylakoid, grana, stroma)",
+            "central vacuole",
+            "cytoskeleton (microtubules, microfilaments, intermediate filaments)",
+            "plasma membrane"
+          ],
+          "text_tag": 0,
+          "write_text": "",
+          "processed_ids": [],
+          "refined_labels_file": null,
+          "bbox_px": null,
+          "objects_that_comprise_image": []
+        },
+        {
+          "content": "nucleus: double membrane, nuclear pores, nucleoplasm, nucleolus, chromatin",
+          "topic": "Cell Biology - Nucleus",
+          "query": "",
+          "span_text": "two functions of the plasma membrane — what did",
+          "range_start": 80,
+          "range_end": 88,
+          "diagram": 0,
+          "diagram_required_objects": [],
+          "text_tag": 1,
+          "write_text": "nucleus: double membrane, nuclear pores, nucleoplasm, nucleolus, chromatin"
+        },
+        {
+          "content": "nucleolus assembles rRNA and ribosomal subunits",
+          "topic": "Cell Biology - Nucleus",
+          "query": "",
+          "span_text": "barrier and signal reception are correct.",
+          "range_start": 92,
+          "range_end": 97,
+          "diagram": 0,
+          "diagram_required_objects": [],
+          "text_tag": 1,
+          "write_text": "nucleolus assembles rRNA and ribosomal subunits"
+        },
+        {
+          "content": "endomembrane system: production, processing, shipping of molecules",
+          "topic": "Cell Biology - Endomembrane System",
+          "query": "",
+          "span_text": "cells have a rigid cell wall made of",
+          "range_start": 103,
+          "range_end": 110,
+          "diagram": 0,
+          "diagram_required_objects": [],
+          "text_tag": 1,
+          "write_text": "endomembrane system: production, processing, shipping of molecules"
+        },
+        {
+          "content": "rough ER with ribosomes inserting/modifying secreted & membrane proteins (assembly line visual)",
+          "topic": "Cell Biology - Endoplasmic Reticulum",
+          "query": "rough ER with ribosomes inserting/modifying secreted & membrane proteins (assembly line visual)",
+          "span_text": "cellulose or chitin for protection and rigidity, while animal cells are",
+          "range_start": 111,
+          "range_end": 121,
+          "diagram": 0,
+          "diagram_required_objects": [],
+          "text_tag": 0,
+          "write_text": "",
+          "processed_ids": [],
+          "refined_labels_file": null,
+          "bbox_px": null,
+          "objects_that_comprise_image": []
+        },
+        {
+          "content": "smooth ER: lipid synthesis, detoxification, Ca2+ storage (sarcoplasmic reticulum)",
+          "topic": "Cell Biology - Endoplasmic Reticulum",
+          "query": "",
+          "span_text": "surrounded by an extracellular matrix of collagen and proteoglycans that",
+          "range_start": 122,
+          "range_end": 131,
+          "diagram": 0,
+          "diagram_required_objects": [],
+          "text_tag": 1,
+          "write_text": "smooth ER: lipid synthesis, detoxification, Ca2+ storage (sarcoplasmic reticulum)"
+        },
+        {
+          "content": "sequence: RER → Golgi → vesicle → plasma membrane",
+          "topic": "Cell Biology - Protein Trafficking",
+          "query": "sequence: RER → Golgi → vesicle → plasma membrane",
+          "span_text": "supports and signals to cells. >2.0 For example, the",
+          "range_start": 132,
+          "range_end": 140,
+          "diagram": 0,
+          "diagram_required_objects": [],
+          "text_tag": 0,
+          "write_text": "",
+          "processed_ids": [],
+          "refined_labels_file": null,
+          "bbox_px": null,
+          "objects_that_comprise_image": []
+        },
+        {
+          "content": "Golgi: cis face, medial cisternae, trans face (adds shipping labels)",
+          "topic": "Cell Biology - Golgi Apparatus",
+          "query": "",
+          "span_text": "plant cell wall lets a plant cell resist turgor",
+          "range_start": 141,
+          "range_end": 149,
+          "diagram": 0,
+          "diagram_required_objects": [],
+          "text_tag": 1,
+          "write_text": "Golgi: cis face, medial cisternae, trans face (adds shipping labels)"
+        },
+        {
+          "content": "lysosome: acidic digestive compartment; vacuole in plants for storage and turgor",
+          "topic": "Cell Biology - Lysosomes & Vacuoles",
+          "query": "",
+          "span_text": "pressure so it doesn’t burst. >2.0 The nucleus is a double-membrane",
+          "range_start": 150,
+          "range_end": 160,
+          "diagram": 0,
+          "diagram_required_objects": [],
+          "text_tag": 1,
+          "write_text": "lysosome: acidic digestive compartment; vacuole in plants for storage and turgor"
+        },
+        {
+          "content": "peroxisome with catalase breaking down H2O2; oxidative enzymes",
+          "topic": "Cell Biology - Peroxisomes",
+          "query": "",
+          "span_text": "organelle with nuclear pores, nucleoplasm, and a nucleolus; chromatin",
+          "range_start": 161,
+          "range_end": 169,
+          "diagram": 0,
+          "diagram_required_objects": [],
+          "text_tag": 1,
+          "write_text": "peroxisome with catalase breaking down H2O2; oxidative enzymes"
+        },
+        {
+          "content": "mitochondrion: double membrane, cristae, matrix, own DNA, electron transport chain on inner membrane, ATP production (power plant visual)",
+          "topic": "Cell Biology - Mitochondria",
+          "query": "",
+          "span_text": "is the DNA–protein complex and condensed chromosomes form during division, while the",
+          "range_start": 170,
+          "range_end": 181,
+          "diagram": 0,
+          "diagram_required_objects": [],
+          "text_tag": 1,
+          "write_text": "mitochondrion: double membrane, cristae, matrix, own DNA, electron transport chain on inner membrane, ATP production (power plant visual)"
+        },
+        {
+          "content": "chloroplast: thylakoids, grana, stroma; light reactions in thylakoid membranes; Calvin cycle in stroma",
+          "topic": "Plant Cell Biology - Chloroplast",
+          "query": "",
+          "span_text": "nucleolus assembles rRNA and ribosomal subunits. >2.0 Its function is storage",
+          "range_start": 182,
+          "range_end": 192,
+          "diagram": 0,
+          "diagram_required_objects": [],
+          "text_tag": 1,
+          "write_text": "chloroplast: thylakoids, grana, stroma; light reactions in thylakoid membranes; Calvin cycle in stroma"
+        },
+        {
+          "content": "cytoskeleton: microtubules, actin microfilaments, intermediate filaments; motors kinesin, dynein, myosin",
+          "topic": "Cell Biology - Cytoskeleton",
+          "query": "",
+          "span_text": "and regulation of genetic information and control of transcription — the main",
+          "range_start": 193,
+          "range_end": 204,
+          "diagram": 0,
+          "diagram_required_objects": [],
+          "text_tag": 1,
+          "write_text": "cytoskeleton: microtubules, actin microfilaments, intermediate filaments; motors kinesin, dynein, myosin"
+        },
+        {
+          "content": "trace route: Golgi → plasma membrane vesicle moved by kinesin on microtubules (visual: vesicle with kinesin walking)",
+          "topic": "Cell Biology - Intracellular Transport",
+          "query": "trace route: Golgi → plasma membrane vesicle moved by kinesin on microtubules (visual: vesicle with kinesin walking)",
+          "span_text": "office with the blueprints. Where are ribosomal subunits assembled?",
+          "range_start": 205,
+          "range_end": 213,
+          "diagram": 0,
+          "diagram_required_objects": [],
+          "text_tag": 0,
+          "write_text": "",
+          "processed_ids": [],
+          "refined_labels_file": null,
+          "bbox_px": null,
+          "objects_that_comprise_image": []
+        },
+        {
+          "content": "ribosomes: rRNA + proteins; 80S in eukaryotes; free vs ER-bound ribosomes",
+          "topic": "Cell Biology - Ribosomes",
+          "query": "",
+          "span_text": "In the nucleolus. >2.0 The endomembrane system handles production, processing, and",
+          "range_start": 214,
+          "range_end": 224,
+          "diagram": 0,
+          "diagram_required_objects": [],
+          "text_tag": 1,
+          "write_text": "ribosomes: rRNA + proteins; 80S in eukaryotes; free vs ER-bound ribosomes"
+        },
+        {
+          "content": "recap: plasma membrane, cell wall/ECM, nucleus, ER & Golgi, lysosomes/vacuoles, peroxisomes, mitochondria/chloroplasts, cytoskeleton, ribosomes",
+          "topic": "Cell Biology - Summary",
+          "query": "",
+          "span_text": "shipping of molecules. >2.0 Rough ER has membrane-bound ribosomes that insert and modify secreted and membrane proteins and start",
+          "range_start": 225,
+          "range_end": 243,
+          "diagram": 0,
+          "diagram_required_objects": [],
+          "text_tag": 1,
+          "write_text": "recap: plasma membrane, cell wall/ECM, nucleus, ER & Golgi, lysosomes/vacuoles, peroxisomes, mitochondria/chloroplasts, cytoskeleton, ribosomes"
+        },
+        {
+          "content": "Question prompt: Any questions?",
+          "topic": "Lesson Interaction",
+          "query": "",
+          "span_text": "glycosylation — like",
+          "range_start": 244,
+          "range_end": 246,
+          "diagram": 0,
+          "diagram_required_objects": [],
+          "text_tag": 1,
+          "write_text": "Question prompt: Any questions?"
+        }
+      ]
+    },
+    {
+      "chapter_index": 3,
+      "timeline_chunk": "CHAPTER: Integrated processes, application, checks, and recap\n1. Introduce integrative goal: \"We will trace three core processes across organelles to see cooperation: protein production and trafficking, energy conversion, and cell division/mitosis.\" (pace: medium)\n2. Protein production and secretory pathway — stepwise trace:\n   - Step 1: Transcription in nucleus: DNA → pre-mRNA; processing (splicing, 5' cap, poly-A tail) in nucleus. (pace: slow)\n   - Step 2: Translation initiation where ribosomes begin synthesis on RER for secreted/membrane proteins; signal peptide directs ribosome to RER via signal recognition particle (SRP). (pace: slow)\n   - Step 3: Co-translational translocation into RER lumen or insertion into membrane; initial glycosylation and folding with chaperones. (pace: medium)\n   - Step 4: Vesicle budding from RER to Golgi; explain coat proteins (COPII for ER→Golgi) as an aside. (pace: medium)\n   - Step 5: Golgi processing, sorting, and packaging into secretory vesicles; targeted transport along cytoskeleton. (pace: medium)\n   - Step 6: Exocytosis at plasma membrane or delivery to lysosome. (pace: medium)\n   - Mini-check sequence quiz: Provide a scrambled sequence and ask learners to reorder: Golgi → RER → Nucleus → Plasma membrane. Correct order: Nucleus → RER → Golgi → Plasma membrane. (pace: medium)\n3. Energy conversion across organelles:\n   - Explain glycolysis in cytosol (briefly), pyruvate import into mitochondria, and the TCA cycle in matrix producing NADH/FADH2. (pace: slow)\n   - Describe electron transport chain on inner mitochondrial membrane creating proton gradient and ATP synthesis by ATP synthase. (pace: slow)\n   - For photosynthetic cells, trace light-driven electron flow in thylakoid membranes producing ATP and NADPH and Calvin cycle in stroma fixing CO2 into sugars. (pace: medium)\n   - Mini-check calculation thought: \"If oxygen is limiting, where will ATP production drop most and what pathway compensates temporarily?\" Expected reasoning: oxidative phosphorylation drops; glycolysis + fermentation increases. (pace: medium)\n4. Intracellular transport and cytoskeleton coordination:\n   - Show how vesicles use motor proteins on microtubules for long-distance transport and actin for short-range positioning; emphasize polarity (microtubule minus vs plus ends). (pace: medium)\n   - Example: neuronal axonal transport: kinesin moves vesicles anterograde to synapse, dynein mediates retrograde transport. (pace: medium)\n   - Mini-check: Ask \"Which motor moves cargo toward the plus end of microtubules?\" Expected answer: kinesin.\n5. Cell cycle and division (overview with organelle considerations):\n   - Outline phases: G1 (growth), S (DNA replication), G2 (prep), M (mitosis), cytokinesis. (pace: slow)\n   - Explain chromosome condensation, nuclear envelope breakdown, spindle assembly from microtubules and centrosomes, chromosome segregation, and reformation of nuclei. (pace: medium)\n   - Note organelle fates: mitochondria/chloroplasts are distributed by fission and partitioning; ER and Golgi fragments and reassemble. (pace: medium)\n   - Mini-check: Ask \"What organizes the mitotic spindle in animal cells?\" Expected answer: centrosomes (microtubule organizing centers).\n6. Clinical and biological applications (brief):\n   - Give examples linking organelle dysfunction to disease: mitochondrial myopathies (ATP shortage), lysosomal storage diseases (e.g., Tay–Sachs), defective CFTR trafficking in cystic fibrosis (protein misfolding/ER retention). (pace: slow)\n   - Prompt learners to think: \"If a secreted enzyme fails to be glycosylated in the Golgi, what cellular problem can result?\" Encourage short responses about mis-sorting or degradation. (pace: medium)\n7. Formative assessment: 6-question rapid quiz (written or verbal), for example:\n   - Q1: Where is rRNA transcribed? (nucleolus)\n   - Q2: Which organelle has cristae? (mitochondrion)\n   - Q3: Sequence: transcription → ? → Golgi. (translation at RER)\n   - Q4: Motor for retrograde microtubule transport? (dynein)\n   - Q5: Organelle that degrades worn-out organelles? (lysosome/autophagy)\n   - Q6: Site of Calvin cycle? (chloroplast stroma)\n   Provide immediate feedback or model answers after each question. (pace: medium)\n8. Summative recap and synthesis:\n   - Verbally summarize: revisit the roadmap and confirm that each objective was met: naming organelles, their structures/functions, core processes, and linking dysfunction to disease. (pace: slow)\n   - Provide one integrated metaphor tying the cell to the factory again, mapping each organelle to its department in one sentence. (pace: medium)\n9. Closing activities and transitions:\n   - Assign a short homework/application: sketch a eukaryotic cell and label organelles, then write two sentences describing an integrated path (e.g., insulin secretion). (pace: slow)\n   - Offer optional extension: read a paper/summary about endosymbiotic theory or a clinical case about lysosomal storage disease. (pace: fast)\n10. Final quick reflection prompt and exit mini-check: Ask learners to state one new thing they learned and one question they still have; collect responses for next lesson planning. (pace: slow)",
+      "speech": "Today we will trace three core processes across organelles to see how they cooperate: protein production and trafficking, energy conversion, and cell division or mitosis. >2.0\n\nFirst, protein production and the secretory pathway. Transcription happens in the nucleus where DNA is copied into pre‑mRNA, then processed by splicing, addition of a 5′ cap, and a poly‑A tail before export. >2.0\n\nTranslation for secreted or membrane proteins begins on ribosomes bound to the rough endoplasmic reticulum; a signal peptide on the nascent chain is recognized by the SRP which targets the ribosome to the RER. >2.0\n\nProteins are co‑translationally translocated into the RER lumen or inserted into the membrane, undergo initial glycosylation and folding with chaperones. >1.5\n\nVesicles bud from the RER to the Golgi—COPII coats mediate ER→Golgi transport—then the Golgi processes, sorts, and packages cargo into secretory vesicles that travel along the cytoskeleton for exocytosis or lysosomal delivery. >2.0\n\nQuick check: reorder this scrambled sequence—Golgi, RER, Nucleus, Plasma membrane. Do you see the correct order? It’s Nucleus → RER → Golgi → Plasma membrane. >2.0\n\nNext, energy conversion: glycolysis in the cytosol yields pyruvate, which enters mitochondria; the TCA cycle in the matrix produces NADH and FADH2. >2.0\n\nThose carriers feed the electron transport chain on the inner membrane, creating a proton gradient used by ATP synthase to make most ATP. >2.0\n\nIn photosynthetic cells, light reactions in thylakoids make ATP and NADPH and the Calvin cycle in the stroma fixes CO2 into sugars. >1.5\n\nMini‑check: if oxygen is limiting, oxidative phosphorylation drops most and glycolysis plus fermentation temporarily compensates. >2.0\n\nIntracellular transport uses motor proteins on microtubules for long distances and actin for short positioning; microtubules have polarity with plus and minus ends. >1.5\n\nExample: in axons, kinesin moves vesicles anterograde to the synapse and dynein moves cargo retrograde. Which motor moves toward the plus end? Kinesin. >2.0\n\nOn the cell cycle: G1 growth, S DNA replication, G2 preparation, M mitosis, then cytokinesis. >1.5\n\nChromosomes condense, the nuclear envelope breaks down, spindle microtubules from centrosomes segregate chromosomes, and nuclei reform; mitochondria and chloroplasts are partitioned by fission while ER and Golgi fragment and reassemble. >2.0\n\nMini‑check: what organizes the mitotic spindle in animal cells? Centrosomes. >2.0\n\nClinically, organelle dysfunction causes disease: mitochondrial myopathies cause ATP shortage, lysosomal storage diseases like Tay–Sachs block degradation, and misfolded CFTR retained in the ER causes cystic fibrosis. >2.0\n\nIf a secreted enzyme fails to be glycosylated in the Golgi, what might happen? Think mis‑sorting or degradation—short answer: loss of function and possible disease. >2.0\n\nNow a rapid six‑question quiz with answers: rRNA is transcribed in the nucleolus; cristae are in mitochondria; transcription → translation at the RER → Golgi; retrograde motor is dynein; lysosomes degrade worn‑out organelles; Calvin cycle is in the chloroplast stroma. >2.0\n\nTo finish, remember the roadmap: organelles, structures and functions, core processes, and disease links—each objective met. >2.0\n\nOne metaphor: the cell is a factory—nucleus the office, RER the production line, Golgi the shipping department, mitochondria the power plant, lysosomes the recycling center. >2.0\n\nFor homework, sketch a eukaryotic cell and label organelles, then describe one integrated path such as insulin secretion in two sentences. >2.0\n\nOptional extension: read about endosymbiotic theory or a lysosomal disease case. >1.5\n\nFinally, tell me one new thing you learned and one question you still have so I can plan the next lesson. >2.5",
+      "image_plan": {
+        "word_index_base": 0,
+        "end_index_inclusive": true,
+        "images": [
+          {
+            "content": "Title: Core cellular processes — protein trafficking, energy conversion, mitosis",
+            "topic": "Cell Biology Overview",
+            "diagram": 0,
+            "text": 1,
+            "diagram_required_objects": [],
+            "range_start": 0,
+            "range_end": 6
+          },
+          {
+            "content": "Simple labeled eukaryotic cell diagram (nucleus, RER, Golgi, mitochondria, chloroplasts, lysosome, plasma membrane)",
+            "topic": "Eukaryotic Cell Structure",
+            "diagram": 1,
+            "text": 0,
+            "diagram_required_objects": [
+              "nucleus",
+              "rough endoplasmic reticulum",
+              "Golgi apparatus",
+              "mitochondrion",
+              "chloroplast (if present)",
+              "lysosome",
+              "plasma membrane",
+              "cytosol",
+              "microtubules",
+              "actin filaments"
+            ],
+            "range_start": 7,
+            "range_end": 40
+          },
+          {
+            "content": "Nucleus: transcription → pre-mRNA; splicing, 5' cap, poly-A tail; export",
+            "topic": "Gene Expression",
+            "diagram": 0,
+            "text": 1,
+            "diagram_required_objects": [],
+            "range_start": 41,
+            "range_end": 60
+          },
+          {
+            "content": "Ribosome on RER: signal peptide + SRP targeting",
+            "topic": "Protein Synthesis and Targeting",
+            "diagram": 1,
+            "text": 0,
+            "diagram_required_objects": [
+              "ribosome",
+              "rough ER membrane",
+              "signal peptide",
+              "SRP (signal recognition particle)",
+              "translocon"
+            ],
+            "range_start": 61,
+            "range_end": 100
+          },
+          {
+            "content": "Co-translational translocation; glycosylation; chaperone-assisted folding",
+            "topic": "Protein Folding and Modification",
+            "diagram": 0,
+            "text": 1,
+            "diagram_required_objects": [],
+            "range_start": 101,
+            "range_end": 127
+          },
+          {
+            "content": "Vesicle budding from ER with COPII coat → Golgi; arrows showing transport along microtubules to plasma membrane or lysosome",
+            "topic": "Vesicular Transport",
+            "diagram": 1,
+            "text": 0,
+            "diagram_required_objects": [
+              "COPII-coated vesicle",
+              "Golgi stacks",
+              "secretory vesicle",
+              "microtubule track",
+              "motor protein (kinesin/dynein)",
+              "plasma membrane",
+              "lysosome"
+            ],
+            "range_start": 128,
+            "range_end": 182
+          },
+          {
+            "content": "Order: Nucleus → RER → Golgi → Plasma membrane",
+            "topic": "Secretory Pathway Check",
+            "diagram": 0,
+            "text": 1,
+            "diagram_required_objects": [],
+            "range_start": 183,
+            "range_end": 196
+          },
+          {
+            "content": "Glycolysis → pyruvate (cytosol) ; pyruvate enters mitochondrion",
+            "topic": "Cellular Respiration Overview",
+            "diagram": 0,
+            "text": 1,
+            "diagram_required_objects": [],
+            "range_start": 197,
+            "range_end": 219
+          },
+          {
+            "content": "Mitochondrion cross-section showing matrix (TCA), inner membrane (ETC), cristae, ATP synthase, NADH/FADH2 flow",
+            "topic": "Mitochondrial Energy Conversion",
+            "diagram": 1,
+            "text": 0,
+            "diagram_required_objects": [
+              "matrix",
+              "TCA cycle",
+              "inner membrane",
+              "electron transport chain complexes",
+              "proton gradient",
+              "ATP synthase",
+              "cristae",
+              "NADH",
+              "FADH2"
+            ],
+            "range_start": 220,
+            "range_end": 260
+          },
+          {
+            "content": "Photosynthesis: thylakoid light reactions → ATP/NADPH; stroma Calvin cycle fixes CO2",
+            "topic": "Photosynthesis",
+            "diagram": 0,
+            "text": 1,
+            "diagram_required_objects": [],
+            "range_start": 261,
+            "range_end": 286
+          },
+          {
+            "content": "If O2 low: oxidative phosphorylation ↓ ; glycolysis + fermentation ↑",
+            "topic": "Metabolic Response",
+            "diagram": 0,
+            "text": 1,
+            "diagram_required_objects": [],
+            "range_start": 287,
+            "range_end": 301
+          },
+          {
+            "content": "Microtubules (long transport) vs actin (short positioning); polarity plus/minus labeled",
+            "topic": "Cytoskeleton and Transport",
+            "diagram": 0,
+            "text": 1,
+            "diagram_required_objects": [],
+            "range_start": 302,
+            "range_end": 324
+          },
+          {
+            "content": "Axon transport: kinesin (anterograde, plus end) vs dynein (retrograde) — small diagram of axon with arrows",
+            "topic": "Neuronal Transport",
+            "diagram": 0,
+            "text": 1,
+            "diagram_required_objects": [],
+            "range_start": 325,
+            "range_end": 350
+          },
+          {
+            "content": "Cell cycle: G1, S, G2, M, Cytokinesis (written as cycle)",
+            "topic": "Cell Cycle",
+            "diagram": 0,
+            "text": 1,
+            "diagram_required_objects": [],
+            "range_start": 351,
+            "range_end": 366
+          },
+          {
+            "content": "Mitosis steps: chromosome condensation, NE breakdown, spindle from centrosomes, segregation, nuclear reformation; mitochondria/chloroplast fission; ER/Golgi fragment and reassemble",
+            "topic": "Mitosis and Organelle Dynamics",
+            "diagram": 1,
+            "text": 0,
+            "diagram_required_objects": [
+              "condensed chromosomes",
+              "nuclear envelope",
+              "spindle microtubules",
+              "centrosomes",
+              "separated chromatids",
+              "mitochondrion fission",
+              "chloroplast fission",
+              "fragmented ER",
+              "Golgi fragments"
+            ],
+            "range_start": 367,
+            "range_end": 430
+          },
+          {
+            "content": "Mitotic organizer: Centrosomes",
+            "topic": "Mitosis Check",
+            "diagram": 0,
+            "text": 1,
+            "diagram_required_objects": [],
+            "range_start": 431,
+            "range_end": 439
+          },
+          {
+            "content": "Clinical examples: mitochondrial myopathies (ATP shortage); lysosomal storage (Tay–Sachs); misfolded CFTR retained in ER → cystic fibrosis",
+            "topic": "Organelle-related Diseases",
+            "diagram": 0,
+            "text": 1,
+            "diagram_required_objects": [],
+            "range_start": 440,
+            "range_end": 493
+          },
+          {
+            "content": "If enzyme not glycosylated in Golgi → mis-sorting / degradation → loss of function",
+            "topic": "Functional Consequences",
+            "diagram": 0,
+            "text": 1,
+            "diagram_required_objects": [],
+            "range_start": 494,
+            "range_end": 520
+          },
+          {
+            "content": "Quiz answers (short list): nucleolus→rRNA, cristae→mitochondria, transcription→translation @RER→Golgi, dynein retrograde, lysosomes degrade organelles, Calvin cycle in stroma",
+            "topic": "Quick Quiz Answers",
+            "diagram": 0,
+            "text": 1,
+            "diagram_required_objects": [],
+            "range_start": 521,
+            "range_end": 560
+          },
+          {
+            "content": "Roadmap reminder: organelles, structures/functions, core processes, disease links",
+            "topic": "Lesson Roadmap",
+            "diagram": 0,
+            "text": 1,
+            "diagram_required_objects": [],
+            "range_start": 560,
+            "range_end": 560
+          },
+          {
+            "content": "Metaphor text: Cell = factory; office (nucleus), production line (RER), shipping (Golgi), power plant (mitochondria), recycling (lysosomes)",
+            "topic": "Metaphor",
+            "diagram": 0,
+            "text": 1,
+            "diagram_required_objects": [],
+            "range_start": 560,
+            "range_end": 560
+          },
+          {
+            "content": "Homework: sketch a eukaryotic cell and label organelles; describe one integrated path (two sentences)",
+            "topic": "Homework",
+            "diagram": 0,
+            "text": 1,
+            "diagram_required_objects": [],
+            "range_start": 560,
+            "range_end": 560
+          },
+          {
+            "content": "Optional extension: endosymbiotic theory or lysosomal disease case",
+            "topic": "Extension Reading",
+            "diagram": 0,
+            "text": 1,
+            "diagram_required_objects": [],
+            "range_start": 560,
+            "range_end": 560
+          },
+          {
+            "content": "Prompt: one new thing learned and one question you still have",
+            "topic": "Reflection Prompt",
+            "diagram": 0,
+            "text": 1,
+            "diagram_required_objects": [],
+            "range_start": 560,
+            "range_end": 560
+          }
+        ]
+      },
+      "image_text_maps": [
+        {
+          "content": "Title: Core cellular processes — protein trafficking, energy conversion, mitosis",
+          "topic": "Cell Biology Overview",
+          "query": "",
+          "span_text": "Today we will trace three core processes",
+          "range_start": 0,
+          "range_end": 6,
+          "diagram": 0,
+          "diagram_required_objects": [],
+          "text_tag": 1,
+          "write_text": "Title: Core cellular processes — protein trafficking, energy conversion, mitosis"
+        },
+        {
+          "content": "Simple labeled eukaryotic cell diagram (nucleus, RER, Golgi, mitochondria, chloroplasts, lysosome, plasma membrane)",
+          "topic": "Eukaryotic Cell Structure",
+          "query": "Simple labeled eukaryotic cell diagram (nucleus, RER, Golgi, mitochondria, chloroplasts, lysosome, plasma membrane)",
+          "span_text": "across organelles to see how they cooperate: protein production and trafficking, energy conversion, and cell division or mitosis. >2.0 First, protein production and the secretory pathway. Transcription happens in the nucleus where DNA is",
+          "range_start": 7,
+          "range_end": 40,
+          "diagram": 1,
+          "diagram_required_objects": [
+            "nucleus",
+            "rough endoplasmic reticulum",
+            "Golgi apparatus",
+            "mitochondrion",
+            "chloroplast (if present)",
+            "lysosome",
+            "plasma membrane",
+            "cytosol",
+            "microtubules",
+            "actin filaments"
+          ],
+          "text_tag": 0,
+          "write_text": "",
+          "processed_ids": [],
+          "refined_labels_file": null,
+          "bbox_px": null,
+          "objects_that_comprise_image": []
+        },
+        {
+          "content": "Nucleus: transcription → pre-mRNA; splicing, 5' cap, poly-A tail; export",
+          "topic": "Gene Expression",
+          "query": "",
+          "span_text": "copied into pre‑mRNA, then processed by splicing, addition of a 5′ cap, and a poly‑A tail before export. >2.0 Translation",
+          "range_start": 41,
+          "range_end": 60,
+          "diagram": 0,
+          "diagram_required_objects": [],
+          "text_tag": 1,
+          "write_text": "Nucleus: transcription → pre-mRNA; splicing, 5' cap, poly-A tail; export"
+        },
+        {
+          "content": "Ribosome on RER: signal peptide + SRP targeting",
+          "topic": "Protein Synthesis and Targeting",
+          "query": "Ribosome on RER: signal peptide + SRP targeting",
+          "span_text": "for secreted or membrane proteins begins on ribosomes bound to the rough endoplasmic reticulum; a signal peptide on the nascent chain is recognized by the SRP which targets the ribosome to the RER. >2.0 Proteins are co‑translationally translocated into the",
+          "range_start": 61,
+          "range_end": 100,
+          "diagram": 1,
+          "diagram_required_objects": [
+            "ribosome",
+            "rough ER membrane",
+            "signal peptide",
+            "SRP (signal recognition particle)",
+            "translocon"
+          ],
+          "text_tag": 0,
+          "write_text": "",
+          "processed_ids": [],
+          "refined_labels_file": null,
+          "bbox_px": null,
+          "objects_that_comprise_image": []
+        },
+        {
+          "content": "Co-translational translocation; glycosylation; chaperone-assisted folding",
+          "topic": "Protein Folding and Modification",
+          "query": "",
+          "span_text": "RER lumen or inserted into the membrane, undergo initial glycosylation and folding with chaperones. >1.5 Vesicles bud from the RER to the Golgi—COPII coats mediate ER→Golgi transport—then",
+          "range_start": 101,
+          "range_end": 127,
+          "diagram": 0,
+          "diagram_required_objects": [],
+          "text_tag": 1,
+          "write_text": "Co-translational translocation; glycosylation; chaperone-assisted folding"
+        },
+        {
+          "content": "Vesicle budding from ER with COPII coat → Golgi; arrows showing transport along microtubules to plasma membrane or lysosome",
+          "topic": "Vesicular Transport",
+          "query": "Vesicle budding from ER with COPII coat → Golgi; arrows showing transport along microtubules to plasma membrane or lysosome",
+          "span_text": "the Golgi processes, sorts, and packages cargo into secretory vesicles that travel along the cytoskeleton for exocytosis or lysosomal delivery. >2.0 Quick check: reorder this scrambled sequence—Golgi, RER, Nucleus, Plasma membrane. Do you see the correct order? It’s Nucleus → RER → Golgi → Plasma membrane. >2.0 Next, energy conversion: glycolysis in the cytosol yields",
+          "range_start": 128,
+          "range_end": 182,
+          "diagram": 1,
+          "diagram_required_objects": [
+            "COPII-coated vesicle",
+            "Golgi stacks",
+            "secretory vesicle",
+            "microtubule track",
+            "motor protein (kinesin/dynein)",
+            "plasma membrane",
+            "lysosome"
+          ],
+          "text_tag": 0,
+          "write_text": "",
+          "processed_ids": [],
+          "refined_labels_file": null,
+          "bbox_px": null,
+          "objects_that_comprise_image": []
+        },
+        {
+          "content": "Order: Nucleus → RER → Golgi → Plasma membrane",
+          "topic": "Secretory Pathway Check",
+          "query": "",
+          "span_text": "pyruvate, which enters mitochondria; the TCA cycle in the matrix produces NADH and FADH2.",
+          "range_start": 183,
+          "range_end": 196,
+          "diagram": 0,
+          "diagram_required_objects": [],
+          "text_tag": 1,
+          "write_text": "Order: Nucleus → RER → Golgi → Plasma membrane"
+        },
+        {
+          "content": "Glycolysis → pyruvate (cytosol) ; pyruvate enters mitochondrion",
+          "topic": "Cellular Respiration Overview",
+          "query": "",
+          "span_text": ">2.0 Those carriers feed the electron transport chain on the inner membrane, creating a proton gradient used by ATP synthase to make most",
+          "range_start": 197,
+          "range_end": 219,
+          "diagram": 0,
+          "diagram_required_objects": [],
+          "text_tag": 1,
+          "write_text": "Glycolysis → pyruvate (cytosol) ; pyruvate enters mitochondrion"
+        },
+        {
+          "content": "Mitochondrion cross-section showing matrix (TCA), inner membrane (ETC), cristae, ATP synthase, NADH/FADH2 flow",
+          "topic": "Mitochondrial Energy Conversion",
+          "query": "Mitochondrion cross-section showing matrix (TCA), inner membrane (ETC), cristae, ATP synthase, NADH/FADH2 flow",
+          "span_text": "ATP. >2.0 In photosynthetic cells, light reactions in thylakoids make ATP and NADPH and the Calvin cycle in the stroma fixes CO2 into sugars. >1.5 Mini‑check: if oxygen is limiting, oxidative phosphorylation drops most and glycolysis plus fermentation temporarily compensates. >2.0",
+          "range_start": 220,
+          "range_end": 260,
+          "diagram": 1,
+          "diagram_required_objects": [
+            "matrix",
+            "TCA cycle",
+            "inner membrane",
+            "electron transport chain complexes",
+            "proton gradient",
+            "ATP synthase",
+            "cristae",
+            "NADH",
+            "FADH2"
+          ],
+          "text_tag": 0,
+          "write_text": "",
+          "processed_ids": [],
+          "refined_labels_file": null,
+          "bbox_px": null,
+          "objects_that_comprise_image": []
+        },
+        {
+          "content": "Photosynthesis: thylakoid light reactions → ATP/NADPH; stroma Calvin cycle fixes CO2",
+          "topic": "Photosynthesis",
+          "query": "",
+          "span_text": "Intracellular transport uses motor proteins on microtubules for long distances and actin for short positioning; microtubules have polarity with plus and minus ends. >1.5 Example: in",
+          "range_start": 261,
+          "range_end": 286,
+          "diagram": 0,
+          "diagram_required_objects": [],
+          "text_tag": 1,
+          "write_text": "Photosynthesis: thylakoid light reactions → ATP/NADPH; stroma Calvin cycle fixes CO2"
+        },
+        {
+          "content": "If O2 low: oxidative phosphorylation ↓ ; glycolysis + fermentation ↑",
+          "topic": "Metabolic Response",
+          "query": "",
+          "span_text": "axons, kinesin moves vesicles anterograde to the synapse and dynein moves cargo retrograde. Which motor",
+          "range_start": 287,
+          "range_end": 301,
+          "diagram": 0,
+          "diagram_required_objects": [],
+          "text_tag": 1,
+          "write_text": "If O2 low: oxidative phosphorylation ↓ ; glycolysis + fermentation ↑"
+        },
+        {
+          "content": "Microtubules (long transport) vs actin (short positioning); polarity plus/minus labeled",
+          "topic": "Cytoskeleton and Transport",
+          "query": "",
+          "span_text": "moves toward the plus end? Kinesin. >2.0 On the cell cycle: G1 growth, S DNA replication, G2 preparation, M mitosis, then cytokinesis. >1.5",
+          "range_start": 302,
+          "range_end": 324,
+          "diagram": 0,
+          "diagram_required_objects": [],
+          "text_tag": 1,
+          "write_text": "Microtubules (long transport) vs actin (short positioning); polarity plus/minus labeled"
+        },
+        {
+          "content": "Axon transport: kinesin (anterograde, plus end) vs dynein (retrograde) — small diagram of axon with arrows",
+          "topic": "Neuronal Transport",
+          "query": "",
+          "span_text": "Chromosomes condense, the nuclear envelope breaks down, spindle microtubules from centrosomes segregate chromosomes, and nuclei reform; mitochondria and chloroplasts are partitioned by fission while ER and",
+          "range_start": 325,
+          "range_end": 350,
+          "diagram": 0,
+          "diagram_required_objects": [],
+          "text_tag": 1,
+          "write_text": "Axon transport: kinesin (anterograde, plus end) vs dynein (retrograde) — small diagram of axon with arrows"
+        },
+        {
+          "content": "Cell cycle: G1, S, G2, M, Cytokinesis (written as cycle)",
+          "topic": "Cell Cycle",
+          "query": "",
+          "span_text": "Golgi fragment and reassemble. >2.0 Mini‑check: what organizes the mitotic spindle in animal cells? Centrosomes. >2.0",
+          "range_start": 351,
+          "range_end": 366,
+          "diagram": 0,
+          "diagram_required_objects": [],
+          "text_tag": 1,
+          "write_text": "Cell cycle: G1, S, G2, M, Cytokinesis (written as cycle)"
+        },
+        {
+          "content": "Mitosis steps: chromosome condensation, NE breakdown, spindle from centrosomes, segregation, nuclear reformation; mitochondria/chloroplast fission; ER/Golgi fragment and reassemble",
+          "topic": "Mitosis and Organelle Dynamics",
+          "query": "Mitosis steps: chromosome condensation, NE breakdown, spindle from centrosomes, segregation, nuclear reformation; mitochondria/chloroplast fission; ER/Golgi fragment and reassemble",
+          "span_text": "Clinically, organelle dysfunction causes disease: mitochondrial myopathies cause ATP shortage, lysosomal storage diseases like Tay–Sachs block degradation, and misfolded CFTR retained in the ER causes cystic fibrosis. >2.0 If a secreted enzyme fails to be glycosylated in the Golgi, what might happen? Think mis‑sorting or degradation—short answer: loss of function and possible disease. >2.0 Now a rapid six‑question quiz with answers: rRNA is transcribed",
+          "range_start": 367,
+          "range_end": 430,
+          "diagram": 1,
+          "diagram_required_objects": [
+            "condensed chromosomes",
+            "nuclear envelope",
+            "spindle microtubules",
+            "centrosomes",
+            "separated chromatids",
+            "mitochondrion fission",
+            "chloroplast fission",
+            "fragmented ER",
+            "Golgi fragments"
+          ],
+          "text_tag": 0,
+          "write_text": "",
+          "processed_ids": [],
+          "refined_labels_file": null,
+          "bbox_px": null,
+          "objects_that_comprise_image": []
+        },
+        {
+          "content": "Mitotic organizer: Centrosomes",
+          "topic": "Mitosis Check",
+          "query": "",
+          "span_text": "in the nucleolus; cristae are in mitochondria; transcription →",
+          "range_start": 431,
+          "range_end": 439,
+          "diagram": 0,
+          "diagram_required_objects": [],
+          "text_tag": 1,
+          "write_text": "Mitotic organizer: Centrosomes"
+        },
+        {
+          "content": "Clinical examples: mitochondrial myopathies (ATP shortage); lysosomal storage (Tay–Sachs); misfolded CFTR retained in ER → cystic fibrosis",
+          "topic": "Organelle-related Diseases",
+          "query": "",
+          "span_text": "translation at the RER → Golgi; retrograde motor is dynein; lysosomes degrade worn‑out organelles; Calvin cycle is in the chloroplast stroma. >2.0 To finish, remember the roadmap: organelles, structures and functions, core processes, and disease links—each objective met. >2.0 One metaphor: the cell is a factory—nucleus the office, RER the production line, Golgi the",
+          "range_start": 440,
+          "range_end": 493,
+          "diagram": 0,
+          "diagram_required_objects": [],
+          "text_tag": 1,
+          "write_text": "Clinical examples: mitochondrial myopathies (ATP shortage); lysosomal storage (Tay–Sachs); misfolded CFTR retained in ER → cystic fibrosis"
+        },
+        {
+          "content": "If enzyme not glycosylated in Golgi → mis-sorting / degradation → loss of function",
+          "topic": "Functional Consequences",
+          "query": "",
+          "span_text": "shipping department, mitochondria the power plant, lysosomes the recycling center. >2.0 For homework, sketch a eukaryotic cell and label organelles, then describe one integrated path such as",
+          "range_start": 494,
+          "range_end": 520,
+          "diagram": 0,
+          "diagram_required_objects": [],
+          "text_tag": 1,
+          "write_text": "If enzyme not glycosylated in Golgi → mis-sorting / degradation → loss of function"
+        },
+        {
+          "content": "Quiz answers (short list): nucleolus→rRNA, cristae→mitochondria, transcription→translation @RER→Golgi, dynein retrograde, lysosomes degrade organelles, Calvin cycle in stroma",
+          "topic": "Quick Quiz Answers",
+          "query": "",
+          "span_text": "insulin secretion in two sentences. >2.0 Optional extension: read about endosymbiotic theory or a lysosomal disease case. >1.5 Finally, tell me one new thing you learned and one question you still have so I can plan the next lesson. >2.5",
+          "range_start": 521,
+          "range_end": 560,
+          "diagram": 0,
+          "diagram_required_objects": [],
+          "text_tag": 1,
+          "write_text": "Quiz answers (short list): nucleolus→rRNA, cristae→mitochondria, transcription→translation @RER→Golgi, dynein retrograde, lysosomes degrade organelles, Calvin cycle in stroma"
+        },
+        {
+          "content": "Roadmap reminder: organelles, structures/functions, core processes, disease links",
+          "topic": "Lesson Roadmap",
+          "query": "",
+          "span_text": ">2.5",
+          "range_start": 560,
+          "range_end": 560,
+          "diagram": 0,
+          "diagram_required_objects": [],
+          "text_tag": 1,
+          "write_text": "Roadmap reminder: organelles, structures/functions, core processes, disease links"
+        },
+        {
+          "content": "Metaphor text: Cell = factory; office (nucleus), production line (RER), shipping (Golgi), power plant (mitochondria), recycling (lysosomes)",
+          "topic": "Metaphor",
+          "query": "",
+          "span_text": ">2.5",
+          "range_start": 560,
+          "range_end": 560,
+          "diagram": 0,
+          "diagram_required_objects": [],
+          "text_tag": 1,
+          "write_text": "Metaphor text: Cell = factory; office (nucleus), production line (RER), shipping (Golgi), power plant (mitochondria), recycling (lysosomes)"
+        },
+        {
+          "content": "Homework: sketch a eukaryotic cell and label organelles; describe one integrated path (two sentences)",
+          "topic": "Homework",
+          "query": "",
+          "span_text": ">2.5",
+          "range_start": 560,
+          "range_end": 560,
+          "diagram": 0,
+          "diagram_required_objects": [],
+          "text_tag": 1,
+          "write_text": "Homework: sketch a eukaryotic cell and label organelles; describe one integrated path (two sentences)"
+        },
+        {
+          "content": "Optional extension: endosymbiotic theory or lysosomal disease case",
+          "topic": "Extension Reading",
+          "query": "",
+          "span_text": ">2.5",
+          "range_start": 560,
+          "range_end": 560,
+          "diagram": 0,
+          "diagram_required_objects": [],
+          "text_tag": 1,
+          "write_text": "Optional extension: endosymbiotic theory or lysosomal disease case"
+        },
+        {
+          "content": "Prompt: one new thing learned and one question you still have",
+          "topic": "Reflection Prompt",
+          "query": "",
+          "span_text": ">2.5",
+          "range_start": 560,
+          "range_end": 560,
+          "diagram": 0,
+          "diagram_required_objects": [],
+          "text_tag": 1,
+          "write_text": "Prompt: one new thing learned and one question you still have"
+        }
+      ]
+    }
+  ],
+  "image_pipeline": {
+    "enabled": true,
+    "assets_by_prompt": {
+      "Cartoon reception desk with a receptionist (labelled 'Reception') and small sign-in clipboard": {
+        "diagram": 0,
+        "processed_ids": [],
+        "refined_labels_file": null,
+        "bbox_px": null,
+        "objects_that_comprise_image": []
+      },
+      "Cartoon office suites: desks, computers, filing cabinets (labelled 'Offices')": {
+        "diagram": 0,
+        "processed_ids": [],
+        "refined_labels_file": null,
+        "bbox_px": null,
+        "objects_that_comprise_image": []
+      },
+      "Cartoon power plant with smokestack and generator (labelled 'Power')": {
+        "diagram": 0,
+        "processed_ids": [],
+        "refined_labels_file": null,
+        "bbox_px": null,
+        "objects_that_comprise_image": []
+      },
+      "Cartoon shipping & receiving dock with boxes and truck (labelled 'Shipping/Receiving')": {
+        "diagram": 0,
+        "processed_ids": [],
+        "refined_labels_file": null,
+        "bbox_px": null,
+        "objects_that_comprise_image": []
+      },
+      "Simple sketch comparing: Eukaryotic cell (with nucleus and membrane-bound organelles) vs Prokaryotic cell (no nucleus)": {
+        "diagram": 1,
+        "processed_ids": [],
+        "refined_labels_file": null,
+        "bbox_px": null,
+        "objects_that_comprise_image": []
+      },
+      "Diagram: cross-section of a typical eukaryotic cell with labeled organelles and factory-mapping labels (reception desk → plasma membrane, offices → nucleus/ER, power plant → mitochondrion/chloroplast, shipping → Golgi/vesicles)": {
+        "diagram": 1,
+        "processed_ids": [],
+        "refined_labels_file": null,
+        "bbox_px": null,
+        "objects_that_comprise_image": []
+      },
+      "phospholipid bilayer with embedded proteins, cholesterol, carbohydrates": {
+        "diagram": 1,
+        "processed_ids": [],
+        "refined_labels_file": null,
+        "bbox_px": null,
+        "objects_that_comprise_image": []
+      },
+      "security gate controlling entry and communications (visual: gate with guards and signal icons)": {
+        "diagram": 0,
+        "processed_ids": [],
+        "refined_labels_file": null,
+        "bbox_px": null,
+        "objects_that_comprise_image": []
+      },
+      "plant cell wall resisting turgor pressure (visual: plant cell swollen but intact)": {
+        "diagram": 0,
+        "processed_ids": [],
+        "refined_labels_file": null,
+        "bbox_px": null,
+        "objects_that_comprise_image": []
+      },
+      "eukaryotic cell cross-section with nucleus, RER, SER, Golgi, lysosome, peroxisome, mitochondrion, chloroplast, vacuole, cytoskeleton, ribosomes": {
+        "diagram": 1,
+        "processed_ids": [],
+        "refined_labels_file": null,
+        "bbox_px": null,
+        "objects_that_comprise_image": []
+      },
+      "rough ER with ribosomes inserting/modifying secreted & membrane proteins (assembly line visual)": {
+        "diagram": 0,
+        "processed_ids": [],
+        "refined_labels_file": null,
+        "bbox_px": null,
+        "objects_that_comprise_image": []
+      },
+      "sequence: RER → Golgi → vesicle → plasma membrane": {
+        "diagram": 0,
+        "processed_ids": [],
+        "refined_labels_file": null,
+        "bbox_px": null,
+        "objects_that_comprise_image": []
+      },
+      "trace route: Golgi → plasma membrane vesicle moved by kinesin on microtubules (visual: vesicle with kinesin walking)": {
+        "diagram": 0,
+        "processed_ids": [],
+        "refined_labels_file": null,
+        "bbox_px": null,
+        "objects_that_comprise_image": []
+      },
+      "Simple labeled eukaryotic cell diagram (nucleus, RER, Golgi, mitochondria, chloroplasts, lysosome, plasma membrane)": {
+        "diagram": 1,
+        "processed_ids": [],
+        "refined_labels_file": null,
+        "bbox_px": null,
+        "objects_that_comprise_image": []
+      },
+      "Ribosome on RER: signal peptide + SRP targeting": {
+        "diagram": 1,
+        "processed_ids": [],
+        "refined_labels_file": null,
+        "bbox_px": null,
+        "objects_that_comprise_image": []
+      },
+      "Vesicle budding from ER with COPII coat → Golgi; arrows showing transport along microtubules to plasma membrane or lysosome": {
+        "diagram": 1,
+        "processed_ids": [],
+        "refined_labels_file": null,
+        "bbox_px": null,
+        "objects_that_comprise_image": []
+      },
+      "Mitochondrion cross-section showing matrix (TCA), inner membrane (ETC), cristae, ATP synthase, NADH/FADH2 flow": {
+        "diagram": 1,
+        "processed_ids": [],
+        "refined_labels_file": null,
+        "bbox_px": null,
+        "objects_that_comprise_image": []
+      },
+      "Mitosis steps: chromosome condensation, NE breakdown, spindle from centrosomes, segregation, nuclear reformation; mitochondria/chloroplast fission; ER/Golgi fragment and reassemble": {
+        "diagram": 1,
+        "processed_ids": [],
+        "refined_labels_file": null,
+        "bbox_px": null,
+        "objects_that_comprise_image": []
+      }
+    },
+    "debug": {
+      "pinecone_hits": [],
+      "misses": [
+        "Cartoon reception desk with a receptionist (labelled 'Reception') and small sign-in clipboard",
+        "Cartoon office suites: desks, computers, filing cabinets (labelled 'Offices')",
+        "Cartoon power plant with smokestack and generator (labelled 'Power')",
+        "Cartoon shipping & receiving dock with boxes and truck (labelled 'Shipping/Receiving')",
+        "Simple sketch comparing: Eukaryotic cell (with nucleus and membrane-bound organelles) vs Prokaryotic cell (no nucleus)",
+        "Diagram: cross-section of a typical eukaryotic cell with labeled organelles and factory-mapping labels (reception desk → plasma membrane, offices → nucleus/ER, power plant → mitochondrion/chloroplast, shipping → Golgi/vesicles)",
+        "phospholipid bilayer with embedded proteins, cholesterol, carbohydrates",
+        "security gate controlling entry and communications (visual: gate with guards and signal icons)",
+        "plant cell wall resisting turgor pressure (visual: plant cell swollen but intact)",
+        "eukaryotic cell cross-section with nucleus, RER, SER, Golgi, lysosome, peroxisome, mitochondrion, chloroplast, vacuole, cytoskeleton, ribosomes",
+        "rough ER with ribosomes inserting/modifying secreted & membrane proteins (assembly line visual)",
+        "sequence: RER → Golgi → vesicle → plasma membrane",
+        "trace route: Golgi → plasma membrane vesicle moved by kinesin on microtubules (visual: vesicle with kinesin walking)",
+        "Simple labeled eukaryotic cell diagram (nucleus, RER, Golgi, mitochondria, chloroplasts, lysosome, plasma membrane)",
+        "Ribosome on RER: signal peptide + SRP targeting",
+        "Vesicle budding from ER with COPII coat → Golgi; arrows showing transport along microtubules to plasma membrane or lysosome",
+        "Mitochondrion cross-section showing matrix (TCA), inner membrane (ETC), cristae, ATP synthase, NADH/FADH2 flow",
+        "Mitosis steps: chromosome condensation, NE breakdown, spindle from centrosomes, segregation, nuclear reformation; mitochondria/chloroplast fission; ER/Golgi fragment and reassemble"
+      ],
+      "pipeline_started": false,
+      "selection_done": true,
+      "colours_done": true,
+      "pipeline_errors": {
+        "comfy_many": "URLError(ConnectionRefusedError(10061, 'No connection could be made because the target machine actively refused it', None, 10061, None))",
+        "comfy_free_after_flux": "RuntimeError('ComfyUI /free call failed: <urlopen error [WinError 10061] No connection could be made because the target machine actively refused it>')",
+        "research_finalize_rerank": "RuntimeError('siglip_bundle_none_after_reload')",
+        "qwen_load": "RuntimeError('Cannot send a request, as the client has been closed.')",
+        "comfy_warmup_after_qwen": "URLError(ConnectionRefusedError(10061, 'No connection could be made because the target machine actively refused it', None, 10061, None))"
+      },
+      "refined_labels_dir": null,
+      "diagram_misses": [
+        "Simple sketch comparing: Eukaryotic cell (with nucleus and membrane-bound organelles) vs Prokaryotic cell (no nucleus)",
+        "Diagram: cross-section of a typical eukaryotic cell with labeled organelles and factory-mapping labels (reception desk → plasma membrane, offices → nucleus/ER, power plant → mitochondrion/chloroplast, shipping → Golgi/vesicles)",
+        "phospholipid bilayer with embedded proteins, cholesterol, carbohydrates",
+        "eukaryotic cell cross-section with nucleus, RER, SER, Golgi, lysosome, peroxisome, mitochondrion, chloroplast, vacuole, cytoskeleton, ribosomes",
+        "Simple labeled eukaryotic cell diagram (nucleus, RER, Golgi, mitochondria, chloroplasts, lysosome, plasma membrane)",
+        "Ribosome on RER: signal peptide + SRP targeting",
+        "Vesicle budding from ER with COPII coat → Golgi; arrows showing transport along microtubules to plasma membrane or lysosome",
+        "Mitochondrion cross-section showing matrix (TCA), inner membrane (ETC), cristae, ATP synthase, NADH/FADH2 flow",
+        "Mitosis steps: chromosome condensation, NE breakdown, spindle from centrosomes, segregation, nuclear reformation; mitochondria/chloroplast fission; ER/Golgi fragment and reassemble"
+      ],
+      "comfy_misses": [
+        "Cartoon reception desk with a receptionist (labelled 'Reception') and small sign-in clipboard",
+        "Cartoon office suites: desks, computers, filing cabinets (labelled 'Offices')",
+        "Cartoon power plant with smokestack and generator (labelled 'Power')",
+        "Cartoon shipping & receiving dock with boxes and truck (labelled 'Shipping/Receiving')",
+        "security gate controlling entry and communications (visual: gate with guards and signal icons)",
+        "plant cell wall resisting turgor pressure (visual: plant cell swollen but intact)",
+        "rough ER with ribosomes inserting/modifying secreted & membrane proteins (assembly line visual)",
+        "sequence: RER → Golgi → vesicle → plasma membrane",
+        "trace route: Golgi → plasma membrane vesicle moved by kinesin on microtubules (visual: vesicle with kinesin walking)"
+      ],
+      "comfy_generated": {}
+    }
+  },
+  "whiteboard_actions": {
+    "enabled": false,
+    "error": "qwen_not_loaded",
+    "saved_action_timeline_json": "PipelineOutputs\\whiteboard_action_timeline.json"
+  },
+  "efficientsam3_bboxes": {
+    "ok": false,
+    "err": "RuntimeError: Missing EfficientSAM3 checkpoint. Set EFFICIENTSAM3_CKPT or pass checkpoint_path=..."
+  },
+  "diagram_cluster_labels": {
+    "ok": false,
+    "error": "qwen_reload_failed: RuntimeError('Cannot send a request, as the client has been closed.')"
+  },
+  "timings_ms": [
+    {
+      "label": "llm.timeline",
+      "elapsed_ms": 0.35,
+      "topic": "Eukaryotic cell"
+    },
+    {
+      "label": "llm.speech",
+      "elapsed_ms": 0.83,
+      "chapter_index": 2,
+      "chapter_count": 3
+    },
+    {
+      "label": "llm.speech",
+      "elapsed_ms": 0.9,
+      "chapter_index": 3,
+      "chapter_count": 3
+    },
+    {
+      "label": "llm.speech",
+      "elapsed_ms": 2.72,
+      "chapter_index": 1,
+      "chapter_count": 3
+    },
+    {
+      "label": "llm.image_plan",
+      "elapsed_ms": 1.42,
+      "chapter_index": 2
+    },
+    {
+      "label": "llm.image_plan",
+      "elapsed_ms": 1.35,
+      "chapter_index": 3
+    },
+    {
+      "label": "llm.image_plan",
+      "elapsed_ms": 0.89,
+      "chapter_index": 1
+    },
+    {
+      "label": "image_plan.parse_and_clamp",
+      "elapsed_ms": 0.32,
+      "chapter_index": 1
+    },
+    {
+      "label": "chapter.full",
+      "elapsed_ms": 13.94,
+      "chapter_index": 1
+    },
+    {
+      "label": "image_plan.parse_and_clamp",
+      "elapsed_ms": 0.62,
+      "chapter_index": 2
+    },
+    {
+      "label": "image_plan.parse_and_clamp",
+      "elapsed_ms": 0.42,
+      "chapter_index": 3
+    },
+    {
+      "label": "chapter.full",
+      "elapsed_ms": 15.62,
+      "chapter_index": 2
+    },
+    {
+      "label": "chapter.full",
+      "elapsed_ms": 15.98,
+      "chapter_index": 3
+    },
+    {
+      "label": "chapters.parallel_generation",
+      "elapsed_ms": 19.78,
+      "chapters": 3,
+      "workers": 3
+    },
+    {
+      "label": "models.preload_minilm",
+      "elapsed_ms": 17615.89,
+      "gpu_index": 0,
+      "cpu_threads": 4
+    },
+    {
+      "label": "models.preload_siglip",
+      "elapsed_ms": 39625.0,
+      "gpu_index": 0,
+      "cpu_threads": 4
+    },
+    {
+      "label": "models.wait_preload_siglip_minilm",
+      "elapsed_ms": 39605.23
+    },
+    {
+      "label": "models.unload_siglip_text_after_pinecone",
+      "elapsed_ms": 3114.39,
+      "gpu_index": 0
+    },
+    {
+      "label": "models.unload_siglip_before_comfy",
+      "elapsed_ms": 0.13,
+      "gpu_index": 0
+    },
+    {
+      "label": "comfy.free_after_flux_before_siglip",
+      "elapsed_ms": 7269.52,
+      "gpu_index": 0
+    },
+    {
+      "label": "models.reload_siglip_after_comfy",
+      "elapsed_ms": 1605.21,
+      "gpu_index": 0,
+      "cpu_threads": 4
+    },
+    {
+      "label": "models.load_qwen_after_flux",
+      "elapsed_ms": 2086.83,
+      "gpu_index": 0,
+      "cpu_threads": 4
+    },
+    {
+      "label": "models.wait_post_flux_model_prep",
+      "elapsed_ms": 0.09
+    },
+    {
+      "label": "image_pipeline.selection_only",
+      "elapsed_ms": 4712938.94
+    },
+    {
+      "label": "qwen.whiteboard_action_planning",
+      "elapsed_ms": 0.11
+    },
+    {
+      "label": "models.unload_qwen",
+      "elapsed_ms": 0.08
+    },
+    {
+      "label": "models.load_efficientsam3",
+      "elapsed_ms": 1.89
+    },
+    {
+      "label": "models.unload_efficientsam3",
+      "elapsed_ms": 0.07
+    },
+    {
+      "label": "models.wait_qwen_reload",
+      "elapsed_ms": 2044.53
+    },
+    {
+      "label": "models.unload_qwen_after_diagram_labeling",
+      "elapsed_ms": 0.07
+    },
+    {
+      "label": "comfy.warmup_after_qwen",
+      "elapsed_ms": 2051.19,
+      "gpu_index": 0
+    }
+  ],
+  "run_elapsed_ms": 4756675.53
+}

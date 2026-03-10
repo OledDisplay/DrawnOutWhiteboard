@@ -5,6 +5,7 @@ import json
 import os
 import re
 import time
+import gc
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 
@@ -83,6 +84,17 @@ RECT_THICKNESS_PX = 3
 DTYPE = torch.float16
 MIN_ACCEPT_CONF = 0.65
 
+# Planner prompt/memory guardrails (env-tunable).
+def _env_flag(name: str, default: bool) -> bool:
+    raw = str(os.getenv(name, "1" if default else "0")).strip().lower()
+    return raw not in ("0", "false", "no", "off", "")
+
+
+PLAN_PROMPT_CHAR_CAP = max(512, int(os.getenv("QWEN_PLAN_PROMPT_CHAR_CAP", "12000") or 12000))
+PLAN_BATCH_CHAR_BUDGET = max(1024, int(os.getenv("QWEN_PLAN_BATCH_CHAR_BUDGET", "18000") or 18000))
+PLAN_DO_SAMPLE = _env_flag("QWEN_PLAN_DO_SAMPLE", False)
+PLAN_USE_CACHE = _env_flag("QWEN_PLAN_USE_CACHE", True)
+
 # Prints for every completed cluster (even in batching).
 PRINT_EVERY_CLUSTER = True
 
@@ -125,6 +137,187 @@ def _clean_word(w: str) -> Optional[str]:
     if re.fullmatch(r"\d+", s):
         return None
     return s
+
+
+# ----------------------------
+# FAST INFERENCE CONFIG
+# ----------------------------
+USE_SDPA = True
+USE_TORCH_COMPILE = True          # keep on only if your hot path is shape-stable
+TRY_STATIC_CACHE = False          # transformers StaticLayer cache has been unstable here
+COMPILE_MODE = "reduce-overhead"
+PAD_TO_MULTIPLE_OF = 8            # reduces shape churn a bit without wasting too much padding
+
+
+def _qwen_attn_impl() -> Optional[str]:
+    if FORCE_CPU or not torch.cuda.is_available() or not USE_SDPA:
+        return None
+    return "sdpa"
+
+
+def _processor_batch(
+    processor,
+    *,
+    text=None,
+    images=None,
+):
+    kwargs = {
+        "return_tensors": "pt",
+        "padding": True,
+        "truncation": True,
+    }
+
+    if text is not None:
+        kwargs["text"] = text
+        if PAD_TO_MULTIPLE_OF:
+            kwargs["pad_to_multiple_of"] = int(PAD_TO_MULTIPLE_OF)
+
+    if images is not None:
+        kwargs["images"] = images
+
+    try:
+        return processor(**kwargs)
+    except TypeError:
+        kwargs.pop("pad_to_multiple_of", None)
+        return processor(**kwargs)
+
+
+def _move_inputs_to_device(inputs, device: torch.device):
+    img_dtype = _img_tensor_dtype(device)
+
+    for k, v in list(inputs.items()):
+        if not torch.is_tensor(v):
+            continue
+        if k == "pixel_values":
+            inputs[k] = v.to(device=device, dtype=img_dtype, non_blocking=True)
+        else:
+            inputs[k] = v.to(device=device, non_blocking=True)
+
+    return inputs
+
+
+def _maybe_enable_qwen_fast_inference(
+    model,
+    device: torch.device,
+    *,
+    allow_compile: bool = True,
+):
+    flags = {
+        "attn_implementation": None,
+        "static_cache": False,
+        "compiled": False,
+        "compile_fullgraph": None,
+    }
+
+    if device.type != "cuda":
+        setattr(model, "_qwen_fast_flags", flags)
+        return model
+
+    try:
+        if USE_SDPA and hasattr(model, "set_attn_implementation"):
+            model.set_attn_implementation("sdpa")
+            flags["attn_implementation"] = "sdpa"
+    except Exception as e:
+        print(f"[warn] set_attn_implementation(sdpa) failed: {e}")
+
+    if TRY_STATIC_CACHE and allow_compile:
+        try:
+            model.generation_config.cache_implementation = "static"
+            flags["static_cache"] = True
+        except Exception as e:
+            print(f"[warn] static cache unavailable: {e}")
+
+    if USE_TORCH_COMPILE and allow_compile and flags["static_cache"]:
+        try:
+            model.forward = torch.compile(
+                model.forward,
+                mode=COMPILE_MODE,
+                fullgraph=True,
+            )
+            flags["compiled"] = True
+            flags["compile_fullgraph"] = True
+        except Exception:
+            try:
+                model.forward = torch.compile(
+                    model.forward,
+                    mode=COMPILE_MODE,
+                    fullgraph=False,
+                )
+                flags["compiled"] = True
+                flags["compile_fullgraph"] = False
+            except Exception as e:
+                print(f"[warn] torch.compile disabled: {e}")
+                try:
+                    model.generation_config.cache_implementation = None
+                except Exception:
+                    pass
+                flags["static_cache"] = False
+
+    setattr(model, "_qwen_fast_flags", flags)
+    return model
+
+
+def _is_static_cache_batch_error(err: BaseException) -> bool:
+    msg = f"{type(err).__name__}: {err}".lower()
+    return ("staticlayer" in msg) and ("max_batch_size" in msg)
+
+
+def _downgrade_cache_mode_for_runtime(model) -> None:
+    changed: List[str] = []
+
+    gen_cfg = getattr(model, "generation_config", None)
+    if gen_cfg is not None:
+        try:
+            if getattr(gen_cfg, "cache_implementation", None) != "dynamic":
+                gen_cfg.cache_implementation = "dynamic"
+                changed.append("cache_implementation=dynamic")
+        except Exception:
+            try:
+                gen_cfg.cache_implementation = None
+                changed.append("cache_implementation=None")
+            except Exception:
+                pass
+
+    try:
+        if hasattr(model, "config"):
+            model.config.use_cache = False
+            changed.append("model.config.use_cache=False")
+    except Exception:
+        pass
+
+    for attr in ("_cache", "_past_key_values", "past_key_values"):
+        try:
+            if hasattr(model, attr):
+                setattr(model, attr, None)
+        except Exception:
+            pass
+
+    flags = getattr(model, "_qwen_fast_flags", None)
+    if isinstance(flags, dict):
+        flags["static_cache"] = False
+        flags["compiled"] = False
+        flags["compile_fullgraph"] = None
+
+    if changed:
+        print(f"[warn] qwen cache fallback applied ({', '.join(changed)})")
+
+
+def _safe_generate(
+    model,
+    *,
+    inputs: Dict[str, Any],
+    gen_kwargs: Dict[str, Any],
+):
+    try:
+        return model.generate(**inputs, **gen_kwargs)
+    except Exception as e:
+        if not _is_static_cache_batch_error(e):
+            raise
+        print(f"[warn] qwen static cache mismatch, retrying without cache: {e}")
+        _downgrade_cache_mode_for_runtime(model)
+        retry_kwargs = dict(gen_kwargs or {})
+        retry_kwargs["use_cache"] = False
+        return model.generate(**inputs, **retry_kwargs)
 
 
 # ============================
@@ -484,19 +677,14 @@ def refine_candidate_labels_with_qwen(
     )
 
     try:
-        inputs = processor(
+        inputs = _processor_batch(
+            processor,
             text=[prompt_str],
-            return_tensors="pt",
-            padding=True,
-            truncation=True,
         )
-
-        for k, v in list(inputs.items()):
-            if torch.is_tensor(v):
-                inputs[k] = v.to(device=device, non_blocking=True)
+        inputs = _move_inputs_to_device(inputs, device)
 
         with torch.inference_mode():
-            out_ids = model.generate(**inputs, **gen_kwargs_refine)
+            out_ids = _safe_generate(model, inputs=inputs, gen_kwargs=gen_kwargs_refine)
 
         if "input_ids" in inputs and torch.is_tensor(inputs["input_ids"]):
             prompt_len = int(inputs["input_ids"].shape[1])
@@ -790,18 +978,14 @@ def postfacto_match_labels_with_qwen(
     )
 
     try:
-        inputs = processor(
+        inputs = _processor_batch(
+            processor,
             text=[prompt_str],
-            return_tensors="pt",
-            padding=True,
-            truncation=True,
         )
-        for k, v in list(inputs.items()):
-            if torch.is_tensor(v):
-                inputs[k] = v.to(device=device, non_blocking=True)
+        inputs = _move_inputs_to_device(inputs, device)
 
         with torch.inference_mode():
-            out_ids = model.generate(**inputs, **gen_kwargs)
+            out_ids = _safe_generate(model, inputs=inputs, gen_kwargs=gen_kwargs)
 
         if "input_ids" in inputs and torch.is_tensor(inputs["input_ids"]):
             prompt_len = int(inputs["input_ids"].shape[1])
@@ -849,7 +1033,6 @@ def load_model_and_processor():
     have_cuda = torch.cuda.is_available() and not FORCE_CPU
     device = torch.device(f"cuda:{GPU_INDEX}" if have_cuda else "cpu")
 
-    # Processor
     try:
         processor = AutoProcessor.from_pretrained(
             MODEL_ID,
@@ -867,13 +1050,8 @@ def load_model_and_processor():
             tok.pad_token = tok.eos_token
 
     used_quant = False
-
-    # Use disk offload to avoid CPU RAM spikes during loading
-    offload_dir = str((BASE_DIR / "_hf_offload").resolve())
-    os.makedirs(offload_dir, exist_ok=True)
-
-    # Quant config (actually used now)
     quant_config = None
+
     if have_cuda and QUANT_MODE in ("4bit", "8bit") and _HAS_BNB:
         if QUANT_MODE == "4bit":
             quant_config = BitsAndBytesConfig(
@@ -888,23 +1066,34 @@ def load_model_and_processor():
             )
             used_quant = True
 
+    load_kwargs = {
+        "low_cpu_mem_usage": True,
+    }
+
+    attn_impl = _qwen_attn_impl()
+    if attn_impl is not None:
+        load_kwargs["attn_implementation"] = attn_impl
+
     if have_cuda:
-        # Prefer auto placement + offload knobs (reduces CPU peak)
-        model = Qwen3VLForConditionalGeneration.from_pretrained(
-            MODEL_ID,
-            torch_dtype="auto" if not used_quant else None,
-            device_map="auto",
-            low_cpu_mem_usage=True,
-            offload_state_dict=True,
-            offload_folder=offload_dir,
-            quantization_config=quant_config,
-        ).eval()
+        if used_quant:
+            load_kwargs["quantization_config"] = quant_config
+            load_kwargs["device_map"] = "auto" if INT8_CPU_OFFLOAD else {"": GPU_INDEX}
+            model = Qwen3VLForConditionalGeneration.from_pretrained(
+                MODEL_ID,
+                **load_kwargs,
+            ).eval()
+        else:
+            load_kwargs["torch_dtype"] = DTYPE
+            load_kwargs["device_map"] = {"": GPU_INDEX}
+            model = Qwen3VLForConditionalGeneration.from_pretrained(
+                MODEL_ID,
+                **load_kwargs,
+            ).eval()
     else:
         model = Qwen3VLForConditionalGeneration.from_pretrained(
             MODEL_ID,
-            low_cpu_mem_usage=True,
-            offload_state_dict=True,
-            offload_folder=offload_dir,
+            torch_dtype=torch.float32,
+            **load_kwargs,
         ).eval().to(device)
 
     if tok is not None and hasattr(model, "generation_config"):
@@ -915,6 +1104,13 @@ def load_model_and_processor():
         model.config.use_cache = True
     except Exception:
         pass
+
+    if have_cuda:
+        model = _maybe_enable_qwen_fast_inference(
+            model,
+            device,
+            allow_compile=not used_quant,
+        )
 
     return model, processor, device, used_quant
 
@@ -1050,25 +1246,25 @@ def warmup_qwen_once(model, processor, device: torch.device) -> None:
     conv, img = _make_dummy_vl_sample()
     prompt_str = processor.apply_chat_template(conv, tokenize=False, add_generation_prompt=True)
 
-    inputs = processor(
+    inputs = _processor_batch(
+        processor,
         text=[prompt_str],
         images=[img],
-        return_tensors="pt",
-        padding=True,
-        truncation=True,
     )
+    inputs = _move_inputs_to_device(inputs, device)
 
-    img_dtype = _img_tensor_dtype(device)
-
-    for k, v in list(inputs.items()):
-        if torch.is_tensor(v):
-            if k == "pixel_values":
-                inputs[k] = v.to(device=device, dtype=img_dtype, non_blocking=True)
-            else:
-                inputs[k] = v.to(device=device, non_blocking=True)
+    fast_flags = getattr(model, "_qwen_fast_flags", {})
+    warmup_iters = 2 if fast_flags.get("compiled") else 1
 
     with torch.inference_mode():
-        _ = model.generate(**inputs, max_new_tokens=8, do_sample=False, num_beams=1, use_cache=True)
+        warmup_kwargs = {
+            "max_new_tokens": 8,
+            "do_sample": False,
+            "num_beams": 1,
+            "use_cache": True,
+        }
+        for _ in range(warmup_iters):
+            _ = _safe_generate(model, inputs=inputs, gen_kwargs=warmup_kwargs)
 
     if device.type == "cuda":
         torch.cuda.synchronize(device)
@@ -1111,11 +1307,9 @@ def _resize_longest_side(img: Image.Image, max_side: int) -> Image.Image:
 
 def preload_qwen_cpu_only(
     model_id: str = MODEL_ID,
+    *,
+    warmup: bool = False,
 ) -> tuple[Any, Any, torch.device]:
-    """
-    Loads Qwen on CPU and runs a dummy prompt.
-    Safe to do while Paddle/other GPU work is running.
-    """
     device = torch.device("cpu")
 
     try:
@@ -1135,7 +1329,6 @@ def preload_qwen_cpu_only(
         if tok.pad_token_id is None:
             tok.pad_token = tok.eos_token
 
-    # CPU: use fp32 (much less likely to break)
     model = Qwen3VLForConditionalGeneration.from_pretrained(
         model_id,
         torch_dtype=torch.float32,
@@ -1152,7 +1345,9 @@ def preload_qwen_cpu_only(
     except Exception:
         pass
 
-    warmup_qwen_once(model, processor, device)
+    if warmup:
+        warmup_qwen_once(model, processor, device)
+
     return model, processor, device
 
 
@@ -1164,16 +1359,21 @@ def move_qwen_to_cuda_if_available(
 ) -> tuple[Any, torch.device]:
     if torch.cuda.is_available() and not FORCE_CPU:
         device = torch.device(f"cuda:{gpu_index}")
+        torch.cuda.set_device(gpu_index)
+
         model = model.to(device)
         model.eval()
 
-        # Try to reduce VRAM by casting after moving (safe-ish, but guard it)
         try:
-            if hasattr(model, "to"):
-                model = model.to(dtype=DTYPE)
+            model = model.to(dtype=DTYPE)
         except Exception:
             pass
 
+        model = _maybe_enable_qwen_fast_inference(
+            model,
+            device,
+            allow_compile=True,
+        )
         return model, device
 
     return model, torch.device("cpu")
@@ -1203,8 +1403,6 @@ def label_clusters_transformers(
         num_beams=1,
         use_cache=True,
     )
-
-    img_dtype = _img_tensor_dtype(device)
 
     results_by_idx: Dict[int, Dict[str, Any]] = {}
 
@@ -1380,23 +1578,15 @@ def label_clusters_transformers(
 
             t_req0 = time.time()
             try:
-                inputs = processor(
+                inputs = _processor_batch(
+                    processor,
                     text=texts_batch,
                     images=images_batch,
-                    return_tensors="pt",
-                    padding=True,
-                    truncation=True,
                 )
-
-                for k, v in list(inputs.items()):
-                    if torch.is_tensor(v):
-                        if k == "pixel_values":
-                            inputs[k] = v.to(device=device, dtype=img_dtype, non_blocking=True)
-                        else:
-                            inputs[k] = v.to(device=device, non_blocking=True)
+                inputs = _move_inputs_to_device(inputs, device)
 
                 with torch.inference_mode():
-                    out_ids = model.generate(**inputs, **gen_kwargs)
+                    out_ids = _safe_generate(model, inputs=inputs, gen_kwargs=gen_kwargs)
 
                 if "input_ids" in inputs and torch.is_tensor(inputs["input_ids"]):
                     prompt_len = int(inputs["input_ids"].shape[1])
@@ -1634,7 +1824,6 @@ def probe_processed_images_stage1(
         use_cache=True,
     )
 
-    img_dtype = _img_tensor_dtype(device)
     out: Dict[str, Dict[str, Any]] = {}
 
     bs = max(1, int(batch_size))
@@ -1670,23 +1859,15 @@ def probe_processed_images_stage1(
             continue
 
         try:
-            inputs = processor(
+            inputs = _processor_batch(
+                processor,
                 text=texts_batch,
                 images=images_batch,
-                return_tensors="pt",
-                padding=True,
-                truncation=True,
             )
-
-            for k, v in list(inputs.items()):
-                if torch.is_tensor(v):
-                    if k == "pixel_values":
-                        inputs[k] = v.to(device=device, dtype=img_dtype, non_blocking=True)
-                    else:
-                        inputs[k] = v.to(device=device, non_blocking=True)
+            inputs = _move_inputs_to_device(inputs, device)
 
             with torch.inference_mode():
-                out_ids = model.generate(**inputs, **gen_kwargs)
+                out_ids = _safe_generate(model, inputs=inputs, gen_kwargs=gen_kwargs)
 
             if "input_ids" in inputs and torch.is_tensor(inputs["input_ids"]):
                 prompt_len = int(inputs["input_ids"].shape[1])
@@ -1895,18 +2076,14 @@ def pick_two_processed_candidates_transformers(
 
     chosen: List[Dict[str, Any]] = []
     try:
-        inputs = processor(
+        inputs = _processor_batch(
+            processor,
             text=[prompt_str],
-            return_tensors="pt",
-            padding=True,
-            truncation=True,
         )
-        for k, v in list(inputs.items()):
-            if torch.is_tensor(v):
-                inputs[k] = v.to(device=device, non_blocking=True)
+        inputs = _move_inputs_to_device(inputs, device)
 
         with torch.inference_mode():
-            out_ids = model.generate(**inputs, **gen_kwargs)
+            out_ids = _safe_generate(model, inputs=inputs, gen_kwargs=gen_kwargs)
 
         if "input_ids" in inputs and torch.is_tensor(inputs["input_ids"]):
             prompt_len = int(inputs["input_ids"].shape[1])
@@ -2033,6 +2210,435 @@ def _extract_first_json_object(text: str) -> Optional[Dict[str, Any]]:
                     return None
     return None
 
+
+def _clamp_i(v: int, lo: int, hi: int) -> int:
+    return max(int(lo), min(int(v), int(hi)))
+
+
+def _bbox_overlap_xywh(a: Dict[str, int], b: Dict[str, int]) -> bool:
+    ax0 = int(a.get("x", 0))
+    ay0 = int(a.get("y", 0))
+    ax1 = ax0 + int(a.get("w", 0))
+    ay1 = ay0 + int(a.get("h", 0))
+    bx0 = int(b.get("x", 0))
+    by0 = int(b.get("y", 0))
+    bx1 = bx0 + int(b.get("w", 0))
+    by1 = by0 + int(b.get("h", 0))
+    if ax1 <= bx0 or bx1 <= ax0:
+        return False
+    if ay1 <= by0 or by1 <= ay0:
+        return False
+    return True
+
+
+def _normalize_print_bbox(
+    pb: Optional[Dict[str, Any]],
+    *,
+    default_w: int,
+    default_h: int,
+    board_w: int,
+    board_h: int,
+) -> Dict[str, int]:
+    if not isinstance(pb, dict):
+        pb = {}
+    w = int(pb.get("w", default_w) or default_w)
+    h = int(pb.get("h", default_h) or default_h)
+    # keep space boxes large, but cap around quadrant-ish scale so multiple entries can coexist
+    max_w = max(80, int(board_w) // 2)
+    max_h = max(60, int(board_h) // 2)
+    w = max(80, min(w, max_w))
+    h = max(60, min(h, max_h))
+
+    x = int(pb.get("x", 20) or 20)
+    y = int(pb.get("y", 20) or 20)
+    max_x = max(0, int(board_w) - w)
+    max_y = max(0, int(board_h) - h)
+    x = _clamp_i(x, 0, max_x)
+    y = _clamp_i(y, 0, max_y)
+    return {"x": x, "y": y, "w": int(w), "h": int(h)}
+
+
+def _find_non_overlapping_box(
+    desired: Dict[str, int],
+    *,
+    placed: List[Dict[str, int]],
+    board_w: int,
+    board_h: int,
+    step: int = 40,
+) -> Dict[str, int]:
+    cand = _normalize_print_bbox(
+        desired,
+        default_w=int(desired.get("w", 240) or 240),
+        default_h=int(desired.get("h", 180) or 180),
+        board_w=board_w,
+        board_h=board_h,
+    )
+    if all(not _bbox_overlap_xywh(cand, p) for p in placed):
+        return cand
+
+    max_x = max(0, int(board_w) - int(cand["w"]))
+    max_y = max(0, int(board_h) - int(cand["h"]))
+
+    def _scan(cur: Dict[str, int]) -> Optional[Dict[str, int]]:
+        mx = max(0, int(board_w) - int(cur["w"]))
+        my = max(0, int(board_h) - int(cur["h"]))
+        yy = 0
+        while yy <= my:
+            xx = 0
+            while xx <= mx:
+                test = {"x": int(xx), "y": int(yy), "w": int(cur["w"]), "h": int(cur["h"])}
+                if all(not _bbox_overlap_xywh(test, p) for p in placed):
+                    return test
+                xx += int(step)
+            yy += int(step)
+        return None
+
+    found = _scan(cand)
+    if found is not None:
+        return found
+
+    # If no space with current size, shrink progressively to force non-overlap placement.
+    cur = dict(cand)
+    for _ in range(8):
+        cur["w"] = max(80, int(round(cur["w"] * 0.88)))
+        cur["h"] = max(60, int(round(cur["h"] * 0.88)))
+        found = _scan(cur)
+        if found is not None:
+            return found
+
+    return cand
+
+
+def _render_chat_text(processor, prompt: str) -> str:
+    try:
+        tok = getattr(processor, "tokenizer", None)
+        if tok is not None and hasattr(tok, "apply_chat_template"):
+            messages = [{"role": "user", "content": prompt}]
+            return tok.apply_chat_template(messages, tokenize=False, add_generation_prompt=True)
+    except Exception:
+        pass
+    return prompt
+
+
+def _clip_str(v: Any, max_chars: int) -> str:
+    s = str(v or "").strip()
+    if max_chars > 0 and len(s) > max_chars:
+        return s[:max_chars].rstrip()
+    return s
+
+
+def _clip_str_list(values: Any, *, max_items: int, max_chars: int) -> List[str]:
+    out: List[str] = []
+    if not isinstance(values, list):
+        return out
+    for it in values:
+        s = _clip_str(it, max_chars=max_chars)
+        if not s:
+            continue
+        out.append(s)
+        if len(out) >= max_items:
+            break
+    return out
+
+
+def _compact_space_chunk_for_prompt(chunk: Dict[str, Any], *, board_width: int, board_height: int) -> Dict[str, Any]:
+    steps_src = chunk.get("steps") if isinstance(chunk, dict) else None
+    entries_src = chunk.get("entries") if isinstance(chunk, dict) else None
+
+    steps_out: List[Dict[str, Any]] = []
+    for s in (steps_src or []):
+        if not isinstance(s, dict):
+            continue
+        steps_out.append(
+            {
+                "key": _clip_str(s.get("key", ""), 24),
+                "timeline_text": _clip_str(s.get("timeline_text", ""), 180),
+                "start_word_index": int(s.get("start_word_index", 0) or 0),
+                "end_word_index": int(s.get("end_word_index", 0) or 0),
+            }
+        )
+
+    entries_out: List[Dict[str, Any]] = []
+    for e in (entries_src or []):
+        if not isinstance(e, dict):
+            continue
+        row: Dict[str, Any] = {
+            "entry_index": int(e.get("entry_index", 0) or 0),
+            "type": _clip_str(e.get("type", ""), 16),
+            "name": _clip_str(e.get("name", ""), 80),
+            "step_key": _clip_str(e.get("step_key", ""), 24),
+            "range_start": int(e.get("range_start", 0) or 0),
+            "range_end": int(e.get("range_end", 0) or 0),
+            "duration_sec": float(e.get("duration_sec", 0.0) or 0.0),
+            "diagram": int(e.get("diagram", 0) or 0),
+            "text_tag": int(e.get("text_tag", 0) or 0),
+            "write_text": _clip_str(e.get("write_text", ""), 180),
+            "bbox_px": e.get("bbox_px") if isinstance(e.get("bbox_px"), dict) else None,
+            "delete_all": bool(e.get("delete_all", False)),
+            "speech_text_in_range": _clip_str(e.get("speech_text_in_range", ""), 220),
+        }
+        if row["type"] != "silence":
+            row["content"] = _clip_str(e.get("content", ""), 160)
+            row["objects_that_comprise_image"] = _clip_str_list(
+                e.get("objects_that_comprise_image"),
+                max_items=32,
+                max_chars=64,
+            )
+        entries_out.append(row)
+
+    return {
+        "chapter_index": int(chunk.get("chapter_index", 0) or 0),
+        "board": {"w": int(board_width), "h": int(board_height)},
+        "steps": steps_out,
+        "entries": entries_out,
+    }
+
+
+def _compact_visual_event_for_prompt(ev: Dict[str, Any]) -> Dict[str, Any]:
+    ctx_out: List[Dict[str, Any]] = []
+    for c in (ev.get("static_plan_context") or []):
+        if not isinstance(c, dict):
+            continue
+        ctx_out.append(
+            {
+                "name": _clip_str(c.get("name", ""), 80),
+                "type": _clip_str(c.get("type", ""), 16),
+                "print_bbox": c.get("print_bbox") if isinstance(c.get("print_bbox"), dict) else None,
+                "range_start": int(c.get("range_start", 0) or 0),
+                "range_end": int(c.get("range_end", 0) or 0),
+                "diagram": int(c.get("diagram", 0) or 0),
+                "text_tag": int(c.get("text_tag", 0) or 0),
+                "speech_text_in_range": _clip_str(c.get("speech_text_in_range", ""), 180),
+            }
+        )
+        if len(ctx_out) >= 12:
+            break
+
+    return {
+        "name": _clip_str(ev.get("name", ""), 80),
+        "type": _clip_str(ev.get("type", ""), 16),
+        "content": _clip_str(ev.get("content", ""), 180),
+        "write_text": _clip_str(ev.get("write_text", ""), 180),
+        "diagram": int(ev.get("diagram", 0) or 0),
+        "text_tag": int(ev.get("text_tag", 0) or 0),
+        "range_start": int(ev.get("range_start", 0) or 0),
+        "range_end": int(ev.get("range_end", 0) or 0),
+        "speech_text_in_range": _clip_str(ev.get("speech_text_in_range", ""), 260),
+        "print_bbox": ev.get("print_bbox") if isinstance(ev.get("print_bbox"), dict) else None,
+        "bbox_px": ev.get("bbox_px") if isinstance(ev.get("bbox_px"), dict) else None,
+        "objects_that_comprise_image": _clip_str_list(
+            ev.get("objects_that_comprise_image"),
+            max_items=48,
+            max_chars=64,
+        ),
+        "static_plan_context": ctx_out,
+    }
+
+
+def _compact_active_objects_for_prompt(ev: Dict[str, Any]) -> List[Dict[str, Any]]:
+    out: List[Dict[str, Any]] = []
+    src = ev.get("active_objects")
+    if not isinstance(src, list):
+        return out
+    for idx, row in enumerate(src):
+        if not isinstance(row, dict):
+            continue
+        bb0 = row.get("bbox")
+        bb = bb0 if isinstance(bb0, dict) else {}
+        one = {
+            "name": _clip_str(row.get("name", ""), 96),
+            "kind": _clip_str(row.get("kind", ""), 20),
+            "bbox": {
+                "x": int(bb.get("x", row.get("x", 0)) or 0),
+                "y": int(bb.get("y", row.get("y", 0)) or 0),
+                "w": int(bb.get("w", row.get("w", 0)) or 0),
+                "h": int(bb.get("h", row.get("h", 0)) or 0),
+            },
+            "source_type": _clip_str(row.get("source_type", ""), 16),
+            "created_order": int(row.get("created_order", idx) or idx),
+        }
+        if one["name"]:
+            out.append(one)
+        if len(out) >= 96:
+            break
+    return out
+
+
+def _compact_silence_event_for_prompt(ev: Dict[str, Any]) -> Dict[str, Any]:
+    active_objs = _compact_active_objects_for_prompt(ev)
+    active_names = [str(x.get("name", "")) for x in active_objs if str(x.get("name", ""))]
+    return {
+        "chapter_index": int(ev.get("chapter_index", 0) or 0),
+        "chunk_index": int(ev.get("chunk_index", 0) or 0),
+        "segment_index": int(ev.get("segment_index", 0) or 0),
+        "name": _clip_str(ev.get("name", ""), 80),
+        "start_word_index": int(ev.get("start_word_index", 0) or 0),
+        "end_word_index": int(ev.get("end_word_index", 0) or 0),
+        "duration_sec": float(ev.get("duration_sec", 0.0) or 0.0),
+        "active_names": _clip_str_list(active_names, max_items=128, max_chars=96),
+        "active_objects": active_objs,
+    }
+
+
+def _generate_json_objects_from_prompts(
+    *,
+    model,
+    processor,
+    device,
+    prompts: List[str],
+    temperature: float,
+    max_new_tokens: int,
+    batch_size: int = 8,
+    debug_label: str = "qwen_json",
+) -> Tuple[List[Dict[str, Any]], List[str]]:
+    if not prompts:
+        return [], []
+
+    capped_prompts: List[str] = []
+    for p in prompts:
+        one = str(p or "")
+        if PLAN_PROMPT_CHAR_CAP > 0 and len(one) > PLAN_PROMPT_CHAR_CAP:
+            one = one[:PLAN_PROMPT_CHAR_CAP].rstrip() + "\n\n[TRUNCATED_FOR_VRAM]"
+        capped_prompts.append(one)
+
+    chat_texts = [_render_chat_text(processor, p) for p in capped_prompts]
+    bs = max(1, int(batch_size or 1))
+    all_raws: List[str] = []
+    empty_cache_each_batch = str(os.getenv("QWEN_PLAN_EMPTY_CACHE_EACH_BATCH", "1")).strip().lower() not in ("0", "false", "no")
+    batch_char_budget = max(1024, int(os.getenv("QWEN_PLAN_BATCH_CHAR_BUDGET", str(PLAN_BATCH_CHAR_BUDGET)) or PLAN_BATCH_CHAR_BUDGET))
+
+    def _cleanup_cuda_cache() -> None:
+        try:
+            gc.collect()
+        except Exception:
+            pass
+        try:
+            if torch.cuda.is_available():
+                try:
+                    torch.cuda.synchronize()
+                except Exception:
+                    pass
+                torch.cuda.empty_cache()
+                try:
+                    torch.cuda.ipc_collect()
+                except Exception:
+                    pass
+        except Exception:
+            pass
+
+    def _run_generate(texts_batch: List[str]) -> List[str]:
+        inputs = None
+        out_ids = None
+        gen_only_ids = None
+        try:
+            with torch.no_grad():
+                inputs = _processor_batch(processor, text=texts_batch)
+                inputs = _move_inputs_to_device(inputs, device)
+
+                gen_kwargs = {
+                    "max_new_tokens": int(max_new_tokens),
+                    "do_sample": bool(PLAN_DO_SAMPLE),
+                    "temperature": float(temperature),
+                    "top_p": 0.9,
+                    "num_beams": 1,
+                    "use_cache": bool(PLAN_USE_CACHE),
+                }
+                out_ids = _safe_generate(model, inputs=inputs, gen_kwargs=gen_kwargs)
+
+                if "input_ids" in inputs and torch.is_tensor(inputs["input_ids"]):
+                    prompt_len = int(inputs["input_ids"].shape[1])
+                    gen_only_ids = out_ids[:, prompt_len:]
+                else:
+                    gen_only_ids = out_ids
+
+                decoded = processor.batch_decode(gen_only_ids, skip_special_tokens=True)
+                return decoded
+        finally:
+            try:
+                del gen_only_ids
+            except Exception:
+                pass
+            try:
+                del out_ids
+            except Exception:
+                pass
+            try:
+                del inputs
+            except Exception:
+                pass
+
+    def _run_with_backoff(texts_batch: List[str], *, global_start: int) -> List[str]:
+        if not texts_batch:
+            return []
+        try:
+            return _run_generate(texts_batch)
+        except RuntimeError as e:
+            msg = str(e).lower()
+            is_oom = ("out of memory" in msg) or ("cuda error: out of memory" in msg)
+            if is_oom and len(texts_batch) > 1:
+                print(
+                    f"[qwen][DBG] {debug_label} split_after_oom start={global_start} "
+                    f"size={len(texts_batch)} -> {len(texts_batch) // 2}+{len(texts_batch) - (len(texts_batch) // 2)}"
+                )
+                _cleanup_cuda_cache()
+                mid = max(1, len(texts_batch) // 2)
+                left = _run_with_backoff(texts_batch[:mid], global_start=global_start)
+                right = _run_with_backoff(texts_batch[mid:], global_start=global_start + mid)
+                return left + right
+
+            print(f"[qwen][DBG] {debug_label} single_fail idx={global_start} err={type(e).__name__}: {e}")
+            _cleanup_cuda_cache()
+            return [""] * len(texts_batch)
+        except Exception as e:
+            print(f"[qwen][DBG] {debug_label} batch_fail start={global_start} size={len(texts_batch)} err={type(e).__name__}: {e}")
+            _cleanup_cuda_cache()
+            return [""] * len(texts_batch)
+
+    start = 0
+    while start < len(chat_texts):
+        cur_bs = min(bs, len(chat_texts) - start)
+        if batch_char_budget > 0:
+            while cur_bs > 1:
+                cand = chat_texts[start:start + cur_bs]
+                if sum(len(x) for x in cand) <= batch_char_budget:
+                    break
+                cur_bs = max(1, cur_bs // 2)
+
+        batch = chat_texts[start:start + cur_bs]
+        if not batch:
+            continue
+
+        t0 = time.perf_counter()
+        batch_chars = sum(len(x) for x in batch)
+        max_chars = max((len(x) for x in batch), default=0)
+        print(
+            f"[qwen][DBG] {debug_label} batch_start start={start} size={len(batch)} "
+            f"chars_total={batch_chars} chars_max={max_chars} vram={_vram_str()}"
+        )
+        try:
+            batch_raws = _run_with_backoff(batch, global_start=start)
+        finally:
+            print(
+                f"[qwen][DBG] {debug_label} batch_end start={start} size={len(batch)} "
+                f"elapsed_ms={round((time.perf_counter() - t0) * 1000.0, 2)} vram={_vram_str()}"
+            )
+            if empty_cache_each_batch:
+                _cleanup_cuda_cache()
+
+        if len(batch_raws) < len(batch):
+            batch_raws = list(batch_raws) + [""] * (len(batch) - len(batch_raws))
+        all_raws.extend(batch_raws[:len(batch)])
+        start += len(batch)
+
+    objs: List[Dict[str, Any]] = []
+    for raw in all_raws:
+        parsed = _extract_first_json_object(raw)
+        if not isinstance(parsed, dict):
+            parsed = {}
+        parsed["raw_text"] = raw
+        objs.append(parsed)
+    return objs, all_raws
+
 def plan_whiteboard_actions_transformers(
     *,
     model,
@@ -2142,7 +2748,6 @@ def plan_whiteboard_actions_transformers(
             # base:
             # {"type":"draw","target":"<image name>","x":123,"y":456}
             # {"type":"erase","target":"<image name or text object name>"}
-            # {"type":"shift","dx":-200,"dy":0}
             # {"type":"link","a":"<image name>","b":"<image name>"}
             # {"type":"write","text":"...","x":100,"y":200,"scale":1.0}
             # {"type":"move","target":"<image name>","x":400,"y":200}
@@ -2182,19 +2787,11 @@ def plan_whiteboard_actions_transformers(
         chat_text = prompt
 
     with torch.no_grad():
-        inputs = None
-        try:
-            inputs = processor(text=chat_text, return_tensors="pt")
-        except Exception:
-            # fallback for processors that want "input_ids" only
-            inputs = processor(chat_text, return_tensors="pt")
-
-        if hasattr(inputs, "to"):
-            inputs = inputs.to(device)
-        else:
-            for k, v in list(inputs.items()):
-                if hasattr(v, "to"):
-                    inputs[k] = v.to(device)
+        inputs = _processor_batch(
+            processor,
+            text=[chat_text],
+        )
+        inputs = _move_inputs_to_device(inputs, device)
 
         gen_kwargs = {
             "max_new_tokens": int(max_new_tokens),
@@ -2203,12 +2800,17 @@ def plan_whiteboard_actions_transformers(
             "top_p": 0.9,
         }
 
-        out_ids = model.generate(**inputs, **gen_kwargs)
+        out_ids = _safe_generate(model, inputs=inputs, gen_kwargs=gen_kwargs)
+        if "input_ids" in inputs and torch.is_tensor(inputs["input_ids"]):
+            prompt_len = int(inputs["input_ids"].shape[1])
+            gen_only_ids = out_ids[:, prompt_len:]
+        else:
+            gen_only_ids = out_ids
         try:
-            raw = processor.decode(out_ids[0], skip_special_tokens=True)
+            raw = processor.batch_decode(gen_only_ids, skip_special_tokens=True)[0]
         except Exception:
             # some processors expose tokenizer.decode
-            raw = processor.tokenizer.decode(out_ids[0], skip_special_tokens=True)
+            raw = processor.tokenizer.decode(gen_only_ids[0], skip_special_tokens=True)
 
     parsed = _extract_first_json_object(raw)
     if not isinstance(parsed, dict):
@@ -2226,6 +2828,664 @@ def plan_whiteboard_actions_transformers(
 
     parsed["raw_text"] = raw
     return parsed
+
+
+def _repair_space_plan_chunk(
+    *,
+    chunk: Dict[str, Any],
+    planned_entries: Optional[List[Dict[str, Any]]],
+    board_w: int,
+    board_h: int,
+) -> Dict[str, Any]:
+    entries_in = chunk.get("entries") or []
+    if not isinstance(entries_in, list):
+        entries_in = []
+    plan_rows = planned_entries if isinstance(planned_entries, list) else []
+    plan_by_idx: Dict[int, Dict[str, Any]] = {}
+    for row in plan_rows:
+        if not isinstance(row, dict):
+            continue
+        try:
+            k = int(row.get("entry_index", -1))
+        except Exception:
+            k = -1
+        if k >= 0:
+            plan_by_idx[k] = row
+
+    merged: List[Dict[str, Any]] = []
+    for e in entries_in:
+        if not isinstance(e, dict):
+            continue
+        out = dict(e)
+        idx = int(out.get("entry_index", 0) or 0)
+        p = plan_by_idx.get(idx) or {}
+        t = str(out.get("type", "") or "").lower()
+        if t in ("image", "text"):
+            bbox_px = out.get("bbox_px") or {}
+            bw = int(bbox_px.get("w", 400) or 400)
+            bh = int(bbox_px.get("h", 300) or 300)
+            # "very big bbox" policy: image/text occupancy can approach quadrant scale.
+            if t == "text":
+                target_w = max(bw + 80, board_w // 8)
+                target_h = max(bh + 60, board_h // 10)
+            else:
+                target_w = max(bw + 140, board_w // 5)
+                target_h = max(bh + 120, board_h // 5)
+            target_w = min(target_w, board_w)
+            target_h = min(target_h, board_h)
+            pb = p.get("print_bbox")
+            out["print_bbox"] = _normalize_print_bbox(
+                pb if isinstance(pb, dict) else None,
+                default_w=int(target_w),
+                default_h=int(target_h),
+                board_w=board_w,
+                board_h=board_h,
+            )
+        elif t == "silence":
+            default_delete = bool(out.get("chunk_boundary_silence", False))
+            out["delete_all"] = bool((p.get("delete_all") if isinstance(p, dict) else default_delete) if isinstance(p, dict) else default_delete)
+        merged.append(out)
+
+    # deterministic no-overlap repair for print boxes
+    placed: List[Dict[str, int]] = []
+    for row in sorted(
+        [x for x in merged if str(x.get("type", "") or "") in ("image", "text")],
+        key=lambda x: (int(x.get("range_start", 0) or 0), int(x.get("entry_index", 0) or 0)),
+    ):
+        pb = row.get("print_bbox") if isinstance(row.get("print_bbox"), dict) else None
+        bbox_px = row.get("bbox_px") or {}
+        dw = int(bbox_px.get("w", 400) or 400)
+        dh = int(bbox_px.get("h", 300) or 300)
+        desired = _normalize_print_bbox(
+            pb,
+            default_w=max(dw + 120, board_w // 6),
+            default_h=max(dh + 100, board_h // 6),
+            board_w=board_w,
+            board_h=board_h,
+        )
+        fixed = _find_non_overlapping_box(desired, placed=placed, board_w=board_w, board_h=board_h, step=40)
+        row["print_bbox"] = fixed
+        placed.append(fixed)
+
+    merged.sort(key=lambda x: (int(x.get("range_start", 0) or 0), 0 if str(x.get("type", "") or "") == "silence" else 1))
+    for i, row in enumerate(merged):
+        row["entry_index"] = int(i)
+
+    return {
+        "chapter_index": int(chunk.get("chapter_index", 0) or 0),
+        "board": {"w": int(board_w), "h": int(board_h)},
+        "step_order": list(chunk.get("step_order") or []),
+        "steps": list(chunk.get("steps") or []),
+        "entries": merged,
+    }
+
+
+def plan_space_timeline_batch_transformers(
+    *,
+    model,
+    processor,
+    device,
+    chunk_maps: List[Dict[str, Any]],
+    board_width: int = 4000,
+    board_height: int = 4000,
+    batch_size: int = 8,
+    temperature: float = 0.15,
+    max_new_tokens: int = 900,
+) -> Dict[str, Any]:
+    """
+    Plans static print space per chunk:
+      - assigns print_bbox for image/text entries
+      - marks silence entries with delete_all true/false
+    Always validates + repairs output to ensure valid non-overlapping bboxes.
+    """
+    chunks = [c for c in (chunk_maps or []) if isinstance(c, dict)]
+    if not chunks:
+        return {"chunks": []}
+
+    prompts: List[str] = []
+    for ch in chunks:
+        payload = _compact_space_chunk_for_prompt(
+            ch,
+            board_width=int(board_width),
+            board_height=int(board_height),
+        )
+        prompt = (
+            "You are managing where images will be printed on a whiteboard.\n"
+            "Goal: assign each image/text entry to a non-overlapping print_bbox and choose which silence rows should be cleanup points.\n"
+            "You receive chronologically synced entries with range_start/range_end and speech_text_in_range.\n"
+            "For each image/text entry you MUST output print_bbox.\n"
+            "For each silence you MUST output delete_all true/false.\n"
+            "Set delete_all=true only for pauses where board cleanup is useful before the next cluster of visuals.\n"
+            "Keep nearby chronology conceptually close where possible.\n"
+            "Use large boxes, avoid overlap, stay inside board bounds.\n"
+            "Output JSON only.\n\n"
+            "Input chunk:\n"
+            + json.dumps(payload, ensure_ascii=False, indent=2)
+            + "\n\nOutput schema:\n"
+            + json.dumps(
+                {
+                    "entries": [
+                        {"entry_index": 0, "type": "image", "print_bbox": {"x": 0, "y": 0, "w": 800, "h": 800}},
+                        {"entry_index": 1, "type": "text", "print_bbox": {"x": 900, "y": 100, "w": 500, "h": 300}},
+                        {"entry_index": 2, "type": "silence", "delete_all": False},
+                    ],
+                    "notes": "short optional note",
+                },
+                ensure_ascii=False,
+                indent=2,
+            )
+        )
+        prompts.append(prompt)
+
+    parsed_objs, _ = _generate_json_objects_from_prompts(
+        model=model,
+        processor=processor,
+        device=device,
+        prompts=prompts,
+        temperature=float(temperature),
+        max_new_tokens=int(max_new_tokens),
+        batch_size=int(batch_size),
+        debug_label="plan_space",
+    )
+
+    out_chunks: List[Dict[str, Any]] = []
+    for i, ch in enumerate(chunks):
+        obj = parsed_objs[i] if i < len(parsed_objs) else {}
+        plan_entries = obj.get("entries") if isinstance(obj, dict) else None
+        repaired = _repair_space_plan_chunk(
+            chunk=ch,
+            planned_entries=plan_entries if isinstance(plan_entries, list) else None,
+            board_w=int(board_width),
+            board_h=int(board_height),
+        )
+        out_chunks.append(repaired)
+
+    return {"chunks": out_chunks}
+
+
+def _default_visual_actions_for_event(ev: Dict[str, Any]) -> List[Dict[str, Any]]:
+    s = int(ev.get("range_start", 0) or 0)
+    e = int(ev.get("range_end", s) or s)
+    if e < s:
+        e = s
+    span = max(0, e - s)
+    pb = ev.get("print_bbox") or {"x": 0, "y": 0, "w": 400, "h": 300}
+    x = int(pb.get("x", 0) or 0)
+    y = int(pb.get("y", 0) or 0)
+
+    acts: List[Dict[str, Any]] = []
+    if int(ev.get("text_tag", 0) or 0) == 1:
+        acts.append(
+            {
+                "type": "write_text",
+                "target": str(ev.get("name", "") or ""),
+                "text": str(ev.get("write_text", "") or ev.get("content", "")),
+                "x": x,
+                "y": y,
+                "sync_local": {"start_word_offset": 0, "end_word_offset": span},
+            }
+        )
+        return acts
+
+    acts.append(
+        {
+            "type": "draw_image",
+            "target": str(ev.get("name", "") or ""),
+            "x": x,
+            "y": y,
+            "sync_local": {"start_word_offset": 0, "end_word_offset": min(span, 2)},
+        }
+    )
+    if int(ev.get("diagram", 0) or 0) == 1:
+        objs = ev.get("objects_that_comprise_image") or []
+        first_obj = str(objs[0] if isinstance(objs, list) and objs else "").strip()
+        acts.append(
+            {
+                "type": "highlight_cluster",
+                "cluster_name": first_obj,
+                "sync_local": {"start_word_offset": min(span, 1), "end_word_offset": min(span, max(1, span // 2))},
+            }
+        )
+    return acts
+
+
+_VISUAL_ACTION_ALIASES = {
+    "draw_image": "draw_image",
+    "draw": "draw_image",
+    "write_text": "write_text",
+    "write": "write_text",
+    "annotate": "write_text",
+    "move_inside_bbox": "move_inside_bbox",
+    "move_inside_print_bbox": "move_inside_bbox",
+    "move": "move_inside_bbox",
+    "link_to_image": "link_to_image",
+    "link_to_previous": "link_to_image",
+    "link": "link_to_image",
+    "delete_self": "delete_self",
+    "highlight_cluster": "highlight_cluster",
+    "unhighlight_cluster": "unhighlight_cluster",
+    "zoom_cluster": "zoom_cluster",
+    "unzoom_cluster": "unzoom_cluster",
+    "write_label": "write_label",
+}
+
+
+def _safe_float(v: Any, default: float = 0.0) -> float:
+    try:
+        return float(v)
+    except Exception:
+        return float(default)
+
+
+def _safe_int(v: Any, default: int = 0) -> int:
+    try:
+        return int(round(float(v)))
+    except Exception:
+        return int(default)
+
+
+def _normalize_sync_local(sync: Any, *, span: int) -> Dict[str, int]:
+    if not isinstance(sync, dict):
+        sync = {}
+    s = _safe_int(sync.get("start_word_offset", sync.get("start", 0)), 0)
+    e = _safe_int(sync.get("end_word_offset", sync.get("end", s)), s)
+    s = _clamp_i(s, 0, max(0, span))
+    e = _clamp_i(e, s, max(0, span))
+    return {
+        "start_word_offset": int(s),
+        "end_word_offset": int(e),
+    }
+
+
+def _extract_xy(raw: Dict[str, Any], *, default_x: int, default_y: int, x_key: str = "x", y_key: str = "y") -> Tuple[int, int]:
+    loc = raw.get("location")
+    xv = raw.get(x_key, None)
+    yv = raw.get(y_key, None)
+    if isinstance(loc, dict):
+        if xv is None:
+            xv = loc.get("x")
+        if yv is None:
+            yv = loc.get("y")
+    x = _safe_int(xv, default_x)
+    y = _safe_int(yv, default_y)
+    return x, y
+
+
+def _clean_visual_action_for_event(ev: Dict[str, Any], a: Dict[str, Any], *, action_index: int) -> Optional[Dict[str, Any]]:
+    raw_t = str(a.get("type", "") or "").strip().lower()
+    if not raw_t:
+        return None
+    t = _VISUAL_ACTION_ALIASES.get(raw_t)
+    if not t:
+        return None
+
+    is_diagram = int(ev.get("diagram", 0) or 0) == 1
+    diagram_types = ("highlight_cluster", "unhighlight_cluster", "zoom_cluster", "unzoom_cluster", "write_label")
+    if t in diagram_types and not is_diagram:
+        return None
+
+    s = int(ev.get("range_start", 0) or 0)
+    e = int(ev.get("range_end", s) or s)
+    if e < s:
+        e = s
+    span = max(0, e - s)
+
+    pb = ev.get("print_bbox") if isinstance(ev.get("print_bbox"), dict) else {"x": 0, "y": 0, "w": 400, "h": 300}
+    default_x = _safe_int(pb.get("x", 0), 0)
+    default_y = _safe_int(pb.get("y", 0), 0)
+    default_name = str(ev.get("name", "") or "").strip()
+
+    out: Dict[str, Any] = {"type": t}
+
+    if t == "draw_image":
+        x, y = _extract_xy(a, default_x=default_x, default_y=default_y, x_key="x", y_key="y")
+        out["target"] = str(a.get("target", "") or default_name).strip()
+        out["x"] = int(x)
+        out["y"] = int(y)
+    elif t == "write_text":
+        x, y = _extract_xy(a, default_x=default_x, default_y=default_y, x_key="x", y_key="y")
+        text_fallback = str(ev.get("write_text", "") or ev.get("content", "")).strip()
+        out["text"] = str(a.get("text", "") or text_fallback)
+        out["x"] = int(x)
+        out["y"] = int(y)
+        out["scale"] = float(_safe_float(a.get("scale", 1.0), 1.0))
+        tgt = str(a.get("target", "") or "").strip()
+        if not tgt:
+            tgt = default_name if int(ev.get("text_tag", 0) or 0) == 1 else f"{default_name}__text_{action_index + 1}"
+        out["target"] = tgt
+    elif t == "move_inside_bbox":
+        nx, ny = _extract_xy(a, default_x=default_x, default_y=default_y, x_key="new_x", y_key="new_y")
+        if "new_x" not in a and "new_y" not in a:
+            nx, ny = _extract_xy(a, default_x=default_x, default_y=default_y, x_key="x", y_key="y")
+        out["target"] = str(a.get("target", "") or default_name).strip()
+        out["new_x"] = int(nx)
+        out["new_y"] = int(ny)
+    elif t == "link_to_image":
+        other = (
+            str(a.get("image_name", "") or a.get("target_image", "") or a.get("link_to_image", "") or a.get("to", "") or "")
+            .strip()
+        )
+        if not other:
+            return None
+        out["target"] = default_name
+        out["image_name"] = other
+    elif t == "delete_self":
+        pass
+    elif t in diagram_types:
+        objs = ev.get("objects_that_comprise_image") if isinstance(ev.get("objects_that_comprise_image"), list) else []
+        first_obj = str(objs[0] if objs else "").strip()
+        cluster_name = str(
+            a.get("cluster_name", "")
+            or a.get("cluster", "")
+            or a.get("object", "")
+            or a.get("name", "")
+            or first_obj
+        ).strip()
+        if not cluster_name:
+            return None
+        out["cluster_name"] = cluster_name
+        if t == "write_label":
+            out["text"] = str(a.get("text", "") or cluster_name)
+
+    out["sync_local"] = _normalize_sync_local(a.get("sync_local"), span=span)
+    return out
+
+
+def plan_visual_actions_batch_transformers(
+    *,
+    model,
+    processor,
+    device,
+    events: List[Dict[str, Any]],
+    batch_size: int = 8,
+    temperature: float = 0.2,
+    max_new_tokens: int = 700,
+) -> Dict[str, Any]:
+    """
+    Plans actions for image/text/diagram events.
+    Uses static timeline context (only items before current event in current batch).
+    """
+    rows = [e for e in (events or []) if isinstance(e, dict)]
+    if not rows:
+        return {"items": []}
+
+    prompts: List[str] = []
+    for ev in rows:
+        payload = {
+            "event": _compact_visual_event_for_prompt(ev),
+            "allowed_actions": {
+                "base": [
+                    "draw_image",
+                    "write_text",
+                    "move_inside_bbox",
+                    "link_to_image",
+                    "delete_self",
+                ],
+                "diagram_extra": [
+                    "highlight_cluster",
+                    "unhighlight_cluster",
+                    "zoom_cluster",
+                    "unzoom_cluster",
+                    "write_label",
+                ],
+            },
+            "rules": {
+                "print_bbox_is_fixed_context": True,
+                "all_actions_inside_print_bbox": True,
+                "generic_delete_not_allowed": True,
+                "delete_self_only_for_temporary_non_diagram": True,
+                "must_emit_sync_local_per_action": True,
+                "sync_local_is_relative_to_event_range": True,
+            },
+        }
+        prompt = (
+            "You plan actions for one visual event on a whiteboard timeline.\n"
+            "Use ONLY the allowed actions and exactly their field names.\n"
+            "Every action MUST include sync_local {start_word_offset,end_word_offset} inside the event range.\n"
+            "Coordinates must stay inside the event print_bbox.\n"
+            "For diagram events, clusters in objects_that_comprise_image are interactable.\n"
+            "Use diagram actions only when diagram=1.\n"
+            "For text_tag=1 prioritize write_text.\n"
+            "Base actions schema:\n"
+            "- draw_image: {type,target,x,y,sync_local}\n"
+            "- write_text: {type,target,text,x,y,scale,sync_local}\n"
+            "- move_inside_bbox: {type,target,new_x,new_y,sync_local}\n"
+            "- link_to_image: {type,target,image_name,sync_local}\n"
+            "- delete_self: {type,sync_local}\n"
+            "Diagram actions schema:\n"
+            "- highlight_cluster/unhighlight_cluster/zoom_cluster/unzoom_cluster: {type,cluster_name,sync_local}\n"
+            "- write_label: {type,cluster_name,text,sync_local}\n"
+            "Return JSON only.\n"
+            "Input includes static_plan_context with all prior entries from this batch.\n\n"
+            "Input:\n"
+            + json.dumps(payload, ensure_ascii=False, indent=2)
+            + "\n\nOutput schema:\n"
+            + json.dumps(
+                {
+                    "actions": [
+                        {"type": "draw_image", "target": "img_name", "x": 100, "y": 180, "sync_local": {"start_word_offset": 0, "end_word_offset": 2}},
+                        {"type": "write_text", "target": "img_name__text_1", "text": "label", "x": 120, "y": 260, "scale": 1.0, "sync_local": {"start_word_offset": 2, "end_word_offset": 4}},
+                        {"type": "move_inside_bbox", "target": "img_name", "new_x": 180, "new_y": 220, "sync_local": {"start_word_offset": 4, "end_word_offset": 6}},
+                        {"type": "link_to_image", "target": "img_name", "image_name": "previous_img", "sync_local": {"start_word_offset": 6, "end_word_offset": 8}},
+                        {"type": "highlight_cluster", "cluster_name": "nucleus", "sync_local": {"start_word_offset": 7, "end_word_offset": 9}},
+                        {"type": "write_label", "cluster_name": "nucleus", "text": "Nucleus", "sync_local": {"start_word_offset": 8, "end_word_offset": 10}},
+                    ],
+                    "notes": "short note",
+                },
+                ensure_ascii=False,
+                indent=2,
+            )
+        )
+        prompts.append(prompt)
+
+    parsed_objs, raws = _generate_json_objects_from_prompts(
+        model=model,
+        processor=processor,
+        device=device,
+        prompts=prompts,
+        temperature=float(temperature),
+        max_new_tokens=int(max_new_tokens),
+        batch_size=int(batch_size),
+        debug_label="plan_visual",
+    )
+
+    out_items: List[Dict[str, Any]] = []
+    for i, ev in enumerate(rows):
+        obj = parsed_objs[i] if i < len(parsed_objs) else {}
+        acts = obj.get("actions") if isinstance(obj, dict) else None
+        if not isinstance(acts, list):
+            acts = []
+
+        cleaned: List[Dict[str, Any]] = []
+        for ai, a in enumerate(acts):
+            if not isinstance(a, dict):
+                continue
+            one = _clean_visual_action_for_event(ev, a, action_index=ai)
+            if one is None:
+                continue
+            cleaned.append(one)
+
+        if not cleaned:
+            cleaned = _default_visual_actions_for_event(ev)
+
+        out_items.append(
+            {
+                "actions": cleaned,
+                "notes": str(obj.get("notes", "") or ""),
+                "raw_text": raws[i] if i < len(raws) else "",
+            }
+        )
+
+    return {"items": out_items}
+
+
+def _ordered_active_names_for_silence(ev: Dict[str, Any]) -> List[str]:
+    src = ev.get("active_objects")
+    rows: List[Dict[str, Any]] = src if isinstance(src, list) else []
+    sortable: List[Tuple[int, int, int, str]] = []
+    for i, row in enumerate(rows):
+        if not isinstance(row, dict):
+            continue
+        name = str(row.get("name", "") or "").strip()
+        if not name:
+            continue
+        bb = row.get("bbox") if isinstance(row.get("bbox"), dict) else {}
+        y = _safe_int(bb.get("y", row.get("y", 10_000_000)), 10_000_000)
+        x = _safe_int(bb.get("x", row.get("x", 10_000_000)), 10_000_000)
+        created = _safe_int(row.get("created_order", i), i)
+        sortable.append((y, x, created, name))
+    if not sortable:
+        names = ev.get("active_names")
+        if isinstance(names, list):
+            return [str(x).strip() for x in names if str(x).strip()]
+        return []
+    sortable.sort(key=lambda t: (t[0], t[1], t[2], t[3].lower()))
+    out: List[str] = []
+    seen = set()
+    for _, _, _, name in sortable:
+        k = name.lower()
+        if k in seen:
+            continue
+        seen.add(k)
+        out.append(name)
+    return out
+
+
+def _default_silence_delete_actions(ordered_names: List[str], *, span: int) -> List[Dict[str, Any]]:
+    if not ordered_names:
+        return []
+    out: List[Dict[str, Any]] = []
+    den = max(1, len(ordered_names))
+    for i, nm in enumerate(ordered_names):
+        start = 0 if span <= 0 else int(round((float(i) / float(den)) * float(span)))
+        end = max(start, min(span, start))
+        out.append(
+            {
+                "type": "delete_by_name",
+                "target": str(nm),
+                "sync_local": {"start_word_offset": int(start), "end_word_offset": int(end)},
+            }
+        )
+    return out
+
+
+def plan_silence_actions_batch_transformers(
+    *,
+    model,
+    processor,
+    device,
+    events: List[Dict[str, Any]],
+    batch_size: int = 8,
+    temperature: float = 0.1,
+    max_new_tokens: int = 500,
+) -> Dict[str, Any]:
+    """
+    Plans deletion-focused actions for silences marked for cleanup.
+    """
+    rows = [e for e in (events or []) if isinstance(e, dict)]
+    if not rows:
+        return {"items": []}
+
+    prompts: List[str] = []
+    for ev in rows:
+        ordered_names = _ordered_active_names_for_silence(ev)
+        payload = {
+            "silence_event": _compact_silence_event_for_prompt(ev),
+            "allowed_actions": [
+                "delete_by_name",
+            ],
+            "rules": {
+                "goal": "delete all active objects",
+                "order": "top_to_bottom_then_left_to_right",
+                "must_emit_sync_local_per_action": True,
+            },
+            "ordered_names_for_cleanup": ordered_names,
+        }
+        prompt = (
+            "You plan silence cleanup actions.\n"
+            "This stage only deletes active objects from the board.\n"
+            "Use delete_by_name only.\n"
+            "Delete every object in ordered_names_for_cleanup from first to last.\n"
+            "If active_objects include bbox, follow top-to-bottom order.\n"
+            "Return JSON only.\n"
+            "Every action must include sync_local {start_word_offset,end_word_offset}.\n\n"
+            "Input:\n"
+            + json.dumps(payload, ensure_ascii=False, indent=2)
+            + "\n\nOutput schema:\n"
+            + json.dumps(
+                {
+                    "actions": [
+                        {"type": "delete_by_name", "target": "name", "sync_local": {"start_word_offset": 0, "end_word_offset": 0}},
+                    ],
+                    "notes": "short note",
+                },
+                ensure_ascii=False,
+                indent=2,
+            )
+        )
+        prompts.append(prompt)
+
+    parsed_objs, raws = _generate_json_objects_from_prompts(
+        model=model,
+        processor=processor,
+        device=device,
+        prompts=prompts,
+        temperature=float(temperature),
+        max_new_tokens=int(max_new_tokens),
+        batch_size=int(batch_size),
+        debug_label="plan_silence",
+    )
+
+    out_items: List[Dict[str, Any]] = []
+    for i, ev in enumerate(rows):
+        obj = parsed_objs[i] if i < len(parsed_objs) else {}
+        acts = obj.get("actions") if isinstance(obj, dict) else None
+        if not isinstance(acts, list):
+            acts = []
+
+        s = int(ev.get("start_word_index", 0) or 0)
+        e = int(ev.get("end_word_index", s) or s)
+        if e < s:
+            e = s
+        span = max(0, e - s)
+        ordered_names = _ordered_active_names_for_silence(ev)
+
+        cleaned: List[Dict[str, Any]] = []
+        seen_targets = set()
+        for a in acts:
+            if not isinstance(a, dict):
+                continue
+            t = str(a.get("type", "") or "").strip().lower()
+            if t != "delete_by_name":
+                continue
+            target = str(a.get("target", "") or "").strip()
+            if not target:
+                continue
+            if ordered_names:
+                allowed = {x.lower() for x in ordered_names}
+                if target.lower() not in allowed:
+                    continue
+            one = dict(a)
+            one["target"] = target
+            one["sync_local"] = _normalize_sync_local(one.get("sync_local"), span=span)
+            cleaned.append(one)
+            seen_targets.add(target.lower())
+
+        missing = [nm for nm in ordered_names if nm.lower() not in seen_targets]
+        if missing:
+            cleaned.extend(_default_silence_delete_actions(missing, span=span))
+        if not cleaned:
+            cleaned = _default_silence_delete_actions(ordered_names, span=span)
+
+        out_items.append(
+            {
+                "actions": cleaned,
+                "notes": str(obj.get("notes", "") or ""),
+                "raw_text": raws[i] if i < len(raws) else "",
+            }
+        )
+
+    return {"items": out_items}
 
 
 
@@ -2503,23 +3763,15 @@ def main() -> None:
             # Batch encode -> move -> generate
             t1 = time.time()
             try:
-                inputs = processor(
+                inputs = _processor_batch(
+                    processor,
                     text=texts_batch,
                     images=images_batch,
-                    return_tensors="pt",
-                    padding=True,
-                    truncation=True,
                 )
-
-                for k, v in list(inputs.items()):
-                    if torch.is_tensor(v):
-                        if k == "pixel_values":
-                            inputs[k] = v.to(device=device, dtype=DTYPE, non_blocking=True)
-                        else:
-                            inputs[k] = v.to(device=device, non_blocking=True)
+                inputs = _move_inputs_to_device(inputs, device)
 
                 with torch.inference_mode():
-                    out_ids = model.generate(**inputs, **gen_kwargs)
+                    out_ids = _safe_generate(model, inputs=inputs, gen_kwargs=gen_kwargs)
 
                 # Decode ONLY the generated continuation (not the prompt).
                 # generate() returns [prompt + new_tokens] by default.

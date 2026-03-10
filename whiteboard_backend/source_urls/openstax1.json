@@ -9,8 +9,215 @@
     "Geography": ""
   },
   "SubjectUrlsFound": {
-    "embv1:H4sIAEwCo2kA_w3O-09NcQAA8O_5fr_nnO-9t27ldrmsYUqrvOY5tn5izLPMrkxhtYWRtuY1IXlMRdiyPDLzynNCkvKW0VZNWL94DDHNlqG7W7dzzvfJ5y_4mDQTQSuOB-k8rV8vNxa6U8gmyViuvVb-Cj_hNdYpY1jYo3phtrZMBEUSTGcTwQbTT4dab8VHchjujZ4my1AHHyOr9TZxFbWK1VJp74z3cA_IslPAJZ4jk_mmQR84DXwxt-wKdD-2Wt5FI2kM-GOccWVGKsBsXBKZqk7i5_CNlu-KRqvhBZqIOkm9LMLxYpRZSS4wr1iO77mv8j60RwyAK1q7UfC3FvebHuc4afMEgAAHYBK6aL6ytuB0vVgEwQ81X3wXDXqqyVTIXcqK3T9hQH5S5_hlst7OVickAGO0MtEju0kj72E2wqEHqhNag894LEhDheA4Ohp-LX3aDp5gxcrr2uZIOsyjRTLb-upKZOvMNtEhCb9LkgGGpvDyLyrFjhcj1ArLT56iJXQ0nSE2qk-4Wj4xV9rN9KQecnLFPhYwb8Iu1Dm4NKrZrDJK-6rC5aASpMopoTpzZl8uWER84IRxpk-pBeys4w4fYpZ9Gc4Xcx0_fAgfqrqB8VYdX_H_n6FvdSI0RiSRH94E_o3e1zJcE7RmMgpiWEmLB1_gFvmYrVGtobyoxSoXpzLD3RxJ1VexOjCdpsk4rQ0fQ7PQaSOHrzRUJB8ulXOphXLIUxjnGu5ZJktg9sBOWS8-0CZQi_z6QbvJuCbynHjbr0_SsbM7arHwoSyZaE5C591Z9h0qGUDb7FZYAZvgEfiYBkSjKHJ3WwVoP9FlkmxB6aFdVrkT4ABMjr4CKeoNzxG7JFENni6jlExTNcYBWGDOxNNJE19oHwE3-Ft7ovyq1g_5ZTxixaoe_HRtsMpIBxmnd_FaWoqrzM-R2_peUei8xIWygeXAHpjp3RJp52VWTXi79lses2f0F6Kg1ctmo24VNMZ6Erwl4h9mUMQnAAMAAA==": [
-      "https://commons.libretexts.org/book/bio-1764"
+    "embv1:H4sIAM1Oo2kA_wXBe0xVdRwA8N_73Hu4VyznYGI-K83NyPUAJ1ctUbekAKlRDE0nK9vKf9y1TR3ONHTabjZqS4dcK-cDi2g-KosRDZsoKopubeJqWtAmBlzvPef8zu_x7fP5xVuBdprTen3mZxiCyQ5BX7C5th_NhvwoDbvJe-FhPkia5e8PFgdfmhI4lp_SdXzIq6O_mkuZXfHJ-G-1I0iwRlbEKsQTzsde1s-KTtLJF9FX_Lfdeq8Kz_FSyPOXsxZxLfyAL6ZTca9cLZ6BUfMvFLFalDM_uC_jjnif2c_3ykoyPxoLT6KbUEL_ss3koyAlZ6kF0SYZkdV4tVMwegKfDcfs-cge3Gr79bPkOXJnYgHtdu6h7TCMW-W4U4zf4J2WsC5_mt9oj4g2ryh2FB7JrxC_2XbxgkyGOXqen8oh9Lq_CZogHjtjl5pe3WV7YpvNS2RP_LRKw_y8M2FCKHWNfAtbFRXl5rjxyKhb4SyABL1E4rRHNORW2nws-TtBIO_E-kxCXzAlaJ6ch5ZGeuKDsTG6Exqy39m0Vy9nuZ_A1WA_umAE7TAHeAV_PLtxZCMazrarP5lwD458yt40dWgbWqavxNrtLZXk68wAaJ7DS5wqW4Nm2FLRoadnfT9FRqgIEYLR59GUsZYJvcSafoxMpVslv4FyrmETl7nP1F11U36u2mAAF6JD-rZM6jViOm6QL2afYtWq7OFJUe-_JQ-gafEUt3SXeTUyFJ6NjvC1zINSliB5aBDtgzK9AxbqFifBnvaPqrTeGr0fzmW-_odY2RBswBehKfMormb7SGQ8qX8cLyMzyCo-yJolcM--pt9l9XoZTrtTTC0d9ubI98NJQY33h0aIkFPRRv9ccIIW5v0EcVOY3cJuOOWRLXCMf086yTlaq9pyBGa6XdGH9HjYrWvyrqJWUgp78XJ9mT0G24L_1EQ8QNK4z6TCSvUgDGEtuRjNoMPOk-J6kBQfqmIxVRdTlxfBbbzEK8hEKHe-gt3oa_E_-fOmcAADAAA=": [
+      "https://commons.libretexts.org/book/math-19020"
+    ],
+    "embv1:H4sIAGYCsGkA_w3R-0tWZxwA8O95znPOec45vtXeIoNIifKtYTf0B9cSumAXKbSgG7UZbasUurhB2suKeovmqM3SLr8UJVkG2Y1eInFbgwiLZmwx2yamVkpUK7y95z3nPNf6_AufKJsmLsJKv4Ymvd-MKges60Y1HJPbYK62AE7SQqjCZcM3OYJB_jDcwnr47zyOG8lSqPJ_Qn3mU7nC8lESHZQT-WkjHiSthqCF9hp3Iu3hr0HJoENHi5VSg3rBzUfpXHdSaKJxpFq26wUwVitErWIji8MifY-W4jVwAeq82fwf2RwUaXkqx3iucbyQnFO6miW6tcMYOQm-g58RWdal8DbLladom72M_m01wAv9jWzWe9RNKPMmI9-N0T_xE1rCk2ab3YbH43XkipgR_Q8tZge1Ar-JrA9r1H4CkM_K_W94lv4Hq2d5dPRII5yCimACPiH-ytis3Wcvecx0rUKxlEfQWpGFVmXMAM5oehPukoH5Tk4J7skI7jHf01455E4NKz2mfaIKeLM8L2L-D2gXSdAO9Ew02HO9OcgnE6HBr4UWtyt1DW17ezdjPTlmLUyfV5m4nrWGxekE2TeUjw9BO_OgbKgTvYYDQeVgGf8MHxZuuFp9zf5HhXjA7-BP0acCIGYP-LZRHvaCcqtl00huZLshxY-OE27Qt458R_vgS7QFZ0tHZduXnat6KMohHs53t4tfVG3wIN1udtjF0OVXkiK1mexOLcHLAbwBrd6QRi_NlHnBPvFVai9eHjRpx2kcbxxT53eKncFZdDfYlZEznAOLyQ1UoyyrgPVZc4iU33s38Dx_Mn87MlOOlSW8VN_KSNhHsikS5_Q2WoRcK6pmmy_sLgYw7NR-PM4JL8lSFaNXtOoxR4216h3-Fl3WK9yXdkz2005ZnPpZ60ZHRGY0QfqN20zQ_VrUaDVK7elmYCS5J-5HVrEpZiL9ihYbLcHn9LV-C49Sj4Mm1an_Gw7qp_ke_Qu1CDfSOvrIvaiuWRNgvrMm_AD1V_z1AAMAAA==": [
+      "https://commons.libretexts.org/homework"
+    ],
+    "embv1:H4sIAF4CsGkA_w3O-09NcQAA8O_5fr_nnO-9t27ldrmsYUqrvOY5tn5izLPMrkxhtYWRtuY1IXlMRdiyPDLzynNCkvKW0VZNWL94DDHNlqG7W7dzzvfJ5y_4mDQTQSuOB-k8rV8vNxa6U8gmyViuvVb-Cj_hNdYpY1jYo3phtrZMBEUSTGcTwQbTT4dab8VHchjujZ4my1AHHyOr9TZxFbWK1VJp74z3cA_IslPAJZ4jk_mmQR84DXwxt-wKdD-2Wt5FI2kM-GOccWVGKsBsXBKZqk7i5_CNlu-KRqvhBZqIOkm9LMLxYpRZSS4wr1iO77mv8j60RwyAK1q7UfC3FvebHuc4afMEgAAHYBK6aL6ytuB0vVgEwQ81X3wXDXqqyVTIXcqK3T9hQH5S5_hlst7OVickAGO0MtEju0kj72E2wqEHqhNag894LEhDheA4Ohp-LX3aDp5gxcrr2uZIOsyjRTLb-upKZOvMNtEhCb9LkgGGpvDyLyrFjhcj1ArLT56iJXQ0nSE2qk-4Wj4xV9rN9KQecnLFPhYwb8Iu1Dm4NKrZrDJK-6rC5aASpMopoTpzZl8uWER84IRxpk-pBeys4w4fYpZ9Gc4Xcx0_fAgfqrqB8VYdX_H_n6FvdSI0RiSRH94E_o3e1zJcE7RmMgpiWEmLB1_gFvmYrVGtobyoxSoXpzLD3RxJ1VexOjCdpsk4rQ0fQ7PQaSOHrzRUJB8ulXOphXLIUxjnGu5ZJktg9sBOWS8-0CZQi_z6QbvJuCbynHjbr0_SsbM7arHwoSyZaE5C591Z9h0qGUDb7FZYAZvgEfiYBkSjKHJ3WwVoP9FlkmxB6aFdVrkT4ABMjr4CKeoNzxG7JFENni6jlExTNcYBWGDOxNNJE19oHwE3-Ft7ovyq1g_5ZTxixaoe_HRtsMpIBxmnd_FaWoqrzM-R2_peUei8xIWygeXAHpjp3RJp52VWTXi79lses2f0F6Kg1ctmo24VNMZ6Erwl4h9mUMQnAAMAAA==": [
+      "https://commons.libretexts.org/book/bio-79686"
+    ],
+    "embv1:H4sIAHZdsGkA_w3R60-WVQAA8HN7znMeXi6GpKSJqLDA2FIa-ips4tzIXHlDh1JtsJjBariJDpoTl0MG2utt1nJrufSDFQ2vM0qJHElEEcECFJcxJdHywnt_znnORf-B35ff-3ydzopWimYvWXaCFeSwU4XaaFW0JfwTLUKWqA0tSGiUe8guGbAA8kyvughP06hdKSamtqu-WIXziv0PznBHRVP8DLjCT5BScoj46XQnK8Xgj931mHpDZqnq4s32uMpJSHPHSWFah1dHToJskmptZXlqqfWnqZv6iv3K1snZYF_iMTVBS8VC-b_OZ6kknWy2i9m1cAdvsJbofs-VfqsPPS_fg9-ETsGXElvsEvaB2UB60A-0CJ6zL3tFdDlpVRnWkFcsFrrZsRHMg9qMorjzKXzBOWG-Q38nvctv6WMhAOaQL-Awv8t61Tw5QQqCjWqNevlhK9hM89El-VCGRaHJRl-SVSAZ_gt3BP1wpbipcuJHPQJmorbYzScZGDu5dgXMlcXqQlQbvxk0991pOAu4sky9Ea_3HptrIkKXwU1qgEYVALNQnnNZJVrnY_OcCnTD8YfioRJrzEXqQOTt5Dfl9FgNRmatCTxykgbdiGhSK3gJ7oYBsBZ9JAP4PzweXo3H9MZnVnlCufjWao81mIjPE7WoQPWzTHbPZEAqm6nfLGAp1mF9hx-P9GM_H4CT8gHqcm-bW_Isagvv1b-rVxMCIFO-roKqm-7nI7TaOuT-Yf_G0mm7PcM3LPrQome7YXzem4urSYje1bvpoL4O08I-30HTQprwFc7Mbfdnc0e8CGq8JFCpPheN8kc0h_XoMdLkNqpK2PlcnSgk6bjVlIHrztFIgKSyKQxAPhpDqfggnwm2oF7cyVpxEY7CXHLBe4sNmHbfZ_yqfo3U2PWAS1v30dNqWJ2zxnU1OBDS3i_Wh7zBTLo1ej-G_HuxCLwD5oMRt1stZ4udnWgW6o-UP8k1X-O_zI54PPgJ3qam6ajZZFloIzriXOVPAdwdJikAAwAA": [
+      "https://commons.libretexts.org/homework"
+    ],
+    "embv1:H4sIAG9fsGkA_w3S_W-NVxwA8O95znle7u29VzuNH7gLifeMCiaxdorKlrSClBKLCJuqH6pbMW_RoMjQLW6krasIboK1SxAvm1Bi4iUhwRWdNU2qy_ZDVbfbcnvvOc9znnO-8_kbPt1it9_rD_rLdUoNkQV42WmzC6wVWE3KaQ9fL2t4pxNPPfY79C7vtN5K1oQn-NOkA91GH8_iv0GPXA9wst_9zHKwkim3DP_MzNN3WBp6rQYowDdmPwisEl0iEWIk4pS4R1lv8KbeKsboqxhjg-ZT0U_fayf1Q_Dg8K9gF2nCRpmkU9URN4l5bKR4RLdZGJrB68RcetJohnZMuCU5ZQwxJmPsH9itJek0OtzjbBaWZztIpbqiT5kNKsGG2LdSkTb2DfnD-ymY4lcCk-AYKyX5IpB3mT7DNAVg2OC1Q25oCxxTT3T4v6wYJSeK-3SNNTpbBwUqCblyln4g38peh-FKvhx69G_6Iq8IF2PQ-lItykbUFPUkEtcRq1a9pMv43qF7Ip9nzTI-RjfhFj2WJmgPbIw43FLvyC-60R_vzSfaTIj6dHluDS7B8-_75C1d5_fx1ndr86phKW1xamEy6xocQJ5t8heSpPcKyo1Lbr15TxbRmPNwYLMO0D4BUOzlu1H_tJ6h5ljDoYX8KB8GDpi_Gp2Ds6FRTBP3nUlOqdGOr_m5YatVkV0vHzsxNxXeCe20Va72Miyqu6xcNUL080TOErfRK0pndDRQk_cCq-zvQlJtgluZEnubd4jssS6YwntJMrSb3DCuyRB5Sj4yN4er_Ix9nb4axvH34Ey9g6_SpTjbqDCicjuZm27BtPc1rlMNwrQMu9UYq7rMzwdifhwKNcDf4aj9qa7NPicbYDo7TK4Gb9reh20f4wT43ohb-_R2Uuzn8wPqqBe3_7KavS_IMjFKn_A_4Qud58zXhcYK_QCRnIHmyGvVqcaRu3QxcdhtYufsEEk6xyuUrYE6_tat5KV0MlRj04cjm-AsW09_9v8HYGcreAADAAA=": [
+      "https://commons.libretexts.org/homework"
+    ],
+    "embv1:H4sIAItfsGkA_w3O60uVZwAA8Of-vOfoMZe1s8hGtg1HZq4QlI0daSDVh2iSly6QY2mJJI7KjBVGLYIkTQRxrWSxbB_8UGT6YS1xdp-5FDPDCg0KYjLMczznvO_zPrf2-wt-H4nltC5Wq5eb29KSGraHlJM79GC8OPYS_ikaza2FBxT7KSRfPyRd-jL-SZ5R07QLfS9isW5xxBQGo3wdCMtXrnIjcLPsId-oaXSKN7BTi0tBr6yl016TPaL7ky0kU0edHPktzk-fl1VgVBfREp7LryQPoB_0olgl7aMRPQw7nGqZx2e9J6bFZqT081zg8WuwJBn2MkkzeaIr7CdwE8wiY2jzu-MwmHaOFfKw6gLr6QCapD-Sfn8bN6TaHubSv-x9oca8G9QR_7CVtDCtCvegvXYQ3EvJdSdhuwDgFxsxI_4sq1HGm4DZ_31s7ut90TLo4yK-XRp8230ra4AkB3XIVtiyeD1ocwtgvXuCvjaj8JibkYirJbwAnqBbZZbujldIX38HY4lnTqZdqj6Da_Vbc1M_d88G2vVp08qzTS1sANHgdZnh_O71OWE4w-pjpcmjeFoU60fRMx8UJd_Jncia4zZ17iJv9obF58kBeRoLimUOGAKvwQwgiT71L3jw_x8yIYf8LbKXXgjtlmvUoJlJbUV16KV9CLIxNJnYw3nefjs8f5cOeFUgDRxDk6qT_SWm9IVkluqUz1i7npPnybj_N90pHrNO0OStYi4qZOns50Ujtgjd8Xb5HXBEfG1Xk9HAr_qurcR9piB6LzRGLtk3rF3uwLv0hG1QHzpJeUhvMG1Wi5MQB86jFeSP-CNzCd0IpiaW4Y24UczBL3F3fMpWwzwMwAqnkUeIdpvBU3sAR_gmqOg12EN6ZHboFq0M1PlhW0JX0nKYL5pQTpDDeb-WX0WfOgvzG7XDXvgXNfYOg5v4t8R2kwd7Fafj8aAZYhPOXGCNHFvYEZ1SZTiX5JivEg28RcRlKhqnJ4llV0Kz6j3jqGyZAAMAAA==": [
+      "https://commons.libretexts.org/book/bio-161309"
     ]
+  },
+  "Roots": [
+    {
+      "root": "https://commons.libretexts.org/book/math-19020",
+      "NoImagePromptBlocklist": {
+        "pythagorean_theorem_82cb0124": {
+          "query": "Pythagorean theorem",
+          "count": 1,
+          "reason": "no_images",
+          "last_seen": "2026-02-28T20:25:58.845618Z"
+        }
+      }
+    },
+    {
+      "root": "https://commons.libretexts.org/homework",
+      "NoImagePromptBlocklist": {
+        "connect_parts_to_show_integrated_process_da7f884a": {
+          "query": "Connect parts to show integrated processes — overlay arrows showing protein synthesis -> trafficking -> secretion; energy supplied by mitochondria; cytoskeleton tracks for vesicles",
+          "count": 1,
+          "reason": "no_images",
+          "last_seen": "2026-03-10T11:37:33.555985Z"
+        },
+        "diagram_of_a_eukaryotic_cell_with_labele_5fc0f0e5": {
+          "query": "Diagram of a eukaryotic cell with labeled nucleus, rough ER, smooth ER, Golgi, vesicle, lysosome, mitochondrion, plasma membrane",
+          "count": 1,
+          "reason": "no_images",
+          "last_seen": "2026-03-10T18:06:06.982059Z"
+        },
+        "diagram_of_mitosis_stages_in_a_single_ro_11f943d7": {
+          "query": "Diagram of mitosis stages in a single row: prophase, metaphase, anaphase, telophase, cytokinesis with labeled chromosomes and spindle",
+          "count": 1,
+          "reason": "no_images",
+          "last_seen": "2026-03-10T18:14:35.207524Z"
+        }
+      }
+    },
+    {
+      "root": "https://commons.libretexts.org/book/bio-161309",
+      "NoImagePromptBlocklist": {
+        "diagram_of_a_labeled_eukaryotic_cell_nuc_7680b0ff": {
+          "query": "Diagram of a labeled eukaryotic cell (nucleus, rough ER, smooth ER, Golgi, mitochondrion, lysosome, cytosol, ribosomes, plasma membrane)",
+          "count": 1,
+          "reason": "no_images",
+          "last_seen": "2026-03-10T18:16:31.546915Z"
+        }
+      }
+    },
+    {
+      "root": "https://commons.libretexts.org/book/bio-79686",
+      "NoImagePromptBlocklist": {
+        "microtubule_and_motors_9bfde8a3": {
+          "query": "microtubule and motors",
+          "count": 1,
+          "reason": "no_images",
+          "last_seen": "2026-03-10T21:59:58.803959Z"
+        }
+      }
+    }
+  ],
+  "NoImagePromptBlocklistGlobal": {
+    "diagram_of_a_eukaryotic_cell_showing_nuc_fecd62ff": {
+      "query": "Diagram of a eukaryotic cell showing: nucleus, nuclear pores, rough ER, smooth ER, Golgi (cis and trans), transport vesicles, plasma membrane, lysosome",
+      "count": 1,
+      "reason": "stage1_no_roots",
+      "last_seen": "2026-03-03T19:27:23.756943Z"
+    },
+    "drawn_eukaryotic_cell_diagram_with_label_310c6ab8": {
+      "query": "Drawn eukaryotic cell diagram with labels",
+      "count": 1,
+      "reason": "stage1_no_roots",
+      "last_seen": "2026-03-03T19:27:38.504255Z"
+    },
+    "large_diagram_side_by_side_labeled_eukar_a58bb91f": {
+      "query": "Large diagram: side-by-side labeled eukaryotic cells (one plant cell, one animal cell). Include interactable parts: nucleus, mitochondria, chloroplast, cell membrane, cell wall (plant only), large central vacuole, endoplasmic reticulum, Golgi apparatus, ribosomes, cytoplasm. Show simple arrows indicating interactions (e.g., nucleus -> ribosomes -> ER -> Golgi -> vesicle -> membrane).",
+      "count": 1,
+      "reason": "stage1_no_roots",
+      "last_seen": "2026-03-03T19:39:45.908749Z"
+    },
+    "vesicle_budding_from_er_with_copii_coat__e4935a3c": {
+      "query": "Vesicle budding from ER with COPII coat → Golgi; arrows showing transport along microtubules to plasma membrane or lysosome",
+      "count": 1,
+      "reason": "stage1_no_roots",
+      "last_seen": "2026-03-08T10:47:05.041804Z"
+    },
+    "simple_labeled_eukaryotic_cell_diagram_n_aa524c6f": {
+      "query": "Simple labeled eukaryotic cell diagram (nucleus, RER, Golgi, mitochondria, chloroplasts, lysosome, plasma membrane)",
+      "count": 1,
+      "reason": "stage1_no_roots",
+      "last_seen": "2026-03-08T10:47:46.988054Z"
+    },
+    "ribosome_on_rer_signal_peptide_srp_targe_6f3819d1": {
+      "query": "Ribosome on RER: signal peptide + SRP targeting",
+      "count": 1,
+      "reason": "stage1_no_roots",
+      "last_seen": "2026-03-08T10:48:22.172850Z"
+    },
+    "mitosis_steps_chromosome_condensation_ne_eee501ab": {
+      "query": "Mitosis steps: chromosome condensation, NE breakdown, spindle from centrosomes, segregation, nuclear reformation; mitochondria/chloroplast fission; ER/Golgi fragment and reassemble",
+      "count": 1,
+      "reason": "stage1_no_roots",
+      "last_seen": "2026-03-08T10:48:50.893315Z"
+    },
+    "mitochondrion_cross_section_showing_matr_7d59184e": {
+      "query": "Mitochondrion cross-section showing matrix (TCA), inner membrane (ETC), cristae, ATP synthase, NADH/FADH2 flow",
+      "count": 1,
+      "reason": "stage1_no_roots",
+      "last_seen": "2026-03-08T10:49:32.954810Z"
+    },
+    "simple_sketch_comparing_eukaryotic_cell__af388424": {
+      "query": "Simple sketch comparing: Eukaryotic cell (with nucleus and membrane-bound organelles) vs Prokaryotic cell (no nucleus)",
+      "count": 1,
+      "reason": "stage1_no_roots",
+      "last_seen": "2026-03-08T10:50:51.288296Z"
+    },
+    "diagram_cross_section_of_a_typical_eukar_b3f0e3cc": {
+      "query": "Diagram: cross-section of a typical eukaryotic cell with labeled organelles and factory-mapping labels (reception desk → plasma membrane, offices → nucleus/ER, power plant → mitochondrion/chloroplast, shipping → Golgi/vesicles)",
+      "count": 1,
+      "reason": "stage1_no_roots",
+      "last_seen": "2026-03-08T10:52:21.156875Z"
+    },
+    "eukaryotic_cell_cross_section_with_nucle_46deb307": {
+      "query": "eukaryotic cell cross-section with nucleus, RER, SER, Golgi, lysosome, peroxisome, mitochondrion, chloroplast, vacuole, cytoskeleton, ribosomes",
+      "count": 1,
+      "reason": "stage1_no_roots",
+      "last_seen": "2026-03-08T10:52:43.064218Z"
+    },
+    "phospholipid_bilayer_with_embedded_prote_99b1e67e": {
+      "query": "phospholipid bilayer with embedded proteins, cholesterol, carbohydrates",
+      "count": 1,
+      "reason": "stage1_no_roots",
+      "last_seen": "2026-03-08T14:20:00.547042Z"
+    },
+    "golgi_apparatus_diagram_cis_medial_trans_12e964b7": {
+      "query": "Golgi apparatus diagram (cis, medial, trans cisternae) with arrows: RER -> transport vesicle -> cis Golgi -> medial modifications -> trans Golgi -> secretory/lysosomal vesicles",
+      "count": 1,
+      "reason": "stage1_no_roots",
+      "last_seen": "2026-03-10T11:35:42.763646Z"
+    },
+    "simple_eukaryotic_cell_diagram_with_labe_76ebbaac": {
+      "query": "Simple eukaryotic cell diagram with labeled nucleus, rough ER, smooth ER, Golgi, mitochondrion, lysosome, peroxisome, cytosol, plasma membrane; clean cartoon style, teacher-drawn whiteboard look",
+      "count": 1,
+      "reason": "stage1_no_roots",
+      "last_seen": "2026-03-10T11:36:08.485270Z"
+    },
+    "rough_er_with_ribosomes_vs_smooth_er_no__6d753ea9": {
+      "query": "Rough ER (with ribosomes) vs Smooth ER (no ribosomes) — cartoon of ER near nucleus, ribosomes shown as dots on RER",
+      "count": 1,
+      "reason": "stage1_no_roots",
+      "last_seen": "2026-03-10T11:37:15.298096Z"
+    },
+    "mitochondrion_cross_section_diagram_show_e932199a": {
+      "query": "Mitochondrion cross-section diagram showing matrix, inner membrane (cristae), intermembrane space; label TCA in matrix and ETC on inner membrane, ATP synthase on inner membrane",
+      "count": 1,
+      "reason": "stage1_no_roots",
+      "last_seen": "2026-03-10T11:38:40.226132Z"
+    },
+    "membrane_with_insulin_receptor_extracell_0a290b5d": {
+      "query": "Membrane with insulin receptor; extracellular ligand binding triggers intracellular kinase cascade (arrows) to nucleus",
+      "count": 1,
+      "reason": "stage1_no_roots",
+      "last_seen": "2026-03-10T18:04:58.603974Z"
+    },
+    "golgi_apparatus_stacked_cisternae_cis_tr_d68fb34c": {
+      "query": "Golgi apparatus: stacked cisternae (cis → trans)",
+      "count": 1,
+      "reason": "stage1_no_roots",
+      "last_seen": "2026-03-10T18:15:44.094441Z"
+    },
+    "drawn_nucleus_double_membrane_nuclear_en_4d5988ae": {
+      "query": "Drawn nucleus: double membrane (nuclear envelope) with nuclear pores; interior nucleolus and chromatin",
+      "count": 1,
+      "reason": "stage1_no_roots",
+      "last_seen": "2026-03-10T18:16:20.885208Z"
+    },
+    "endoplasmic_reticulum_rer_and_ser_a4cad15f": {
+      "query": "Endoplasmic reticulum (RER and SER)",
+      "count": 1,
+      "reason": "stage1_no_roots",
+      "last_seen": "2026-03-10T18:17:42.611247Z"
+    },
+    "microtubule_and_ends_with_two_motors_kin_538249d3": {
+      "query": "Microtubule + and - ends with two motors: kinesin (plus-directed) and dynein (minus-directed), plus a cargo particle",
+      "count": 1,
+      "reason": "stage1_no_roots",
+      "last_seen": "2026-03-10T19:13:57.538022Z"
+    },
+    "tests_signal_peptide_sequencing_brefeldi_fbaff7bc": {
+      "query": "Tests: signal peptide sequencing, brefeldin A, pulse-chase, EM",
+      "count": 1,
+      "reason": "stage1_no_roots",
+      "last_seen": "2026-03-10T22:01:02.168002Z"
+    }
   }
-  }
+}

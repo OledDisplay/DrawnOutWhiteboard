@@ -147,6 +147,8 @@ class _VectorViewerScreenState extends State<VectorViewerScreen>
 
   // text timing: when _animIsText = true, we use these rules
   bool _animIsText = false;
+  static const double _defaultTextStrokeSlowdown = 8.0;
+  double _textStrokeSlowdown = _defaultTextStrokeSlowdown;
   double _textStrokeBaseTimeSec = 0.035; // constant per stroke
   double _textStrokeCurveExtraFrac = 0.25; // fraction of base added at max curvature
   double _textLetterPauseSec = 0.0; // currently unused (no waits)
@@ -354,7 +356,8 @@ class _VectorViewerScreenState extends State<VectorViewerScreen>
             prompt: name,
             origin: Offset(x, y),
             letterSize: letterSize,
-          );
+            strokeSlowdown: 1
+                      );
         }
       }
 
@@ -714,7 +717,7 @@ class _VectorViewerScreenState extends State<VectorViewerScreen>
       for (final s in _animStrokes) {
         final curvature = s.curvatureMetricDeg;
         final curvNorm = (curvature / 70.0).clamp(0.0, 1.0);
-        final base = _textStrokeBaseTimeSec;
+        final base = _textStrokeBaseTimeSec * _textStrokeSlowdown;
         final extra = base * _textStrokeCurveExtraFrac * curvNorm;
         s.drawTimeSec = base + extra;
         s.travelTimeBeforeSec = 0.0; // no travel/pause between strokes
@@ -914,11 +917,13 @@ class _VectorViewerScreenState extends State<VectorViewerScreen>
     required String prompt,
     required Offset origin,
     required double letterSize,
+    double? strokeSlowdown,
   }) async {
     await _writeTextPromptLocal(
       prompt: prompt,
       origin: origin,
       letterSize: letterSize,
+      strokeSlowdown: strokeSlowdown,
     );
 
     if (_backendEnabled) {
@@ -945,6 +950,7 @@ class _VectorViewerScreenState extends State<VectorViewerScreen>
     required String prompt,
     required Offset origin,
     required double letterSize,
+    double? strokeSlowdown,
   }) async {
     if (prompt.isEmpty) {
       setState(() {
@@ -956,6 +962,9 @@ class _VectorViewerScreenState extends State<VectorViewerScreen>
     if (letterSize <= 0) {
       letterSize = _textBaseFontSizeRef;
     }
+    final effectiveStrokeSlowdown = (strokeSlowdown ?? _defaultTextStrokeSlowdown)
+        .clamp(0.1, 100.0)
+        .toDouble();
 
     await _ensureFontMetricsLoaded();
     final lineHeight = _fontLineHeightPx ?? _targetResolution * 0.5;
@@ -1046,6 +1055,7 @@ class _VectorViewerScreenState extends State<VectorViewerScreen>
 
     setState(() {
       _animIsText = true;
+      _textStrokeSlowdown = effectiveStrokeSlowdown;
       _animStrokes = newStrokes;
       _drawableStrokes = [..._staticStrokes, ..._animStrokes];
 

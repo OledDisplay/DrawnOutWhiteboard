@@ -72,7 +72,13 @@ _EMBED_MINILM_LOCK = threading.Lock()
 _EMBED_SIGLIP_LOCK = threading.Lock()
 
 
-def configure_hot_models(*, siglip_bundle: Any = None, minilm_bundle: Any = None) -> None:
+def configure_hot_models(
+    *,
+    siglip_bundle: Any = None,
+    minilm_bundle: Any = None,
+    clear_siglip: bool = False,
+    clear_minilm: bool = False,
+) -> None:
     """
     Allows ImagePipeline.py (same process) to inject already-loaded models here,
     so PineconeFetch does NOT reload them.
@@ -85,6 +91,11 @@ def configure_hot_models(*, siglip_bundle: Any = None, minilm_bundle: Any = None
     global _siglip_processor, _siglip_model, _siglip_device
     global _minilm_model, _minilm_tok, _minilm_trf_model, _minilm_device
 
+    if clear_siglip:
+        _siglip_model = None
+        _siglip_processor = None
+        _siglip_device = None
+
     if siglip_bundle is not None:
         try:
             _siglip_model = siglip_bundle.model
@@ -96,6 +107,12 @@ def configure_hot_models(*, siglip_bundle: Any = None, minilm_bundle: Any = None
                 _siglip_device = torch.device(str(dev) if dev else ("cuda" if torch.cuda.is_available() else "cpu"))
         except Exception:
             pass
+
+    if clear_minilm:
+        _minilm_model = None
+        _minilm_tok = None
+        _minilm_trf_model = None
+        _minilm_device = None
 
     if minilm_bundle is not None:
         try:

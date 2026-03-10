@@ -43,7 +43,6 @@ import ImageColours
 import PineconeSave
 import PineconeFetch
 
-import ImageResearcher
 import shared_models
 
 from typing import Any, Dict, List, Optional
@@ -293,7 +292,12 @@ def ensure_hot_models(
         # ---- wire hot SigLIP/MiniLM into PineconeFetch (same process) ----
         try:
             import PineconeFetch
-            PineconeFetch.configure_hot_models(siglip_bundle=_HOT_SIGLIP, minilm_bundle=_HOT_MINILM)
+            PineconeFetch.configure_hot_models(
+                siglip_bundle=_HOT_SIGLIP,
+                minilm_bundle=_HOT_MINILM,
+                clear_siglip=True,
+                clear_minilm=True,
+            )
         except Exception:
             pass
 
@@ -1085,6 +1089,13 @@ def _pipeline_worker(
 
         handle.selected_processed_ids = list(selected_ids_all)
         handle.selected_ids_by_base_context = dict(selected_ids_by_ctx)
+        try:
+            print(
+                "[dbg][selection] contexts_total=%d diagram_contexts=%d selected_total=%d"
+                % (len(selected_ids_by_ctx), len(diagram_set), len(selected_ids_all))
+            )
+        except Exception:
+            pass
 
         try:
             (out_dir / "qwen_selection.json").write_text(
@@ -1209,6 +1220,10 @@ def _pipeline_worker(
             workers.qwen_device = None
         except Exception:
             pass
+        # Drop local refs too so the worker thread does not keep Qwen alive indirectly.
+        qwen_model = None
+        qwen_processor = None
+        qwen_device = None
 
         try:
             import gc
@@ -1235,6 +1250,13 @@ def _pipeline_worker(
                     selected_keep.add(pid)
                     if bc in diagram_set:
                         diagram_keep.add(pid)
+        try:
+            print(
+                "[dbg][clusters] selected_keep=%d diagram_keep=%d"
+                % (len(selected_keep), len(diagram_keep))
+            )
+        except Exception:
+            pass
 
         # Keep Pinecone payload aligned with qwen champions used downstream.
         text_items_all_for_pinecone = [
@@ -1330,15 +1352,45 @@ def _pipeline_worker(
             t for t in text_items
             if str(t.get("processed_id", "") or "").strip() in diagram_keep
         ]
-        diagram_preproc_by_idx = {
-            i: preproc_by_idx[i] for i, t in enumerate(text_items)
-            if str(t.get("processed_id", "") or "").strip() in diagram_keep and i in preproc_by_idx
-        }
-        diagram_vectors_by_idx = {
-            i: vectors_by_idx[i] for i, t in enumerate(text_items)
-            if str(t.get("processed_id", "") or "").strip() in diagram_keep and i in vectors_by_idx
-        }
+        # IMPORTANT:
+        # preproc/vectors are keyed by ImageText "idx" (e.g. 134), NOT list position.
+        diagram_indices: set[int] = set()
+        for t in text_items:
+            pid = str(t.get("processed_id", "") or "").strip()
+            if pid not in diagram_keep:
+                continue
+            try:
+                diagram_indices.add(int(t.get("idx")))
+            except Exception:
+                continue
+
+        diagram_preproc_by_idx = {idx: preproc_by_idx[idx] for idx in diagram_indices if idx in preproc_by_idx}
+        diagram_vectors_by_idx = {idx: vectors_by_idx[idx] for idx in diagram_indices if idx in vectors_by_idx}
+
+        try:
+            print(
+                "[dbg][clusters] diagram_text_items=%d diagram_indices=%d preproc_hits=%d vector_hits=%d"
+                % (
+                    len(diagram_text_items),
+                    len(diagram_indices),
+                    len(diagram_preproc_by_idx),
+                    len(diagram_vectors_by_idx),
+                )
+            )
+        except Exception:
+            pass
         if not diagram_text_items or not diagram_preproc_by_idx or not diagram_vectors_by_idx:
+            try:
+                pre_keys = set(int(k) for k in preproc_by_idx.keys())
+                vec_keys = set(int(k) for k in vectors_by_idx.keys())
+                miss_pre = sorted(diagram_indices - pre_keys)
+                miss_vec = sorted(diagram_indices - vec_keys)
+                print(
+                    "[dbg][clusters] empty_input_details missing_preproc=%s missing_vectors=%s"
+                    % (miss_pre[:10], miss_vec[:10])
+                )
+            except Exception:
+                pass
             handle.colours_done.set()
             print("[done] no diagram items available for clusters -> finished after colours.")
             return
@@ -1555,7 +1607,10 @@ def get_images_background(
     Returns:
       (pinecone_hits, pipeline_handle_or_none, diagram_flags_by_prompt)
 
-    - If misses exist: runs ImageResearcher.research_many(misses) then starts pipeline BG.
+    - Pinecone is checked first.
+    - If misses exist, this function ONLY starts ImagePipeline for those prompts.
+    - The caller is responsible for populating ResearchImages/UniqueImages first
+      (researcher for diagrams, Comfy for non-diagrams, etc.).
     - Caller waits:
         handle.wait_selection()  -> read handle.selected_ids_by_base_context + refined labels
         handle.wait_colours()    -> colours ready (only for diagram prompts)
@@ -1596,9 +1651,13 @@ def get_images_background(
     if not prompt_to_topic:
         return {}, None, {}
 
-    # configure PineconeFetch with SigLIP/MiniLM workers (owned by orchestrator)
     try:
-        PineconeFetch.configure_hot_models(siglip_bundle=workers.siglip_bundle, minilm_bundle=workers.minilm_bundle)
+        PineconeFetch.configure_hot_models(
+            siglip_bundle=workers.siglip_bundle,
+            minilm_bundle=workers.minilm_bundle,
+            clear_siglip=True,
+            clear_minilm=True,
+        )
     except Exception:
         pass
 
@@ -1625,10 +1684,6 @@ def get_images_background(
     if not misses:
         return results, None, diagram_flags
 
-    # research missing prompts (bundled)
-    ImageResearcher.research_many(misses)
-
-    # pipeline only for missing prompts
     diagram_prompts = [p for p in misses.keys() if diagram_flags.get(p, 0) == 1]
 
     h = start_pipeline_background(
@@ -1641,6 +1696,7 @@ def get_images_background(
         diagram_base_contexts=diagram_prompts,
     )
     return results, h, diagram_flags
+
 
 def get_images(
     prompt_or_map: Any,

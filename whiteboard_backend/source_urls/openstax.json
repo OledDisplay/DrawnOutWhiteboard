@@ -9,10 +9,165 @@
     "Geography": ""
   },
   "SubjectUrlsFound": {
-    "embv1:H4sIAOf9omkA_w3O-09NcQAA8O_5fr_nnO-9t27ldrmsYUqrvOY5tn5izLPMrkxhtYWRtuY1IXlMRdiyPDLzynNCkvKW0VZNWL94DDHNlqG7W7dzzvfJ5y_4mDQTQSuOB-k8rV8vNxa6U8gmyViuvVb-Cj_hNdYpY1jYo3phtrZMBEUSTGcTwQbTT4dab8VHchjujZ4my1AHHyOr9TZxFbWK1VJp74z3cA_IslPAJZ4jk_mmQR84DXwxt-wKdD-2Wt5FI2kM-GOccWVGKsBsXBKZqk7i5_CNlu-KRqvhBZqIOkm9LMLxYpRZSS4wr1iO77mv8j60RwyAK1q7UfC3FvebHuc4afMEgAAHYBK6aL6ytuB0vVgEwQ81X3wXDXqqyVTIXcqK3T9hQH5S5_hlst7OVickAGO0MtEju0kj72E2wqEHqhNag894LEhDheA4Ohp-LX3aDp5gxcrr2uZIOsyjRTLb-upKZOvMNtEhCb9LkgGGpvDyLyrFjhcj1ArLT56iJXQ0nSE2qk-4Wj4xV9rN9KQecnLFPhYwb8Iu1Dm4NKrZrDJK-6rC5aASpMopoTpzZl8uWER84IRxpk-pBeys4w4fYpZ9Gc4Xcx0_fAgfqrqB8VYdX_H_n6FvdSI0RiSRH94E_o3e1zJcE7RmMgpiWEmLB1_gFvmYrVGtobyoxSoXpzLD3RxJ1VexOjCdpsk4rQ0fQ7PQaSOHrzRUJB8ulXOphXLIUxjnGu5ZJktg9sBOWS8-0CZQi_z6QbvJuCbynHjbr0_SsbM7arHwoSyZaE5C591Z9h0qGUDb7FZYAZvgEfiYBkSjKHJ3WwVoP9FlkmxB6aFdVrkT4ABMjr4CKeoNzxG7JFENni6jlExTNcYBWGDOxNNJE19oHwE3-Ft7ovyq1g_5ZTxixaoe_HRtsMpIBxmnd_FaWoqrzM-R2_peUei8xIWygeXAHpjp3RJp52VWTXi79lses2f0F6Kg1ctmo24VNMZ6Erwl4h9mUMQnAAMAAA==": [
+    "embv1:H4sIAN3zr2kA_wXBe2iVZRwA4N97_S7Hzsphw1LBkFkKcxVKjBZszSkKMVupmTlMEYrNOWXrBFPyjK6WBK1FQfqHt23KacPLco4UBqkFFeMcZMYazJar6XRn3_lu763nqQy9OPJXiY4CMcV2jvnJMsnxj-poVEFa1R9ebu6o9VVYhDvwzfh26OfHzRZ6Dx9ARk3nu_xXgkm6lYxBlQD9En5XnYg_h1fp1_AA_UBHyC79tCDsnFyq7-vO4CN-CkjRSKHOOudMyEG-xFwiU_Y0r5aX6A2aQRt1KX2PdJEhqE0cQyNRLT1LB3HOadCLeHJ-q-iTPZavdsgZ9BlpppvFTeufGQeV4914AK1Ft-gdvd7y9IUEE4vJGrsxrBWlkDI5fR6qrdteOd0ASaeCzYcXSF3wLD8f_IYzPsBbehaiOMar_RWhx5sKVdFx9Gi-K18jM9hVDEa9f_G36BfdEM8ym3xwf8xtmf0-Ggjq6d96NWsOtse23cZ63CW6yBzSj0Vr5EV02aRRjhyBtqigi1TW78ZL4SQ5rTtFEzwPafcNUcVTbpZXzO7iax85lNyYn5urp4d1qS4Jt7GFah8sZz1mIVkQjlp9Og2d5mf1prcfX-eV8jtYh44TVwxEW3WrAEjxdpF2d_oI7Zl3MTpBNpEyu8UmnMHb8jk1rtrRjUI32e7DTJPzu3jdag4uo6x4Jl7JHpK_go_FkPzP7ZWbYVj3yxr-obwg7-ov0Tvxyw7hGXeQgddo2v0F4lezWO-DkkTampCTbnk0JXoLY-SIGkX36AZTHWNh4FNTZu-NUqpY7xSfRM16GOrQBLPYMnUFnX38CXyV1zgZa5lVn5zwzoT9-BsK0J3Iog60yXsqaoBxd4gdw3XsVPg-rxSTMCJHnZ-ClNkNmXAKkhL5ixIHE5PxnOgL9uBs_Ce9zu6QUjOsimE9hPF0eJocdofUfqbUNedJ-zV2F20LG-Eg7IUWKAlOPuiHF6MV0IavQG9czb-Yt878D7MRSHUAAwAA": [
       "https://openstax.org/details/books/biology-2e"
+    ],
+    "embv1:H4sIAN3zr2kA_wXBeUyOYQAA8Od63-_qjb5kjFhisxkmOVqUYY5YpCQk96aP8Qk1y7HWH46ZY441oxGGCCEm_sjSaHNElHNZxirUdHzv8z6n3y9XHmIThaVOyybw1tht3CZV8L3uUl9YGE0SO0QLzSZVfSdZmFGnGWwUB1Ue34DHwHyV-k_axWYdqXQHRaRYpjJ5rIinZeQKuOzEaD-dT3x6iEjDx-EazHhsyE9m6N5-abQerPJm4SQ8m33GufILSe2tM3KIkGekH-SAWvnJLEd3caVYD3d7s2EheiD3h7_0TIA_ZQvscHeyWrDHbADVCLlV10Rc5V6sH8MEJ4g9YB1ayB-hDMpJAt7rlKgk1CMLdD2KgzNkgxkNP_ksBhjAv_Uwz_3udOF2AJgptvAb4rw_4LSEPpJINlkXyClOf2aph0YPrw5dsL-KwThdB-QvNFAQ2u19yFPsa2ycN06Nx23UpzYY7XBQ_3KWIUr7ML_VFyOP6CwWo4rAW5XSl49u8kZgGXluwsfaJcYW_obU8EZjJd7q-0lHuEZ5n0ZlduY7EToRT9MFYGdkZfdcFIgoBuGad-WpDumWU6UUjyhnf33jyC64RCz3rBXbqUdtswG4HdYiBqDV_6io8UezoC4ii8xfYCw-pxbLs2goizdW27l6BxvSFhcxTz01-jkdogndUzUymVbj6ewkXE4SdWvvKTNaZZJ9vFnbfBEYSZbii0qDoDmlpwRna86CchM9g1aYm13JvCkiQX5w1juNsNXKEIfxAhaFp_Od5miV4LNkLDgGX-gyY6gqwbf4M9jMStk3cD28WFTCA9Yc8hqUoTGdd-hVEA0BOOoJ4Hj1LvReTeJNRraZBepJA4gCJ_RGnYku-ZJpsxI4Sj2Xe9grWeiyrDbVLmehP5DTbfqJ64d6yYv0fZxoFdoVepfXi1qdwSidP3FV4O--HJ4CtsN2OxXaIKBqu_fD66E0Ndz4oI7CHGuaNVD_B2ww3WwAAwAA": [
+      "https://openstax.org/details/books/biology-2e"
+    ],
+    "embv1:H4sIAJb0r2kA_w3R_UuVVxwA8O95eV7uawltvfiDGnktQoIG220rsVFGWYmZybCgZZFRjiElG1ERlTkyGsuSkoheBW1LU1ZbLyK1oltBRW3SHKy1jSSx6733uc95znnOOfX5Fz5lfgZ1sftusViklsvXkYOhrHEe3XJH-WNazpT7FpJ4X6oZzYFJ3lyoIgaJex2qMPK_t0rM5s-CQXnG2g0XZJvqV9foMt6o-2SrtmkHNNmNzhP5iG-RX3p5YiYv8r_RBRNKnMW4JfynGhHKy4Cm_YEiN02r2UmnmVTS6eZXsDlUql6RR6IG98MG_zlO87u4m37Lp7AuIz-wl9-Bh4FQ0Laj5gXnlPmAgpFnRek89cLfoyy-J7rQ_8zskEM4yxM4hn5UnYEP7KSbsE6o0cAuvZbMyw7j7sABlatnYIDr6JpfCJONQ3rMj5N6JyjHISfVZF7EJfojyCflqW4R94b4iJ8RhwH4frti_KkcYVOMHSyfDGYbYA3eaV3C3ehX-VIV-9udN2pQ5zhzwk2ogOX5bapejFkD5Bxy2C69GkX8jOXA59Ecuoie50ncGyq1J6cG0odVi_kctiU3GRudq6SCBnSb3ZzZKNa5zXoszXlZtlXW0azstVeas6yf3fW83UtQgEL4Sx4gU_EdMm3iBnTd_RSVk67A3PBMrfyYqmUP6LAs4PfQ1nRF5LQeRKsy5XYt20It4Xi1KAkT0FXYTI7Iu0Ydv28FRYP-WNerm2KpvcLYjqcZVfQYqlZTVYL_K7g8KqTVmu2Rv_m97DL7wdhhjbD2cBVkzDh-vyD-xs9UnJVCjN5G043f8RJ0RnwBH6pJ7KTMpTUwjhpkCblByka_FzvTP5kASyb-IT8xBr1iflZsY53WYvokMh9q6EveZq-DhHE0U-3kk9uk0-3DV_TX0R6jiPZ5PfCGjvJb0Xq7CS_womqArbAa_RZyxbzs_8ePpU_IYdOS7Tl1qUr4joW8x-i4fJXOzT7E_zhP_Rgdgv5wTP0SroR3-nCNiwADAAA=": [
+      "https://openstax.org/details/books/biology-2e"
+    ],
+    "embv1:H4sIAKT0r2kA_wXBeUzNcQAA8O_1O957vertMdOrzTFHo7GZP5QxY-UV5lgaslnMzRrm2ERtxEKOMR3C1hJyhZIjhNSkmRGGZiMywov3O7-XzyekpqHZYKlzhC1DmeSNkg7vsYHecidDBKwLDIur_Y7WzrL5S6ghDD64cXot86hlepkD_iaylaof79MGqQ3ueHRenIUrDKx8kiHYR3a4q7Q2XMYDYClK5yUsHN1LQqBzQNhtYd-8G1EhfW5X6zF4rccC-QqUb9kUWUM2sbFwC32CL6I3xhnZqG5jn6SHN-j5MYJPctN5MtBolwzgEWInPq187x_MDnpCYKdWDV4o8aybfDM7lG7DkoMFsq_Rw2ymdR8tQAV8IZ-IeshCUibWRx9JLK4oUyPv5JoIAOUwRbaSGbG94rK9Ai-y1vE73DCzwTga0P00Ikbal8RTM4uN4c2kzvkXKQlMRiXmUHRWC4LXGNBiPlnO16CvHcUJ5V83DfKjvJ5luUPVleCLaOMtMBYm4Dq5RISFbbSqmWy1soAt0nehXmWCTNaqNDdQH_lujpKO2iM-OrN8QfMm_OU_aQ5x2_un8aDdJPOYZbwSLW473oxvkENwIzoAy808eJkC8BrE05u4SaTw9_4CqLARGogfBTJgvuhyc5XlVh1JI4Xkq6jsS48pcB56M6MB0iNanTZw3UkVOTSMSiEFuewiqRGJchOKjV6SKaxK6yXTaIdvEG5kFdoafNeOZanWHPmMVMLp7gnfQ_rAmvenVmnxb5OjQb9bzA_SW9oZHPQZ7jzciE46tTwR7cOPo1koHD1KCzwX1A2iRy5Xc_APmKhTM-t3Gu6QAHR57mt5OMOdC7bb5zzbfWFlj1oll6Bs1sw2q6-0E-4x0gkz9Ti6WhTTz94ET5Lo5BniOOyzckmR8Mr9cKSRyhbrw-1Ss8h7Cua49WiYNUmp1uv9jpCiAjdEk-BuEKK3jWT1kJzItoL3MkH8jOnyDrD-A53gfGQAAwAA": [
+      "https://openstax.org/details/books/biology-2e"
+    ],
+    "embv1:H4sIAKQBsGkA_w3O60uVZwAA8Of-vOfoMZe1s8hGtg1HZq4QlI0daSDVh2iSly6QY2mJJI7KjBVGLYIkTQRxrWSxbB_8UGT6YS1xdp-5FDPDCg0KYjLMczznvO_zPrf2-wt-H4nltC5Wq5eb29KSGraHlJM79GC8OPYS_ikaza2FBxT7KSRfPyRd-jL-SZ5R07QLfS9isW5xxBQGo3wdCMtXrnIjcLPsId-oaXSKN7BTi0tBr6yl016TPaL7ky0kU0edHPktzk-fl1VgVBfREp7LryQPoB_0olgl7aMRPQw7nGqZx2e9J6bFZqT081zg8WuwJBn2MkkzeaIr7CdwE8wiY2jzu-MwmHaOFfKw6gLr6QCapD-Sfn8bN6TaHubSv-x9oca8G9QR_7CVtDCtCvegvXYQ3EvJdSdhuwDgFxsxI_4sq1HGm4DZ_31s7ut90TLo4yK-XRp8230ra4AkB3XIVtiyeD1ocwtgvXuCvjaj8JibkYirJbwAnqBbZZbujldIX38HY4lnTqZdqj6Da_Vbc1M_d88G2vVp08qzTS1sANHgdZnh_O71OWE4w-pjpcmjeFoU60fRMx8UJd_Jncia4zZ17iJv9obF58kBeRoLimUOGAKvwQwgiT71L3jw_x8yIYf8LbKXXgjtlmvUoJlJbUV16KV9CLIxNJnYw3nefjs8f5cOeFUgDRxDk6qT_SWm9IVkluqUz1i7npPnybj_N90pHrNO0OStYi4qZOns50Ujtgjd8Xb5HXBEfG1Xk9HAr_qurcR9piB6LzRGLtk3rF3uwLv0hG1QHzpJeUhvMG1Wi5MQB86jFeSP-CNzCd0IpiaW4Y24UczBL3F3fMpWwzwMwAqnkUeIdpvBU3sAR_gmqOg12EN6ZHboFq0M1PlhW0JX0nKYL5pQTpDDeb-WX0WfOgvzG7XDXvgXNfYOg5v4t8R2kwd7Fafj8aAZYhPOXGCNHFvYEZ1SZTiX5JivEg28RcRlKhqnJ4llV0Kz6j3jqGyZAAMAAA==": [
+      "https://openstax.org/details/books/biology-2e"
+    ],
+    "embv1:H4sIACgCsGkA_w3O-09NcQAA8O_5fr_nnO-9t27ldrmsYUqrvOY5tn5izLPMrkxhtYWRtuY1IXlMRdiyPDLzynNCkvKW0VZNWL94DDHNlqG7W7dzzvfJ5y_4mDQTQSuOB-k8rV8vNxa6U8gmyViuvVb-Cj_hNdYpY1jYo3phtrZMBEUSTGcTwQbTT4dab8VHchjujZ4my1AHHyOr9TZxFbWK1VJp74z3cA_IslPAJZ4jk_mmQR84DXwxt-wKdD-2Wt5FI2kM-GOccWVGKsBsXBKZqk7i5_CNlu-KRqvhBZqIOkm9LMLxYpRZSS4wr1iO77mv8j60RwyAK1q7UfC3FvebHuc4afMEgAAHYBK6aL6ytuB0vVgEwQ81X3wXDXqqyVTIXcqK3T9hQH5S5_hlst7OVickAGO0MtEju0kj72E2wqEHqhNag894LEhDheA4Ohp-LX3aDp5gxcrr2uZIOsyjRTLb-upKZOvMNtEhCb9LkgGGpvDyLyrFjhcj1ArLT56iJXQ0nSE2qk-4Wj4xV9rN9KQecnLFPhYwb8Iu1Dm4NKrZrDJK-6rC5aASpMopoTpzZl8uWER84IRxpk-pBeys4w4fYpZ9Gc4Xcx0_fAgfqrqB8VYdX_H_n6FvdSI0RiSRH94E_o3e1zJcE7RmMgpiWEmLB1_gFvmYrVGtobyoxSoXpzLD3RxJ1VexOjCdpsk4rQ0fQ7PQaSOHrzRUJB8ulXOphXLIUxjnGu5ZJktg9sBOWS8-0CZQi_z6QbvJuCbynHjbr0_SsbM7arHwoSyZaE5C591Z9h0qGUDb7FZYAZvgEfiYBkSjKHJ3WwVoP9FlkmxB6aFdVrkT4ABMjr4CKeoNzxG7JFENni6jlExTNcYBWGDOxNNJE19oHwE3-Ft7ovyq1g_5ZTxixaoe_HRtsMpIBxmnd_FaWoqrzM-R2_peUei8xIWygeXAHpjp3RJp52VWTXi79lses2f0F6Kg1ctmo24VNMZ6Erwl4h9mUMQnAAMAAA==": [
+      "https://openstax.org/details/books/biology-2e"
+    ],
+    "embv1:H4sIABaUsGkA_w3PWW9MUQAA4LPddS5Te6MiRkeaSAWJpYpkQiwVKUJSNBpROkiVWttGeRAhxYOlCRK7RvRFxswQ1NJUCZNYg-qDrVXaymg7M3fuveeec_j-wXfB-gnLcAQ1W0_sSWK8XEML5HbkBVeAIU6kmkS9UTW4jj5kg1DbwD0xghc5K8g1_hi1aMxcpbSSiFni9Jm9bi_U8XMWQUvdCXyxtkVk6XPFRPRb7O73sim8270lNbC_0O_4hA-2kGwy1HtAuhIvFW0kk21EC8FzIyRG82ax1-xjnSDIl7hZrEBkwkXu94EdvF-OiC1GnM8QF__O4qq6jdTFC8UH9w3Yhj5aY7Uxw94pQfHeyeelrJEF9A08zzMER93lODexi_SQGiuMv5EuNh3-NPaYtWCUW48OG0M5AH78iO2mGVopc9k5-lTskCs8ndo68VpskMYbXxLdTg--7DTgov-vg2qMvYAVKJtWs0P2VxiVDDU0cIP47a84yAJ8CryE60APzdY_gZHyTSlkVik3VAV3EE5WUsWdpRYNMsHDVJgXamF6UUbsCA-Kl6pINSXa4Hpen-wUJs0zy80fdh55qt5nm1NM-sVaYSuN9qdhbroWxXgmLeeXWAD_tjEDoDcZhI1wreckiqEmcoYNiJd8HKxWPvN8ycMyRDeOI5-y1a11k3K1tjrxAgZEGfqcWp0-ap3iFWwnfAYJ6NB9-jDtqjo_2QdvGwtwu9sFJ8t6erGIuDf18x6_8yOdQQ10z94szRFR0IUeWFmwmNvuweQ-hKyp6hi8FCryKm24GsOv5GN2l-NPRZMyWG-e5XdgC4ihMpHB_dY0vtG-CyniUqmQPACsAKFEjjeMYk5IrWTloJPmxKusfO9cNWBs91ymBWCTPDvxgV4QNfp-bTC1lONophzBJaASzyPHeY5oYYWqJb0V01DKAlJjoh0cshchB0ukMbWM3qVX9TVSpbTdPc19cKt8nRezEjMMbmsd3lz4h_8Dxs7cqwADAAA=": [
+      "https://openstax.org/research"
     ]
   },
+  "NoImagePromptBlocklistGlobal": {
+    "simple_labeled_eukaryotic_cell_diagram_n_aa524c6f": {
+      "query": "Simple labeled eukaryotic cell diagram (nucleus, RER, Golgi, mitochondria, chloroplasts, lysosome, plasma membrane)",
+      "count": 1,
+      "reason": "stage1_no_roots",
+      "last_seen": "2026-03-10T10:36:55.048596Z"
+    },
+    "ribosome_on_rer_signal_peptide_srp_targe_6f3819d1": {
+      "query": "Ribosome on RER: signal peptide + SRP targeting",
+      "count": 1,
+      "reason": "stage1_no_roots",
+      "last_seen": "2026-03-10T10:38:06.043473Z"
+    },
+    "vesicle_budding_from_er_with_copii_coat__e4935a3c": {
+      "query": "Vesicle budding from ER with COPII coat → Golgi; arrows showing transport along microtubules to plasma membrane or lysosome",
+      "count": 1,
+      "reason": "stage1_no_roots",
+      "last_seen": "2026-03-10T10:38:12.792103Z"
+    },
+    "mitochondrion_cross_section_showing_matr_7d59184e": {
+      "query": "Mitochondrion cross-section showing matrix (TCA), inner membrane (ETC), cristae, ATP synthase, NADH/FADH2 flow",
+      "count": 1,
+      "reason": "stage1_no_roots",
+      "last_seen": "2026-03-10T10:38:27.299149Z"
+    },
+    "mitosis_steps_chromosome_condensation_ne_eee501ab": {
+      "query": "Mitosis steps: chromosome condensation, NE breakdown, spindle from centrosomes, segregation, nuclear reformation; mitochondria/chloroplast fission; ER/Golgi fragment and reassemble",
+      "count": 1,
+      "reason": "stage1_no_roots",
+      "last_seen": "2026-03-10T10:39:49.185473Z"
+    },
+    "golgi_apparatus_diagram_cis_medial_trans_12e964b7": {
+      "query": "Golgi apparatus diagram (cis, medial, trans cisternae) with arrows: RER -> transport vesicle -> cis Golgi -> medial modifications -> trans Golgi -> secretory/lysosomal vesicles",
+      "count": 1,
+      "reason": "stage1_no_roots",
+      "last_seen": "2026-03-10T11:35:07.431652Z"
+    },
+    "rough_er_with_ribosomes_vs_smooth_er_no__6d753ea9": {
+      "query": "Rough ER (with ribosomes) vs Smooth ER (no ribosomes) — cartoon of ER near nucleus, ribosomes shown as dots on RER",
+      "count": 1,
+      "reason": "stage1_no_roots",
+      "last_seen": "2026-03-10T11:35:42.843193Z"
+    },
+    "connect_parts_to_show_integrated_process_da7f884a": {
+      "query": "Connect parts to show integrated processes — overlay arrows showing protein synthesis -> trafficking -> secretion; energy supplied by mitochondria; cytoskeleton tracks for vesicles",
+      "count": 1,
+      "reason": "stage1_no_roots",
+      "last_seen": "2026-03-10T11:37:10.389123Z"
+    },
+    "mitochondrion_cross_section_diagram_show_e932199a": {
+      "query": "Mitochondrion cross-section diagram showing matrix, inner membrane (cristae), intermembrane space; label TCA in matrix and ETC on inner membrane, ATP synthase on inner membrane",
+      "count": 1,
+      "reason": "stage1_no_roots",
+      "last_seen": "2026-03-10T11:37:38.015393Z"
+    },
+    "membrane_with_insulin_receptor_extracell_0a290b5d": {
+      "query": "Membrane with insulin receptor; extracellular ligand binding triggers intracellular kinase cascade (arrows) to nucleus",
+      "count": 1,
+      "reason": "stage1_no_roots",
+      "last_seen": "2026-03-10T18:04:46.528564Z"
+    },
+    "diagram_of_a_eukaryotic_cell_with_labele_5fc0f0e5": {
+      "query": "Diagram of a eukaryotic cell with labeled nucleus, rough ER, smooth ER, Golgi, vesicle, lysosome, mitochondrion, plasma membrane",
+      "count": 1,
+      "reason": "stage1_no_roots",
+      "last_seen": "2026-03-10T18:05:42.416867Z"
+    },
+    "golgi_apparatus_stacked_cisternae_cis_tr_d68fb34c": {
+      "query": "Golgi apparatus: stacked cisternae (cis → trans)",
+      "count": 1,
+      "reason": "stage1_no_roots",
+      "last_seen": "2026-03-10T18:14:32.386295Z"
+    },
+    "drawn_nucleus_double_membrane_nuclear_en_4d5988ae": {
+      "query": "Drawn nucleus: double membrane (nuclear envelope) with nuclear pores; interior nucleolus and chromatin",
+      "count": 1,
+      "reason": "stage1_no_roots",
+      "last_seen": "2026-03-10T18:15:22.969092Z"
+    },
+    "endoplasmic_reticulum_rer_and_ser_a4cad15f": {
+      "query": "Endoplasmic reticulum (RER and SER)",
+      "count": 1,
+      "reason": "stage1_no_roots",
+      "last_seen": "2026-03-10T18:15:43.800248Z"
+    },
+    "microtubule_and_ends_with_two_motors_kin_538249d3": {
+      "query": "Microtubule + and - ends with two motors: kinesin (plus-directed) and dynein (minus-directed), plus a cargo particle",
+      "count": 1,
+      "reason": "stage1_no_roots",
+      "last_seen": "2026-03-10T19:13:36.271059Z"
+    }
+  },
   "Roots": [
+    {
+      "root": "https://openstax.org/details/books/biology-2e",
+      "NoImagePromptBlocklist": {
+        "main_diagram_labeled_eukaryotic_cell_cro_941dec1c": {
+          "query": "Main diagram: labeled eukaryotic cell cross-section (large, cartoon/educational style)",
+          "count": 1,
+          "reason": "no_images",
+          "last_seen": "2026-03-10T11:37:02.168145Z"
+        },
+        "diagram_of_a_labeled_eukaryotic_cell_nuc_7680b0ff": {
+          "query": "Diagram of a labeled eukaryotic cell (nucleus, rough ER, smooth ER, Golgi, mitochondrion, lysosome, cytosol, ribosomes, plasma membrane)",
+          "count": 1,
+          "reason": "no_images",
+          "last_seen": "2026-03-10T18:14:19.725132Z"
+        },
+        "diagram_of_a_eukaryotic_cell_with_labele_cc0d73d5": {
+          "query": "Diagram of a eukaryotic cell with labeled organelles",
+          "count": 1,
+          "reason": "no_images",
+          "last_seen": "2026-03-10T19:13:10.504115Z"
+        }
+      }
+    },
+    {
+      "root": "https://openstax.org/team",
+      "NoImagePromptBlocklist": {
+        "diagram_of_mitosis_stages_in_a_single_ro_11f943d7": {
+          "query": "Diagram of mitosis stages in a single row: prophase, metaphase, anaphase, telophase, cytokinesis with labeled chromosomes and spindle",
+          "count": 1,
+          "reason": "no_images",
+          "last_seen": "2026-03-10T18:14:07.370014Z"
+        }
+      }
+    },
+    {
+      "root": "https://openstax.org/research",
+      "NoImagePromptBlocklist": {
+        "tests_signal_peptide_sequencing_brefeldi_fbaff7bc": {
+          "query": "Tests: signal peptide sequencing, brefeldin A, pulse-chase, EM",
+          "count": 1,
+          "reason": "no_images",
+          "last_seen": "2026-03-10T21:59:11.945784Z"
+        }
+      }
+    }
   ]
 }

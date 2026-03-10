@@ -1,10 +1,10 @@
-import os, json, copy, requests, re, hashlib, datetime, time, random, shutil
+﻿import os, json, copy, requests, re, hashlib, datetime, time, random, shutil
 from urllib.parse import urlparse, unquote, urljoin, urlunparse
 from nltk.corpus import wordnet as wn
 from bs4 import BeautifulSoup, NavigableString, Tag
 import tldextract
 from collections import deque
-from typing import Dict, List, Optional, Any, Tuple
+from typing import Dict, List, Optional, Any, Tuple, Callable
 from pathlib import Path
 from PIL import Image
 
@@ -85,6 +85,42 @@ class _EmbeddingService:
             texts = [sentences]
         else:
             texts = list(sentences or [])
+
+        # Fairness guard: split oversized list requests into queue-sized chunks so
+        # one caller cannot monopolize the MiniLM worker.
+        if (not is_single) and len(texts) > self._max_batch_texts:
+            step = max(1, int(self._max_batch_texts))
+            jobs: list[_EmbedJob] = []
+            for i in range(0, len(texts), step):
+                ev = threading.Event()
+                job = _EmbedJob(
+                    texts=texts[i:i + step],
+                    normalize=bool(normalize_embeddings),
+                    is_single=False,
+                    done=ev,
+                )
+                self._q.put(job)
+                jobs.append(job)
+
+            for j in jobs:
+                j.done.wait()
+            for j in jobs:
+                if j.error:
+                    raise j.error
+
+            merged = []
+            for j in jobs:
+                if j.result is None:
+                    continue
+                try:
+                    merged.extend(list(j.result))
+                except Exception:
+                    merged.append(j.result)
+            try:
+                import numpy as np
+                return np.asarray(merged, dtype=np.float32)
+            except Exception:
+                return merged
 
         ev = threading.Event()
         job = _EmbedJob(texts=texts, normalize=bool(normalize_embeddings), is_single=is_single, done=ev)
@@ -349,12 +385,17 @@ _IMAGE_META_LOCK = threading.Lock()
 def _register_image_metadata(path: str, meta: dict) -> None:
     if not path:
         return
+    meta_obj = meta if isinstance(meta, dict) else {}
     with _IMAGE_META_LOCK:
         lst = IMAGE_METADATA.get(path)
         if lst is None:
-            IMAGE_METADATA[path] = [meta]
+            IMAGE_METADATA[path] = [meta_obj]
         else:
-            lst.append(meta)
+            lst.append(meta_obj)
+    try:
+        _persist_ranker_record(path, dict(meta_obj), images_root=IMAGES_PATH)
+    except Exception as e:
+        dbg(f"[RANKER_TMP][WARN] metadata persist failed for {path}: {e}")
 
 _JSON_LOCKS_LOCK = threading.Lock()
 _JSON_LOCKS: dict[str, threading.Lock] = {}
@@ -367,6 +408,125 @@ def _json_lock_for(path: str) -> threading.Lock:
             lk = threading.Lock()
             _JSON_LOCKS[ap] = lk
         return lk
+
+_RANKER_TMP_DIRNAME = "_ranker_tmp"
+
+def _ranker_tmp_dir(images_root: str | None = None) -> str:
+    root = images_root or IMAGES_PATH
+    return os.path.join(root, _RANKER_TMP_DIRNAME)
+
+def _ranker_prompt_manifest_path(images_root: str | None = None) -> str:
+    return os.path.join(_ranker_tmp_dir(images_root), "prompt_manifest.json")
+
+def _ranker_prompt_records_path(prompt_id: str, images_root: str | None = None) -> str:
+    pid = (prompt_id or "").strip() or "unknown"
+    safe = re.sub(r"[^a-zA-Z0-9._-]+", "_", pid)
+    return os.path.join(_ranker_tmp_dir(images_root), "prompts", f"{safe}.jsonl")
+
+def _meta_prompt_id(meta: dict) -> str:
+    pid = str((meta or {}).get("prompt_id") or "").strip()
+    if pid:
+        return pid
+    base_context = str((meta or {}).get("base_context") or "").strip()
+    if base_context:
+        return _prompt_key(base_context)
+    return "unknown"
+
+def _append_jsonl(path: str, row: dict) -> None:
+    lock = _json_lock_for(path)
+    with lock:
+        os.makedirs(os.path.dirname(path), exist_ok=True)
+        with open(path, "a", encoding="utf-8") as f:
+            f.write(json.dumps(_json_safe(row), ensure_ascii=False))
+            f.write("\n")
+
+def _persist_ranker_record(path: str, meta: dict, images_root: str | None = None) -> None:
+    prompt_id = _meta_prompt_id(meta)
+    rec_path = _ranker_prompt_records_path(prompt_id, images_root=images_root)
+    _append_jsonl(
+        rec_path,
+        {
+            "image_path": str(path),
+            "meta": dict(meta or {}),
+        },
+    )
+
+def _remember_prompt_for_ranker(
+    prompt_id: str,
+    prompt_text: str,
+    base_ctx_embedding: Any = None,
+    images_root: str | None = None,
+) -> None:
+    if not prompt_id:
+        return
+    path = _ranker_prompt_manifest_path(images_root=images_root)
+    lock = _json_lock_for(path)
+    with lock:
+        data = _load_json(path) if os.path.exists(path) else {}
+        rows = data.get("prompts") or []
+        if not isinstance(rows, list):
+            rows = []
+
+        replaced = False
+        for i, row in enumerate(rows):
+            if str((row or {}).get("prompt_id") or "") == str(prompt_id):
+                old = row if isinstance(row, dict) else {}
+                rows[i] = {
+                    "prompt_id": str(prompt_id),
+                    "prompt_text": str(prompt_text or old.get("prompt_text") or ""),
+                    "base_ctx_embedding": (
+                        base_ctx_embedding
+                        if base_ctx_embedding is not None
+                        else old.get("base_ctx_embedding")
+                    ),
+                    "updated_at": datetime.datetime.utcnow().isoformat() + "Z",
+                }
+                replaced = True
+                break
+
+        if not replaced:
+            rows.append(
+                {
+                    "prompt_id": str(prompt_id),
+                    "prompt_text": str(prompt_text or ""),
+                    "base_ctx_embedding": base_ctx_embedding,
+                    "created_at": datetime.datetime.utcnow().isoformat() + "Z",
+                }
+            )
+
+        payload = {"version": 1, "prompts": rows}
+        _save_json_atomic(path, payload)
+
+def _load_ranker_metadata_for_prompt(
+    prompt_id: str,
+    images_root: str | None = None,
+) -> Dict[str, List[dict]]:
+    out: Dict[str, List[dict]] = {}
+    rec_path = _ranker_prompt_records_path(prompt_id, images_root=images_root)
+    if not os.path.exists(rec_path):
+        return out
+    try:
+        with open(rec_path, "r", encoding="utf-8") as f:
+            for line in f:
+                s = line.strip()
+                if not s:
+                    continue
+                try:
+                    row = json.loads(s)
+                except Exception:
+                    continue
+                img_path = str((row or {}).get("image_path") or "").strip()
+                meta = (row or {}).get("meta")
+                if not img_path or not isinstance(meta, dict):
+                    continue
+                lst = out.get(img_path)
+                if lst is None:
+                    out[img_path] = [meta]
+                else:
+                    lst.append(meta)
+    except Exception as e:
+        dbg(f"[RANKER_TMP][WARN] failed to read prompt records prompt_id={prompt_id}: {e}")
+    return out
 
 MAX_STAGE2_IMAGES_PER_PROMPT = 10
 MAX_WEB_SOURCES_PER_PROMPT = 2
@@ -403,6 +563,96 @@ DEBUG = True
 def dbg(*args):
     if DEBUG:
         print(*args, flush=True)
+
+def _env_flag_true(name: str, default: bool = False) -> bool:
+    v = os.getenv(name)
+    if v is None:
+        return bool(default)
+    s = str(v).strip().lower()
+    return s in ("1", "true", "yes", "on", "y")
+
+def _hdbg_now() -> float:
+    return time.perf_counter()
+
+def _hdbg_iso_now() -> str:
+    return datetime.datetime.utcnow().isoformat() + "Z"
+
+def _hdbg_make_run(query: str, subj: str, prompt_id: str, enabled: bool | None = None) -> dict:
+    if enabled is None:
+        enabled = _env_flag_true("RESEARCH_HEAVY_DEBUG", default=True)
+    out_dir = (os.getenv("RESEARCH_HEAVY_DEBUG_DIR") or os.path.join(IMAGES_PATH, "_debug")).strip()
+    ts = datetime.datetime.utcnow().strftime("%Y%m%dT%H%M%S")
+    run = {
+        "enabled": bool(enabled),
+        "lock": threading.Lock(),
+        "t0": _hdbg_now(),
+        "path": os.path.join(out_dir, f"{prompt_id}_{ts}.json"),
+        "data": {
+            "version": 1,
+            "created_at": _hdbg_iso_now(),
+            "prompt_id": prompt_id,
+            "query": query,
+            "subject": subj,
+            "timings_sec": {},
+            "orchestration": [],
+            "stage1": [],
+            "stage2": [],
+            "apis": [],
+            "errors": [],
+            "result": {},
+        },
+    }
+    return run
+
+def _hdbg_append(run: Optional[dict], key: str, value: Any) -> None:
+    if not run or not run.get("enabled"):
+        return
+    lk = run.get("lock")
+    data = run.get("data") or {}
+    if not isinstance(data, dict):
+        return
+    with lk:
+        arr = data.get(key)
+        if not isinstance(arr, list):
+            arr = []
+            data[key] = arr
+        arr.append(_json_safe(value))
+
+def _hdbg_set(run: Optional[dict], key: str, value: Any) -> None:
+    if not run or not run.get("enabled"):
+        return
+    lk = run.get("lock")
+    data = run.get("data") or {}
+    if not isinstance(data, dict):
+        return
+    with lk:
+        data[key] = _json_safe(value)
+
+def _hdbg_set_timing(run: Optional[dict], name: str, value_sec: float) -> None:
+    if not run or not run.get("enabled"):
+        return
+    lk = run.get("lock")
+    data = run.get("data") or {}
+    if not isinstance(data, dict):
+        return
+    with lk:
+        t = data.get("timings_sec")
+        if not isinstance(t, dict):
+            t = {}
+            data["timings_sec"] = t
+        t[name] = float(value_sec)
+
+def _hdbg_finish_and_write(run: Optional[dict]) -> Optional[str]:
+    if not run or not run.get("enabled"):
+        return None
+    total = _hdbg_now() - float(run.get("t0") or _hdbg_now())
+    _hdbg_set_timing(run, "research_total", total)
+    data = run.get("data") or {}
+    path = str(run.get("path") or "").strip()
+    if not path:
+        return None
+    _save_json_atomic(path, _json_safe(data))
+    return path
 
 
 
@@ -3760,6 +4010,7 @@ def stage2_drill_search_and_images(
     on_terminal_index_promoted: Optional[Any] = None,
 
     img_url_dedupe_set: Optional[set] = None,
+    stage2_debug: Optional[dict] = None,
 
     *_, **compat_kwargs,
 ) -> list[str]:
@@ -3826,6 +4077,28 @@ def stage2_drill_search_and_images(
         roots_list = list(roots or [])
 
     prompt_id = _prompt_key(base_query or "")
+    s2_t0 = _hdbg_now()
+    s2_events = stage2_debug["events"] if isinstance(stage2_debug, dict) else None
+    s2_images = stage2_debug["images"] if isinstance(stage2_debug, dict) else None
+    if isinstance(stage2_debug, dict):
+        stage2_debug.setdefault("prompt_id", prompt_id)
+        stage2_debug.setdefault("base_query", base_query)
+
+    def _s2_evt(kind: str, **kw):
+        if s2_events is None:
+            return
+        row = {"t_sec": float(_hdbg_now() - s2_t0), "kind": kind}
+        row.update(kw)
+        s2_events.append(_json_safe(row))
+
+    def _s2_img(**kw):
+        if s2_images is None:
+            return
+        row = {"t_sec": float(_hdbg_now() - s2_t0)}
+        row.update(kw)
+        s2_images.append(_json_safe(row))
+
+    _s2_evt("start", roots_count=len(roots_list))
 
     pw = _PlaywrightReuse(headless=True)
     prompt_vec = _norm_vec(prompt_embedding if prompt_embedding is not None else query_embedding)
@@ -3856,16 +4129,39 @@ def stage2_drill_search_and_images(
         missing = [k for k in keys if k and k not in key_emb_cache]
         if not missing:
             return
-        try:
-            embs = encoder.encode(missing, normalize_embeddings=True)
-            for k, e in zip(missing, embs):
-                key_emb_cache[k] = np.asarray(e, dtype=np.float32)
-        except Exception as e:
-            dbg(f"[S2][URL_EMBED][ERR] batch={len(missing)} -> {e}")
+        batch_size = 96
+        for i in range(0, len(missing), batch_size):
+            chunk = missing[i:i + batch_size]
+            try:
+                embs = encoder.encode(chunk, normalize_embeddings=True)
+                for k, e in zip(chunk, embs):
+                    key_emb_cache[k] = np.asarray(e, dtype=np.float32)
+            except Exception as e:
+                dbg(f"[S2][URL_EMBED][ERR] batch={len(chunk)} offset={i} -> {e}")
 
     # NEW: dedupe on clean_url BEFORE scoring so you don't hammer the same page 8 times
     def _score_and_sort_urls(urls: list[str], *, k: int) -> list[str]:
-        scored = _score_urls_with_scores(urls)
+        score_window = max(150, int(k) * 4) if k else 400
+        to_score = list(urls or [])
+        if score_window and len(to_score) > score_window:
+            head = to_score[:score_window]
+            tail_cached = []
+            for u in to_score[score_window:]:
+                kk = _url_key_for_embed(u)
+                if kk and kk in key_emb_cache:
+                    tail_cached.append(u)
+                    if len(tail_cached) >= score_window:
+                        break
+            to_score = head + tail_cached
+            _s2_evt(
+                "pool_score_window",
+                total=len(urls or []),
+                scored=len(to_score),
+                window=int(score_window),
+                k=int(k or 0),
+            )
+
+        scored = _score_urls_with_scores(to_score)
         if not scored:
             return []
         if k and len(scored) > k:
@@ -4158,6 +4454,7 @@ def stage2_drill_search_and_images(
         per_layer_counter: list[int],
         per_layer_cap: int,
     ):
+        _s2_evt("terminal_hits_scan_start", page_url=page_url, hits=len(ranked_hits or []))
         for node, score, details in ranked_hits:
             ctx_score = details.get("ctx_score", score)
             ctx_sem = details.get("ctx_sem_score", details.get("sem_score"))
@@ -4195,6 +4492,13 @@ def stage2_drill_search_and_images(
             })
 
             cands = _extract_img_candidates_near_hit(node, tsoup, page_url, per_hit_cap=per_hit_cap) or []
+            _s2_evt(
+                "terminal_hit_candidates",
+                page_url=page_url,
+                cands=len(cands),
+                ctx_score=ctx_score,
+                ctx_sem=ctx_sem,
+            )
             if not cands:
                 continue
 
@@ -4202,6 +4506,7 @@ def stage2_drill_search_and_images(
                 if _save_one(img_url, tsoup, page_url, hit_meta=hit_meta):
                     per_root_counter[0] += 1
                     per_layer_counter[0] += 1
+                    _s2_img(page_url=page_url, image_url=img_url, reason=why, layer_count=per_layer_counter[0], root_count=per_root_counter[0])
                     dbg(
                         f"[COUNT] layer={per_layer_counter[0]}/{per_layer_cap} "
                         f"root_total={per_root_counter[0]} why={why}"
@@ -4220,16 +4525,20 @@ def stage2_drill_search_and_images(
         total: int,
     ) -> int:
         before = per_root_counter[0]
+        term_t0 = _hdbg_now()
 
+        t_render0 = _hdbg_now()
         tsoup, _, _ = render(
             tu,
             expand=False,
             collect_anchors=terminal_collect_anchors,
             js_mode_override=terminal_js_mode,
         )
+        render_sec = float(_hdbg_now() - t_render0)
 
         if not tsoup:
             dbg(f"[TERM {idx:02d}/{total:02d}]  {_short_url(tu)}  soup=None")
+            _s2_evt("terminal_stop", url=tu, idx=idx, total=total, reason="soup_none", render_sec=render_sec, sec=float(_hdbg_now() - term_t0))
             if fatigue_state is not None and per_root_counter[0] > 0:
                 fatigue_state.note_failure()
                 if fatigue_state.should_bail():
@@ -4237,6 +4546,7 @@ def stage2_drill_search_and_images(
                     raise _NextRoot()
             return 0
 
+        t_hits0 = _hdbg_now()
         ranked = smart_find_hits_in_soup(
             tsoup,
             base_query,
@@ -4248,9 +4558,20 @@ def stage2_drill_search_and_images(
             sem_min_score=0.58,
             return_embedding=True,
         )
+        hits_sec = float(_hdbg_now() - t_hits0)
 
         if not ranked:
             dbg(f"[TERM {idx:02d}/{total:02d}]  {_short_url(tu)}  hits=0")
+            _s2_evt(
+                "terminal_stop",
+                url=tu,
+                idx=idx,
+                total=total,
+                reason="hits_zero",
+                render_sec=render_sec,
+                hits_sec=hits_sec,
+                sec=float(_hdbg_now() - term_t0),
+            )
             if fatigue_state is not None and per_root_counter[0] > 0:
                 fatigue_state.note_failure()
                 if fatigue_state.should_bail():
@@ -4261,19 +4582,24 @@ def stage2_drill_search_and_images(
         dbg(f"[TERM {idx:02d}/{total:02d}] {_short_url(tu)} hits={len(ranked)} imgs={per_root_counter[0]}")
 
         any_cand = False
+        t_probe0 = _hdbg_now()
         for n, _, _ in ranked[:3]:
             if _extract_img_candidates_near_hit(n, tsoup, tu, per_hit_cap=1):
                 any_cand = True
                 break
+        probe_sec = float(_hdbg_now() - t_probe0)
 
         if (not any_cand) and terminal_js_fallback:
+            t_fallback0 = _hdbg_now()
             tsoup, _, _ = render(
                 tu,
                 expand=False,
                 collect_anchors=terminal_collect_anchors,
                 js_mode_override="light",
             )
+            _s2_evt("terminal_js_fallback", url=tu, sec=float(_hdbg_now() - t_fallback0))
 
+        t_save0 = _hdbg_now()
         _save_from_hits_layered(
             tu,
             tsoup,
@@ -4282,8 +4608,23 @@ def stage2_drill_search_and_images(
             per_layer_counter=per_layer_counter,
             per_layer_cap=per_layer_cap,
         )
+        save_sec = float(_hdbg_now() - t_save0)
 
         gained = max(0, per_root_counter[0] - before)
+        _s2_evt(
+            "terminal_done",
+            url=tu,
+            idx=idx,
+            total=total,
+            hits=len(ranked),
+            any_cand=bool(any_cand),
+            gained=gained,
+            render_sec=render_sec,
+            hits_sec=hits_sec,
+            probe_sec=probe_sec,
+            save_sec=save_sec,
+            sec=float(_hdbg_now() - term_t0),
+        )
 
         if fatigue_state is not None:
             if gained > 0:
@@ -4307,6 +4648,7 @@ def stage2_drill_search_and_images(
         collect_anchors: bool = True,
         js_mode_override: str | None = None,
     ):
+        t0 = _hdbg_now()
         if not force_js_light and url in html_cache:
             was_expanded = bool(render_expand_state.get(url, False))
             if expand and not was_expanded:
@@ -4316,6 +4658,14 @@ def stage2_drill_search_and_images(
                 a = anchors_cache.get(url, [])
                 if not collect_anchors:
                     a = []
+                _s2_evt(
+                    "render_cache_hit",
+                    url=url,
+                    expand=bool(expand),
+                    collect_anchors=bool(collect_anchors),
+                    anchors=len(a),
+                    sec=float(_hdbg_now() - t0),
+                )
                 return soup, a, False
 
         if js_mode_override is not None:
@@ -4331,6 +4681,14 @@ def stage2_drill_search_and_images(
             if not force_js_light:
                 html_cache[url] = None
                 anchors_cache[url] = []
+            _s2_evt(
+                "render_empty",
+                url=url,
+                mode=mode,
+                via=via,
+                expand=bool(expand),
+                sec=float(_hdbg_now() - t0),
+            )
             return None, [], False
 
         if collect_anchors:
@@ -4341,11 +4699,22 @@ def stage2_drill_search_and_images(
         html_cache[url] = html
         anchors_cache[url] = full
         dbg(f"[S2] via={via:<16} url={_short_url(url)} anchors={len(full)} expand={expand} force_js_light={force_js_light}")
+        _s2_evt(
+            "render",
+            url=url,
+            mode=mode,
+            via=via,
+            expand=bool(expand),
+            force_js_light=bool(force_js_light),
+            anchors=len(full),
+            sec=float(_hdbg_now() - t0),
+        )
         soup = BeautifulSoup(html, "html.parser") if html else None
         return soup, full, True
 
 
     def _save_one(candidate, tsoup, page_url, hit_meta: Optional[dict] = None) -> bool:
+        t0 = _hdbg_now()
         dest = save_image_candidate(
             session=session,
             candidate=candidate,
@@ -4356,6 +4725,7 @@ def stage2_drill_search_and_images(
             dedupe_set=(img_url_dedupe_set if img_url_dedupe_set is not None else set()),
         )
         if not dest:
+            _s2_evt("save_reject", page_url=page_url, image_url=str(candidate or ""), sec=float(_hdbg_now() - t0))
             return False
 
         meta = {
@@ -4376,6 +4746,13 @@ def stage2_drill_search_and_images(
 
         _register_image_metadata(dest, meta)
         saved_paths.append(dest)
+        _s2_img(
+            page_url=page_url,
+            image_url=meta.get("image_url") or str(candidate or ""),
+            saved_path=dest,
+            confidence=meta.get("ctx_confidence"),
+            sec=float(_hdbg_now() - t0),
+        )
 
         dbg(f"---[SAVE] {os.path.basename(dest)}  conf={meta.get('ctx_confidence','n/a')}  from={_short_url(page_url)}")
 
@@ -4529,9 +4906,15 @@ def stage2_drill_search_and_images(
             terminal_indexes, prompt_vec, min_sim=terminal_index_use_threshold
         )
         if chosen_index:
-           dbg(
+            dbg(
                 f"[IDX][USE] ⭐ sim={chosen_sim:.3f} entry={_short_url(chosen_index.get('entry_url'))} "
                 f"terminals={len(chosen_index.get('terminals') or chosen_index.get('terminal_urls') or [])}"
+            )
+            _s2_evt(
+                "index_chosen",
+                entry=clean_url(chosen_index.get("entry_url") or ""),
+                sim=float(chosen_sim),
+                terminals=len(chosen_index.get("terminals") or chosen_index.get("terminal_urls") or []),
             )
 
 
@@ -4570,11 +4953,15 @@ def stage2_drill_search_and_images(
         layer_depth: int,
     ):
         if not terminal_pool:
+            _s2_evt("pool_skip_empty", layer_depth=layer_depth)
             return 0
 
         k = max(75, int(batch_k))  # enforce >= top 75
+        t_score0 = _hdbg_now()
         batch = _score_and_sort_urls(terminal_pool, k=k)
+        score_sec = float(_hdbg_now() - t_score0)
         if not batch:
+            _s2_evt("pool_skip_unscored", layer_depth=layer_depth, score_sec=score_sec)
             return 0
 
         batch_set = set(batch)
@@ -4584,6 +4971,14 @@ def stage2_drill_search_and_images(
         dbg(
             f"[S2][POOL][D{layer_depth}] drain batch={len(batch)} "
             f"remaining_pool={len(terminal_pool)} per_layer_cap={per_layer_cap}"
+        )
+        _s2_evt(
+            "pool_drain_start",
+            layer_depth=layer_depth,
+            batch_size=len(batch),
+            remaining_pool=len(terminal_pool),
+            per_layer_cap=per_layer_cap,
+            score_sec=score_sec,
         )
 
         per_layer_saved = [0]
@@ -4611,10 +5006,25 @@ def stage2_drill_search_and_images(
                 no_accept_streak[0] += 1
             else:
                 no_accept_streak[0] = 0
+            _s2_evt(
+                "pool_terminal_result",
+                layer_depth=layer_depth,
+                url=tu,
+                gained=gained,
+                no_accept_streak=no_accept_streak[0],
+                root_saved=per_root_saved[0],
+            )
 
             if no_accept_streak[0] >= terminal_no_accept_limit:
                 dbg(f"[S2] TERMINAL STREAK {no_accept_streak[0]} with 0 accepts → NEXT ROOT")
+                _s2_evt("pool_stop", layer_depth=layer_depth, reason="terminal_no_accept_limit", streak=no_accept_streak[0])
                 raise _NextRoot()
+        _s2_evt(
+            "pool_drain_done",
+            layer_depth=layer_depth,
+            layer_saved=int(per_layer_saved[0]),
+            root_saved=per_root_saved[0],
+        )
         return int(per_layer_saved[0])
 
     try:
@@ -4629,6 +5039,8 @@ def stage2_drill_search_and_images(
                     pass
 
             dbg(f"\n[S2] ROOT[{rdx}/{len(roots_list)}] {root}")
+            root_t0 = _hdbg_now()
+            _s2_evt("root_start", idx=rdx, total=len(roots_list), root=root)
 
             per_root_saved = [0]
             no_accept_streak = [0]
@@ -4640,6 +5052,7 @@ def stage2_drill_search_and_images(
             # BFS discovery queue starts with root
             root_clean = clean_url(root)
             if not root_clean:
+                _s2_evt("root_skip", idx=rdx, reason="clean_root_empty", root=root)
                 continue
             queue = deque([root_clean])
             depth_by_url: dict[str, int] = {root_clean: 0}
@@ -4659,6 +5072,13 @@ def stage2_drill_search_and_images(
                 if chosen_index:
                     idx_terms = _extract_index_terminals(chosen_index)
                     dbg(f"[IDX][ROUTE] ▶ entry={_short_url(chosen_index.get('entry_url') or '')} terms={len(idx_terms)}")
+                    _s2_evt(
+                        "index_route_start",
+                        root=root_clean,
+                        entry=clean_url(chosen_index.get("entry_url") or ""),
+                        chosen_sim=float(chosen_sim or 0.0),
+                        term_count=len(idx_terms),
+                    )
 
                     if idx_terms:
                         # push index terminals into pool and drain WITHOUT scoring
@@ -4681,6 +5101,7 @@ def stage2_drill_search_and_images(
                         raise _NextRoot()
                     else:
                         dbg("[IDX][ROUTE] produced 0 images → fallback to BFS normal routing")
+                        _s2_evt("index_route_fallback_bfs", root=root_clean, saved_after_index=per_root_saved[0])
 
            
                 while True:
@@ -4694,10 +5115,12 @@ def stage2_drill_search_and_images(
                                 f"[S2][TOP1_FAIL] pre-image depth cap reached ({PRE_IMAGE_MAX_DEPTH}) "
                                 f"-> stop primary path"
                             )
+                            _s2_evt("queue_stop", root=root_clean, cur=cur, depth=cur_depth, reason="pre_image_depth_cap")
                             queue.clear()
                             break
                         if cur_depth > MAX_EXPAND_DEPTH:
                             dbg(f"[S2] depth cap reached ({MAX_EXPAND_DEPTH}) -> stop root traversal")
+                            _s2_evt("queue_stop", root=root_clean, cur=cur, depth=cur_depth, reason="max_expand_depth")
                             queue.clear()
                             break
 
@@ -4733,6 +5156,17 @@ def stage2_drill_search_and_images(
                                     f"[S2][TOP1_FAIL] streak={no_image_path_streak} cap={cap_now} "
                                     f"depth={active_layer_depth} -> stop primary path"
                                 )
+                                _s2_evt(
+                                    "layer_stop",
+                                    root=root_clean,
+                                    depth=active_layer_depth,
+                                    reason="no_image_streak_cap",
+                                    no_image_path_streak=no_image_path_streak,
+                                    cap_now=cap_now,
+                                    layer_images=layer_images,
+                                    solid_deeper=bool(solid_deeper),
+                                    best_deeper_sim=float(layer_best_deeper_sim),
+                                )
                                 queue.clear()
                                 break
 
@@ -4740,6 +5174,14 @@ def stage2_drill_search_and_images(
                                 dbg(
                                     f"[S2] no solid deeper path at depth={active_layer_depth} "
                                     f"(best_deeper_sim={layer_best_deeper_sim:.3f}) -> stop traversal"
+                                )
+                                _s2_evt(
+                                    "layer_stop",
+                                    root=root_clean,
+                                    depth=active_layer_depth,
+                                    reason="no_solid_deeper_path",
+                                    layer_images=layer_images,
+                                    best_deeper_sim=float(layer_best_deeper_sim),
                                 )
                                 queue.clear()
                                 break
@@ -4756,16 +5198,30 @@ def stage2_drill_search_and_images(
                         expanded_pages.add(cur)
 
                         cur_sim = _url_sim_to_prompt(cur)
+                        _s2_evt("node_visit", root=root_clean, cur=cur, depth=cur_depth, cur_sim=float(cur_sim), queue_len=len(queue))
                         if cur_sim >= STRONG_TOPIC_SIM_THRESHOLD:
                             layer_had_strong_topic = True
 
+                        t_expand0 = _hdbg_now()
                         csoup, canchors, _ = render(cur, expand=True)
+                        expand_sec = float(_hdbg_now() - t_expand0)
                         if not canchors:
+                            _s2_evt("node_no_anchors", root=root_clean, cur=cur, depth=cur_depth, expand_sec=expand_sec)
                             continue
 
                         term_full, deeper_full = partition_anchors(cur, canchors, lambda u: _allowed_ok(root, u))
 
                         dbg(f"[S2] cur={_short_url(cur)} term={len(term_full)} deeper={len(deeper_full)} q={len(queue)}")
+                        _s2_evt(
+                            "node_partition",
+                            root=root_clean,
+                            cur=cur,
+                            depth=cur_depth,
+                            term_count=len(term_full),
+                            deeper_count=len(deeper_full),
+                            queue_len=len(queue),
+                            expand_sec=expand_sec,
+                        )
 
                         idx_terms = _index_terminals_for_entry(term_full, deeper_full)
                         _create_pending_index(cur, idx_terms, entry_signals=_extract_page_signals(csoup))
@@ -4774,10 +5230,12 @@ def stage2_drill_search_and_images(
                         if len(term_full) < 10 and len(deeper_full) > 50:
                             _pool_add(deeper_full)
 
+                        t_route0 = _hdbg_now()
                         deeper_ranked, deeper_leftovers = _pick_non_terminal_routes_for_page(
                             deeper_full,
                             top_k=non_terminal_route_top_k_per_page,
                         )
+                        route_sec = float(_hdbg_now() - t_route0)
 
                         for s, bu in deeper_leftovers:
                             cu = clean_url(bu)
@@ -4803,6 +5261,19 @@ def stage2_drill_search_and_images(
                         dbg(
                             f"[S2][ROUTE] cur={_short_url(cur)} deeper_total={len(deeper_full)} "
                             f"deeper_routed={len(deeper_ranked)} backup_cache={len(backup_cache_scores)}"
+                        )
+                        _s2_evt(
+                            "route_decision",
+                            root=root_clean,
+                            cur=cur,
+                            depth=cur_depth,
+                            deeper_total=len(deeper_full),
+                            deeper_routed=len(deeper_ranked),
+                            leftovers=len(deeper_leftovers),
+                            backup_cache=len(backup_cache_scores),
+                            layer_best_deeper_sim=float(layer_best_deeper_sim),
+                            layer_has_valid_deeper_path=bool(layer_has_valid_deeper_path),
+                            route_sec=route_sec,
                         )
                         for du in deeper_ranked:
                             cu = clean_url(du)
@@ -4862,12 +5333,21 @@ def stage2_drill_search_and_images(
                     layer_best_deeper_sim = 0.0
                     no_image_path_streak = 0
                     dbg(f"[S2][BACKUP] top1 path had 0 images -> drilling backup_cache urls={len(backup_urls)}")
+                    _s2_evt("backup_start", root=root_clean, backup_urls=len(backup_urls))
 
             except _NextRoot:
                 dbg(f"[S2] NEXT ROOT (saved {per_root_saved[0]} for {_short_url(root)})")
+                _s2_evt("next_root", root=root_clean, saved=per_root_saved[0], reason="control_flow_next_root")
 
 
             dbg(f"[S2] ROOT DONE {_short_url(root)} images_for_root={per_root_saved[0]} total_images={len(saved_paths)}")
+            _s2_evt(
+                "root_done",
+                root=root_clean,
+                images_for_root=per_root_saved[0],
+                total_images=len(saved_paths),
+                sec=float(_hdbg_now() - root_t0),
+            )
             if source_name and prompt_id and root and per_root_saved[0] == 0:
                 try:
                     _blocklist_prompt_for_root(
@@ -4882,12 +5362,17 @@ def stage2_drill_search_and_images(
 
     except _StopAll:
         dbg(f"[S2] GLOBAL STOP total_images={len(saved_paths)} (global_cap={global_image_cap})")
+        _s2_evt("global_stop", total_images=len(saved_paths), global_cap=global_image_cap)
 
     finally:
         try:
             pw.close()
         except Exception:
             pass
+        if isinstance(stage2_debug, dict):
+            stage2_debug["duration_sec"] = float(_hdbg_now() - s2_t0)
+            stage2_debug["total_saved"] = len(saved_paths)
+        _s2_evt("done", total_saved=len(saved_paths), duration_sec=float(_hdbg_now() - s2_t0))
 
     return saved_paths
 
@@ -4911,6 +5396,11 @@ def find_valid_roots(
     max_roots: int = 2,
     *,
     verbose: bool = False,               
+    stage1_batch0_only: bool = True,
+    stage1_debug: Optional[dict] = None,
+    stage1_source: str | None = None,
+    shared_roots_provider: Optional[Callable[[], list[str]]] = None,
+    on_accepted_root: Optional[Callable[[str], None]] = None,
 ):
     """
     Stage 1: BFS discovery using MiniLM semantic scoring.
@@ -4918,6 +5408,19 @@ def find_valid_roots(
     """
     import numpy as np
     from collections import deque
+
+    stage1_t0 = _hdbg_now()
+    s1_events = stage1_debug["events"] if isinstance(stage1_debug, dict) else None
+    if isinstance(stage1_debug, dict):
+        stage1_debug.setdefault("source_name", stage1_source)
+        stage1_debug.setdefault("base_url", base_url)
+
+    def _s1_evt(kind: str, **kw):
+        if s1_events is None:
+            return
+        row = {"t_sec": float(_hdbg_now() - stage1_t0), "kind": kind}
+        row.update(kw)
+        s1_events.append(_json_safe(row))
 
     # Keep legacy verbose flag, but Stage 1 debug should be visible in normal runs too.
     log = dbg if verbose else (lambda *_a, **_k: None)
@@ -5095,18 +5598,19 @@ def find_valid_roots(
             for u, k, e in zip(urls, keys, embs):
                 s = _dot(pvec, e)
                 scored.append((s, u, k))
-                _dbg_s1(f"[S1][RERANK][RAW] url={u} embed='{k}' prompt_rank={_fmt_s1(s)}")
 
             scored.sort(key=lambda x: x[0], reverse=True)
             keep = scored[:max_roots] if max_roots else scored
             _dbg_s1(f"[S1][RERANK] keep={len(keep)} of {len(scored)} max_roots={max_roots}")
+            if scored:
+                ts, tu, tk = scored[0]
+                _dbg_s1(f"[S1][RERANK][TOP1] url={tu} embed='{tk}' prompt_rank={_fmt_s1(ts)}")
 
             out2 = {}
             for s, u, k in keep:
                 meta = dict(out[u])
                 meta["prompt_rank_score"] = float(s)
                 meta["prompt_rank_key"] = k
-                _dbg_s1(f"[S1][RERANK][KEEP] url={u} embed='{k}' prompt_rank={_fmt_s1(s)}")
                 out2[u] = meta
             return out2
         except Exception as e:
@@ -5120,6 +5624,7 @@ def find_valid_roots(
     encoder = _EMBED_MODEL
     if encoder is None:
         _dbg_s1("[S1] WARNING MiniLM encoder unavailable -> returning empty roots")
+        _s1_evt("stop", reason="encoder_unavailable")
         return {}
 
     lemma_phrases = _lemma_phrases_from_obj(lemma_obj)
@@ -5133,12 +5638,12 @@ def find_valid_roots(
 
     threshold_prompt_expand = 0.2
     threshold_menu_expand = 0.2
-    threshold_prompt_root = 0.5
+    threshold_prompt_root = 0.42
     S1_FETCH_TIMEOUT_MS = 4500
     MAX_STAGE1_VISITED_PAGES = 500
     TITLE_H1_BOOST_WEIGHT = 0.12
     MAX_TITLE_H1_PROBES_PER_BATCH = 14
-    MAX_BUCKET_INDEX = 2  # only buckets 0,1,2 are explored
+    MAX_BUCKET_INDEX = 0 if stage1_batch0_only else 2  # batch-0 only mode keeps only top-7 lane
     TREE_BONUS_MAX_FETCHES = 30
     TREE_PROMPT_THRESHOLD = 0.56
     TREE_COMBO_THRESHOLD = 0.46
@@ -5150,10 +5655,20 @@ def find_valid_roots(
     _dbg_s1(
         f"[S1] start discovery base={base_clean} host={base_host} "
         f"max_pages={max_pages_stage1} js_mode={js_mode} s1_fetch_mode={s1_fetch_mode} "
-        f"s1_fetch_timeout_ms={S1_FETCH_TIMEOUT_MS} stage1_fetch_cap={stage1_fetch_cap}"
+        f"s1_fetch_timeout_ms={S1_FETCH_TIMEOUT_MS} stage1_fetch_cap={stage1_fetch_cap} "
+        f"batch0_only={bool(stage1_batch0_only)}"
+    )
+    _s1_evt(
+        "start",
+        base=base_clean,
+        host=base_host,
+        max_pages=max_pages_stage1,
+        stage1_fetch_cap=stage1_fetch_cap,
+        batch0_only=bool(stage1_batch0_only),
     )
     if not base_clean:
         _dbg_s1("[S1] invalid base URL")
+        _s1_evt("stop", reason="invalid_base_url")
         return {}
 
     base_origin_key = _origin_key_s1(base_clean)
@@ -5169,10 +5684,20 @@ def find_valid_roots(
         ]
         roots0 = prefer_shortest_by_bucket(roots0)
         _dbg_s1(f"[S1] known_roots mode count={len(roots0)}")
-        for i, r in enumerate(roots0[:100], 1):
-            _dbg_s1(f"[S1][KNOWN {i:02d}] url={r}")
+        _s1_evt("known_roots", count=len(roots0))
+        if roots0:
+            _dbg_s1(f"[S1][KNOWN][TOP1] url={roots0[0]}")
+            _s1_evt("known_roots_top1", url=roots0[0])
+            if callable(on_accepted_root):
+                for r in roots0:
+                    try:
+                        on_accepted_root(r)
+                    except Exception as e:
+                        _dbg_s1(f"[S1][KNOWN][SHARE][WARN] publish failed for {r}: {e}")
         out = {r: {"parent": None, "depth": 0, "prompt": None, "menu": None} for r in roots0}
-        return _prompt_rerank_and_cap(out)
+        out2 = _prompt_rerank_and_cap(out)
+        _s1_evt("done", roots=len(out2), duration_sec=float(_hdbg_now() - stage1_t0))
+        return out2
 
     visited = {base_clean}
     total_fetches = 0
@@ -5185,7 +5710,94 @@ def find_valid_roots(
 
     accepted_root = None
     accepted_root_scores = None
+    accepted_root_from_shared = False
     anchor_context_by_url: Dict[str, str] = {}
+    accepted_root_notified: set[str] = set()
+
+    def _notify_accepted_root(url: str) -> None:
+        cu = _clean_url_s1(url or "")
+        if not cu or cu in accepted_root_notified:
+            return
+        accepted_root_notified.add(cu)
+        if callable(on_accepted_root):
+            try:
+                on_accepted_root(cu)
+            except Exception as e:
+                _dbg_s1(f"[S1][SHARE][WARN] failed to publish accepted root {cu}: {e}")
+
+    def _try_accept_shared_root(
+        *,
+        where: str,
+        layer: Optional[int] = None,
+        batch: Optional[int] = None,
+        parent: Optional[str] = None,
+    ) -> bool:
+        nonlocal accepted_root, accepted_root_scores, accepted_root_from_shared
+
+        if accepted_root or not callable(shared_roots_provider):
+            return bool(accepted_root)
+
+        try:
+            shared_candidates = list(shared_roots_provider() or [])
+        except Exception as e:
+            _dbg_s1(f"[S1][SHARE][WARN] provider error: {e}")
+            return False
+
+        shared_clean = []
+        seen_shared = set()
+        for u in shared_candidates:
+            cu = _clean_url_s1(u)
+            if not cu or cu in seen_shared:
+                continue
+            seen_shared.add(cu)
+            if not same_base_host_s1(cu, base_host):
+                continue
+            if is_blocklisted_url(cu):
+                continue
+            shared_clean.append(cu)
+
+        if not shared_clean:
+            return False
+
+        try:
+            keys = [embed_text_for_url(u, anchor_context_by_url.get(u)) for u in shared_clean]
+            embs = encoder.encode(keys, normalize_embeddings=True)
+            prompt_scores = [_dot(prompt_emb, e) for e in embs]
+            menu_scores = [_dot(menu_emb, e) for e in embs]
+            combos = [0.8 * p + 0.2 * m for p, m in zip(prompt_scores, menu_scores)]
+            rows = list(zip(shared_clean, keys, prompt_scores, menu_scores, combos))
+            hits = [r for r in rows if r[2] >= threshold_prompt_root]
+            if not hits:
+                return False
+
+            best = max(hits, key=lambda x: (x[2], x[4]))
+            accepted_root = best[0]
+            accepted_root_scores = (best[2], best[3], best[4], best[1])
+            accepted_root_from_shared = True
+            _dbg_s1(
+                f"[S1][SHARE] accepted_root={accepted_root} prompt={_fmt_s1(best[2])} "
+                f"menu={_fmt_s1(best[3])} combo={_fmt_s1(best[4])} key='{best[1]}' where={where}"
+            )
+
+            evt = {
+                "url": accepted_root,
+                "prompt": float(best[2]),
+                "menu": float(best[3]),
+                "combo": float(best[4]),
+                "where": where,
+            }
+            if layer is not None:
+                evt["layer"] = int(layer)
+            if batch is not None:
+                evt["batch"] = int(batch)
+            if parent:
+                evt["parent"] = parent
+            _s1_evt("accepted_root_shared", **evt)
+            _notify_accepted_root(accepted_root)
+            return True
+        except Exception as e:
+            _dbg_s1(f"[S1][SHARE][ERR] {type(e).__name__}: {e}")
+            return False
 
     import heapq
 
@@ -5199,7 +5811,11 @@ def find_valid_roots(
     heapq.heappush(work_heap, (0, 1, batch_seq, [base_clean]))  # (batch_rank, layer, seq, urls)
     batch_seq += 1
 
+    _try_accept_shared_root(where="pre_discovery")
+
     while work_heap and total_fetches < stage1_fetch_cap:
+        if accepted_root:
+            break
         batch_rank, layer_idx, _seq, layer = heapq.heappop(work_heap)
         if layer_idx > MAX_STAGE1_LAYERS:
             continue
@@ -5208,30 +5824,59 @@ def find_valid_roots(
                 f"[S1][L{layer_idx}][B{batch_rank + 1}] skip reason=bucket_limit "
                 f"max_bucket_index={MAX_BUCKET_INDEX}"
             )
+            _s1_evt("batch_skip", layer=layer_idx, batch=int(batch_rank + 1), reason="bucket_limit")
             continue
+
+        if _try_accept_shared_root(where="batch_poll", layer=layer_idx, batch=int(batch_rank + 1)):
+            break
 
         _dbg_s1(
             f"[S1][L{layer_idx}][B{batch_rank + 1}] frontier_in={len(layer)} "
             f"pending_batches={len(work_heap)} total_fetches={total_fetches}"
         )
+        _s1_evt(
+            "batch_start",
+            layer=layer_idx,
+            batch=int(batch_rank + 1),
+            frontier_in=len(layer),
+            pending_batches=len(work_heap),
+            total_fetches=total_fetches,
+        )
 
         candidates = []
+        skip_origin = 0
+        skip_block = 0
         for u in layer:
             if not same_base_host_s1(u, base_host):
-                _dbg_s1(f"[S1][L{layer_idx}][B{batch_rank + 1}][SKIP] reason=origin_mismatch url={u}")
+                skip_origin += 1
                 continue
             if is_blocklisted_url(u):
-                _dbg_s1(f"[S1][L{layer_idx}][B{batch_rank + 1}][SKIP] reason=blocklisted url={u}")
+                skip_block += 1
                 continue
             candidates.append(u)
+        if skip_origin or skip_block:
+            _dbg_s1(
+                f"[S1][L{layer_idx}][B{batch_rank + 1}][FILTER] "
+                f"kept={len(candidates)} skip_origin={skip_origin} skip_blocklisted={skip_block}"
+            )
+            _s1_evt(
+                "batch_filter",
+                layer=layer_idx,
+                batch=int(batch_rank + 1),
+                kept=len(candidates),
+                skip_origin=skip_origin,
+                skip_blocklisted=skip_block,
+            )
 
         if not candidates:
             _dbg_s1(f"[S1][L{layer_idx}][B{batch_rank + 1}] no candidates after filtering")
+            _s1_evt("batch_empty", layer=layer_idx, batch=int(batch_rank + 1))
             continue
 
         keys = [embed_text_for_url(u, anchor_context_by_url.get(u)) for u in candidates]
 
         # Note: menu_texts == prompt_texts (menu_key was identical)
+        t_rank0 = _hdbg_now()
         prompt_url_embs = encoder.encode(keys, normalize_embeddings=True)
         menu_url_embs = encoder.encode(keys, normalize_embeddings=True)
 
@@ -5241,16 +5886,37 @@ def find_valid_roots(
 
         scored_rows = []
         for u, k, ps, ms, cs in zip(candidates, keys, prompt_scores, menu_scores, combined):
-            ctx_for_u = anchor_context_by_url.get(u) or ""
-            _dbg_s1(
-                f"[S1][L{layer_idx}][B{batch_rank + 1}][RANK] url={u} embed='{k}' "
-                f"prompt={_fmt_s1(ps)} menu={_fmt_s1(ms)} combo={_fmt_s1(cs)}"
-            )
-            if ctx_for_u:
-                _dbg_s1(f"[S1][L{layer_idx}][B{batch_rank + 1}][CTX] url={u} ctx='{_normalize_anchor_ctx_s1(ctx_for_u)}'")
             scored_rows.append((u, k, ps, ms, cs))
 
         scored_rows.sort(key=lambda x: x[2], reverse=True)
+        _s1_evt(
+            "batch_ranked",
+            layer=layer_idx,
+            batch=int(batch_rank + 1),
+            candidates=len(scored_rows),
+            rank_sec=float(_hdbg_now() - t_rank0),
+        )
+        if scored_rows:
+            top_u, top_k, top_ps, top_ms, top_cs = scored_rows[0]
+            _s1_evt(
+                "batch_top1",
+                layer=layer_idx,
+                batch=int(batch_rank + 1),
+                url=top_u,
+                prompt=float(top_ps),
+                menu=float(top_ms),
+                combo=float(top_cs),
+            )
+            if batch_rank == 0:
+                _dbg_s1(
+                    f"[S1][L{layer_idx}][B{batch_rank + 1}][RANK][TOP1] "
+                    f"url={top_u} embed='{top_k}' prompt={_fmt_s1(top_ps)} menu={_fmt_s1(top_ms)} combo={_fmt_s1(top_cs)}"
+                )
+            else:
+                _dbg_s1(
+                    f"[S1][L{layer_idx}][B{batch_rank + 1}][RANK] "
+                    f"candidates={len(scored_rows)} top_prompt={_fmt_s1(top_ps)}"
+                )
 
         # Early root short-circuit:
         # if we already have a strong hit, inspect only that hit + next N and stop Stage 1 discovery.
@@ -5267,6 +5933,18 @@ def find_valid_roots(
                     f"prompt={_fmt_s1(best[2])} menu={_fmt_s1(best[3])} combo={_fmt_s1(best[4])} key='{best[1]}' "
                     f"inspected={inspect_n}"
                 )
+                _s1_evt(
+                    "accepted_root",
+                    layer=layer_idx,
+                    batch=int(batch_rank + 1),
+                    url=accepted_root,
+                    prompt=float(best[2]),
+                    menu=float(best[3]),
+                    combo=float(best[4]),
+                    inspected=inspect_n,
+                    where="batch_rank",
+                )
+                _notify_accepted_root(accepted_root)
                 break
 
         kept_expand_sorted = [
@@ -5275,17 +5953,25 @@ def find_valid_roots(
         ]
         if not kept_expand_sorted:
             kept_expand_sorted = list(scored_rows)
-            for u, k, ps, ms, _cs in kept_expand_sorted[:MAX_EXPAND_PER_BATCH]:
+            reject_count = min(len(kept_expand_sorted), MAX_EXPAND_PER_BATCH)
+            if reject_count:
+                u, _k, ps, ms, _cs = kept_expand_sorted[0]
                 _dbg_s1(
-                    f"[S1][L{layer_idx}][B{batch_rank + 1}][REJECT] url={u} reason=below_expand_threshold "
-                    f"prompt={_fmt_s1(ps)}<{_fmt_s1(threshold_prompt_expand)} "
+                    f"[S1][L{layer_idx}][B{batch_rank + 1}][EXPAND] "
+                    f"pass=0 reject={reject_count} reason=below_expand_threshold "
+                    f"top_reject_url={u} prompt={_fmt_s1(ps)}<{_fmt_s1(threshold_prompt_expand)} "
                     f"menu={_fmt_s1(ms)}<{_fmt_s1(threshold_menu_expand)}"
                 )
         else:
-            for u, _k, ps, ms, _cs in kept_expand_sorted[:MAX_EXPAND_PER_BATCH]:
+            pass_count = min(len(kept_expand_sorted), MAX_EXPAND_PER_BATCH)
+            u, _k, ps, ms, _cs = kept_expand_sorted[0]
+            _dbg_s1(
+                f"[S1][L{layer_idx}][B{batch_rank + 1}][EXPAND] "
+                f"pass={pass_count} reject=0 top_pass_url={u} prompt={_fmt_s1(ps)} menu={_fmt_s1(ms)}"
+            )
+            if pass_count > 1 and batch_rank == 0:
                 _dbg_s1(
-                    f"[S1][L{layer_idx}][B{batch_rank + 1}][EXPAND_OK] url={u} "
-                    f"prompt={_fmt_s1(ps)} menu={_fmt_s1(ms)}"
+                    f"[S1][L{layer_idx}][B{batch_rank + 1}][EXPAND] additional_passed={pass_count - 1}"
                 )
 
         # Title/H1 probe boost (positive-only): never subtract URL semantic scores.
@@ -5306,10 +5992,15 @@ def find_valid_roots(
                     boost = max(0.0, float(score)) * float(TITLE_H1_BOOST_WEIGHT)
                     if boost > 0:
                         boost_by_url[u] = boost
-                        _dbg_s1(
-                            f"[S1][L{layer_idx}][B{batch_rank + 1}][TITLE_H1_BOOST] "
-                            f"url={u} score={_fmt_s1(score)} boost={_fmt_s1(boost)}"
-                        )
+                if boost_by_url:
+                    bu = max(boost_by_url.items(), key=lambda kv: kv[1])[0]
+                    bscore = boost_by_url.get(bu, 0.0)
+                    _dbg_s1(
+                        f"[S1][L{layer_idx}][B{batch_rank + 1}][TITLE_H1_BOOST] "
+                        f"boosted={len(boost_by_url)} top_url={bu} top_boost={_fmt_s1(bscore)}"
+                    )
+                else:
+                    _dbg_s1(f"[S1][L{layer_idx}][B{batch_rank + 1}][TITLE_H1_BOOST] boosted=0")
             except Exception as e:
                 _dbg_s1(f"[S1][L{layer_idx}][B{batch_rank + 1}][TITLE_H1_BOOST][ERR] {type(e).__name__}: {e}")
 
@@ -5324,9 +6015,12 @@ def find_valid_roots(
 
         next_frontier = []
         for u in expand_from:
+            if _try_accept_shared_root(where="fetch_poll", layer=layer_idx, batch=int(batch_rank + 1), parent=u):
+                break
             if total_fetches >= stage1_fetch_cap:
                 break
             local_anchor_ctx: Dict[str, str] = {}
+            t_fetch0 = _hdbg_now()
             try:
                 _, anchors, _via = js_capable_fetch(
                     u,
@@ -5337,6 +6031,15 @@ def find_valid_roots(
             except Exception:
                 anchors = []
             total_fetches += 1
+            _s1_evt(
+                "fetch",
+                layer=layer_idx,
+                batch=int(batch_rank + 1),
+                url=u,
+                anchors=len(anchors),
+                fetch_sec=float(_hdbg_now() - t_fetch0),
+                total_fetches=total_fetches,
+            )
             _dbg_s1(
                 f"[S1][L{layer_idx}][B{batch_rank + 1}][FETCH] url={u} "
                 f"anchors={len(anchors)} total_fetches={total_fetches}"
@@ -5372,10 +6075,23 @@ def find_valid_roots(
 
                     page_rows = list(zip(page_new_candidates, page_keys, page_p_scores, page_m_scores, page_c_scores))
                     page_rows.sort(key=lambda x: x[2], reverse=True)
-                    for cu, k, ps, ms, cs in page_rows[:40]:
+                    if page_rows:
+                        cu, k, ps, ms, cs = page_rows[0]
+                        _s1_evt(
+                            "page_top1",
+                            layer=layer_idx,
+                            batch=int(batch_rank + 1),
+                            parent=u,
+                            url=cu,
+                            prompt=float(ps),
+                            menu=float(ms),
+                            combo=float(cs),
+                            candidates=len(page_rows),
+                        )
                         _dbg_s1(
-                            f"[S1][L{layer_idx}][B{batch_rank + 1}][PAGE_RANK] url={cu} embed='{k}' "
-                            f"prompt={_fmt_s1(ps)} menu={_fmt_s1(ms)} combo={_fmt_s1(cs)} parent={u}"
+                            f"[S1][L{layer_idx}][B{batch_rank + 1}][PAGE_RANK][TOP1] "
+                            f"url={cu} embed='{k}' prompt={_fmt_s1(ps)} menu={_fmt_s1(ms)} combo={_fmt_s1(cs)} "
+                            f"parent={u} candidates={len(page_rows)}"
                         )
 
                     page_hits = [r for r in page_rows if r[2] >= threshold_prompt_root]
@@ -5388,6 +6104,18 @@ def find_valid_roots(
                             f"prompt={_fmt_s1(best[2])} menu={_fmt_s1(best[3])} combo={_fmt_s1(best[4])} key='{best[1]}' "
                             f"parent={u}"
                         )
+                        _s1_evt(
+                            "accepted_root",
+                            layer=layer_idx,
+                            batch=int(batch_rank + 1),
+                            parent=u,
+                            url=accepted_root,
+                            prompt=float(best[2]),
+                            menu=float(best[3]),
+                            combo=float(best[4]),
+                            where="page_fetch",
+                        )
+                        _notify_accepted_root(accepted_root)
                         break
                 except Exception as e:
                     _dbg_s1(f"[S1][L{layer_idx}][B{batch_rank + 1}][PAGE_RANK][ERR] {type(e).__name__}: {e}")
@@ -5405,8 +6133,9 @@ def find_valid_roots(
             ranked_nf = sorted(zip(nf_scores, next_frontier), key=lambda x: x[0], reverse=True)
             next_frontier = prefer_shortest_by_bucket([u for _, u in ranked_nf])
             _dbg_s1(f"[S1][L{layer_idx}][B{batch_rank + 1}] next_frontier_ranked={len(next_frontier)}")
-            for s, u in ranked_nf[:100]:
-                _dbg_s1(f"[S1][L{layer_idx}][B{batch_rank + 1}][NEXT] url={u} prompt={_fmt_s1(s)}")
+            if ranked_nf:
+                s, u = ranked_nf[0]
+                _dbg_s1(f"[S1][L{layer_idx}][B{batch_rank + 1}][NEXT][TOP1] url={u} prompt={_fmt_s1(s)}")
 
             next_layer = layer_idx + 1
             if next_layer <= MAX_STAGE1_LAYERS:
@@ -5420,6 +6149,15 @@ def find_valid_roots(
                     f"[S1][L{layer_idx}][B{batch_rank + 1}] queued_batches={queued}/{len(batches)} "
                     f"for_L{next_layer} pending_batches={len(work_heap)}"
                 )
+                _s1_evt(
+                    "queued_batches",
+                    layer=layer_idx,
+                    batch=int(batch_rank + 1),
+                    next_layer=next_layer,
+                    queued=queued,
+                    total=len(batches),
+                    pending_batches=len(work_heap),
+                )
             else:
                 _dbg_s1(
                     f"[S1][L{layer_idx}][B{batch_rank + 1}] next_layer={next_layer} exceeds limit={MAX_STAGE1_LAYERS}"
@@ -5429,7 +6167,33 @@ def find_valid_roots(
 
     if not accepted_root:
         _dbg_s1("[S1] no accepted root found")
+        _s1_evt("stop", reason="no_accepted_root", total_fetches=total_fetches)
         return {}
+
+    if accepted_root_from_shared:
+        seed_ps, seed_ms, seed_cs, seed_key = accepted_root_scores
+        out = {
+            accepted_root: {
+                "parent": None,
+                "depth": 0,
+                "prompt": float(seed_ps),
+                "menu": float(seed_ms),
+                "combo": float(seed_cs),
+                "key": seed_key,
+                "anchor_context": anchor_context_by_url.get(accepted_root),
+            }
+        }
+        out2 = _prompt_rerank_and_cap(out)
+        _dbg_s1(f"[S1] shared accept shortcut roots_returned={len(out2)} accepted_root={accepted_root}")
+        _s1_evt(
+            "done",
+            roots=len(out2),
+            accepted_root=accepted_root,
+            accepted_from="shared_pool",
+            total_fetches=total_fetches,
+            duration_sec=float(_hdbg_now() - stage1_t0),
+        )
+        return out2
 
     tree_nodes = {}
     seed_ps, seed_ms, seed_cs, seed_key = accepted_root_scores
@@ -5517,24 +6281,26 @@ def find_valid_roots(
         c_scores = [0.8 * p + 0.2 * m for p, m in zip(p_scores, m_scores)]
 
         pass_high = []
-        for u, k, ps, ms, cs in zip(child_candidates, c_keys, p_scores, m_scores, c_scores):
+        fail_threshold = 0
+        ranked_tree = list(zip(child_candidates, c_keys, p_scores, m_scores, c_scores))
+        ranked_tree.sort(key=lambda x: x[2], reverse=True)
+        if ranked_tree:
+            tu, tk, tps, tms, tcs = ranked_tree[0]
             _dbg_s1(
-                f"[S1][TREE][D{tree_depth}][RANK] url={u} embed='{k}' "
-                f"prompt={_fmt_s1(ps)} menu={_fmt_s1(ms)} combo={_fmt_s1(cs)}"
+                f"[S1][TREE][D{tree_depth}][RANK][TOP1] "
+                f"url={tu} embed='{tk}' prompt={_fmt_s1(tps)} menu={_fmt_s1(tms)} combo={_fmt_s1(tcs)} "
+                f"candidates={len(ranked_tree)}"
             )
+        for u, k, ps, ms, cs in zip(child_candidates, c_keys, p_scores, m_scores, c_scores):
             if ps >= TREE_PROMPT_THRESHOLD and cs >= TREE_COMBO_THRESHOLD:
                 pass_high.append((u, ps, ms, cs, k))
-                _dbg_s1(
-                    f"[S1][TREE][D{tree_depth}][KEEP] url={u} "
-                    f"prompt={_fmt_s1(ps)}>={_fmt_s1(TREE_PROMPT_THRESHOLD)} "
-                    f"combo={_fmt_s1(cs)}>={_fmt_s1(TREE_COMBO_THRESHOLD)}"
-                )
             else:
-                _dbg_s1(
-                    f"[S1][TREE][D{tree_depth}][DROP] url={u} "
-                    f"prompt={_fmt_s1(ps)}<{_fmt_s1(TREE_PROMPT_THRESHOLD)} "
-                    f"or combo={_fmt_s1(cs)}<{_fmt_s1(TREE_COMBO_THRESHOLD)}"
-                )
+                fail_threshold += 1
+        _dbg_s1(
+            f"[S1][TREE][D{tree_depth}][THRESH] "
+            f"pass={len(pass_high)} fail={fail_threshold} "
+            f"prompt_min={_fmt_s1(TREE_PROMPT_THRESHOLD)} combo_min={_fmt_s1(TREE_COMBO_THRESHOLD)}"
+        )
 
         pass_high_sorted = sorted(pass_high, key=lambda x: x[1], reverse=True)
         if not pass_high_sorted:
@@ -5569,12 +6335,22 @@ def find_valid_roots(
 
     _dbg_s1(f"[S1] done roots_returned={len(out)} accepted_root={accepted_root}")
     for i, (u, meta) in enumerate(out.items(), 1):
+        if i > 1:
+            break
         _dbg_s1(
-            f"[S1][OUT {i:02d}] url={u} depth={meta.get('depth')} "
+            f"[S1][OUT TOP1] url={u} depth={meta.get('depth')} "
             f"prompt={_fmt_s1(meta.get('prompt'))} menu={_fmt_s1(meta.get('menu'))} combo={_fmt_s1(meta.get('combo'))}"
         )
 
-    return _prompt_rerank_and_cap(out)
+    out2 = _prompt_rerank_and_cap(out)
+    _s1_evt(
+        "done",
+        roots=len(out2),
+        accepted_root=accepted_root,
+        total_fetches=total_fetches,
+        duration_sec=float(_hdbg_now() - stage1_t0),
+    )
+    return out2
 
 
 # =========================
@@ -5792,6 +6568,121 @@ def _collect_subject_bucket_urls(subject_map: dict, subject_text: str, encoder: 
 
     return out
 
+
+# =========================
+# Runtime Stage1 root share (cross-prompt, same source)
+# =========================
+_RUNTIME_STAGE1_ROOTS_LOCK = threading.Lock()
+_RUNTIME_STAGE1_ROOTS: Dict[str, Dict[str, List[str]]] = {}
+_HOST_GUARD_LOCK = threading.Lock()
+_HOST_GUARD_SEMAPHORES: Dict[str, threading.BoundedSemaphore] = {}
+_HOST_GUARD_NEXT_TS: Dict[str, float] = {}
+
+
+def _runtime_stage1_bucket_key(source_name: str, base_url: str) -> str:
+    name = str(source_name or "").strip().casefold()
+    if name:
+        return name
+    reg = (_registrable_of(base_url or "") or "").strip().casefold()
+    return reg or "_unknown_source_"
+
+
+def _register_runtime_stage1_root(bucket_key: str, subject_key: str, root_url: str) -> None:
+    cu = clean_url(root_url or "")
+    sk = str(subject_key or "").strip()
+    if not bucket_key or not sk or not cu:
+        return
+    with _RUNTIME_STAGE1_ROOTS_LOCK:
+        source_map = _RUNTIME_STAGE1_ROOTS.setdefault(bucket_key, {})
+        rows = source_map.setdefault(sk, [])
+        if cu not in rows:
+            rows.append(cu)
+
+
+def _collect_runtime_stage1_roots(
+    bucket_key: str,
+    subject_text: str,
+    encoder: Optional[Any],
+    min_sim: float = SUBJECT_EMB_MATCH_MIN_SIM,
+) -> list[str]:
+    if not bucket_key:
+        return []
+    with _RUNTIME_STAGE1_ROOTS_LOCK:
+        source_map = dict(_RUNTIME_STAGE1_ROOTS.get(bucket_key) or {})
+    if not source_map:
+        return []
+    rows = _collect_subject_bucket_urls(
+        source_map,
+        subject_text,
+        encoder,
+        min_sim=min_sim,
+    )
+    return [clean_url(u) for u in rows if u]
+
+
+def _host_guard_key(url: str) -> str:
+    reg = (_registrable_of(url or "") or "").strip().casefold()
+    if reg:
+        return reg
+    host = (urlparse(url or "").hostname or "").strip().casefold()
+    return host or "_unknown_host_"
+
+
+def _host_guard_acquire(source_url: str, source_name: str = "") -> Tuple[str, Optional[threading.BoundedSemaphore]]:
+    """
+    Per-host safety rails so high prompt fan-out does not hammer a single site.
+    - RESEARCH_MAX_CONCURRENT_PER_HOST (default: 2)
+    - RESEARCH_HOST_REQUEST_SPACING_MS (default: 250)
+    """
+    host_key = _host_guard_key(source_url)
+    try:
+        max_inflight = max(1, int(os.getenv("RESEARCH_MAX_CONCURRENT_PER_HOST", "2")))
+    except Exception:
+        max_inflight = 2
+
+    sem: Optional[threading.BoundedSemaphore] = None
+    with _HOST_GUARD_LOCK:
+        sem = _HOST_GUARD_SEMAPHORES.get(host_key)
+        if sem is None:
+            sem = threading.BoundedSemaphore(value=max_inflight)
+            _HOST_GUARD_SEMAPHORES[host_key] = sem
+
+    try:
+        sem.acquire()
+    except Exception:
+        sem = None
+
+    try:
+        spacing_ms = max(0, int(os.getenv("RESEARCH_HOST_REQUEST_SPACING_MS", "250")))
+    except Exception:
+        spacing_ms = 250
+
+    if spacing_ms > 0:
+        sleep_for = 0.0
+        now = time.perf_counter()
+        with _HOST_GUARD_LOCK:
+            next_ts = float(_HOST_GUARD_NEXT_TS.get(host_key, 0.0) or 0.0)
+            sleep_for = max(0.0, next_ts - now)
+            scheduled = max(now, next_ts) + (spacing_ms / 1000.0)
+            _HOST_GUARD_NEXT_TS[host_key] = scheduled
+        if sleep_for > 0:
+            dbg(
+                f"[HOST_GUARD] source={source_name or host_key} host={host_key} "
+                f"sleep={sleep_for:.2f}s spacing_ms={spacing_ms}"
+            )
+            time.sleep(sleep_for)
+
+    return host_key, sem
+
+
+def _host_guard_release(host_key: str, sem: Optional[threading.BoundedSemaphore]) -> None:
+    if not sem:
+        return
+    try:
+        sem.release()
+    except Exception:
+        dbg(f"[HOST_GUARD][WARN] release failed host={host_key}")
+
 # =========================
 # HANDLE NON-API
 # =========================
@@ -5799,7 +6690,8 @@ def handle_result_no_api(source: Source, query: str, subj: str, hard_image_cap: 
                          encoder: Optional[Any] = None,
                          query_embedding: Optional[Any] = None,
                          base_ctx_embedding: Optional[Any] = None,
-                         global_image_cap: int | None = None):
+                         global_image_cap: int | None = None,
+                         heavy_debug_run: Optional[dict] = None):
 
     def uniq_keep_order(items):
         seen = set()
@@ -5813,6 +6705,7 @@ def handle_result_no_api(source: Source, query: str, subj: str, hard_image_cap: 
     subject_key, _subject_vec = _subject_key_for_text(subj or "", encoder)
     if not subject_key:
         subject_key = (subj or "").strip()
+    runtime_bucket = _runtime_stage1_bucket_key(source.name, source.url)
 
     if source.name and prompt_id:
         try:
@@ -5851,8 +6744,40 @@ def handle_result_no_api(source: Source, query: str, subj: str, hard_image_cap: 
             )
         )
 
+    runtime_roots = _collect_runtime_stage1_roots(
+        runtime_bucket,
+        subj,
+        encoder,
+        min_sim=SUBJECT_EMB_MATCH_MIN_SIM,
+    )
+    if runtime_roots:
+        dbg(f"[NOAPI] runtime shared roots loaded count={len(runtime_roots)}")
+        valid_endpoints.extend(runtime_roots)
+
     valid_endpoints = uniq_keep_order(clean_url(u) for u in valid_endpoints if u)
     valid_endpoints = [u for u in valid_endpoints if u and not is_blocklisted_url(u)]
+
+    def _shared_roots_provider() -> list[str]:
+        rows = _collect_runtime_stage1_roots(
+            runtime_bucket,
+            subj,
+            encoder,
+            min_sim=SUBJECT_EMB_MATCH_MIN_SIM,
+        )
+        return [u for u in rows if u and not is_blocklisted_url(u)]
+
+    def _on_stage1_root_accepted(root_url: str) -> None:
+        _register_runtime_stage1_root(runtime_bucket, subject_key, root_url)
+
+    stage1_trace = {
+        "source_name": source.name,
+        "base_url": source.url,
+        "subject": subj,
+        "known_endpoints_count": len(valid_endpoints),
+        "events": [],
+        "started_at": _hdbg_iso_now(),
+    }
+    stage1_t0 = _hdbg_now()
 
     if valid_endpoints:
         dbg(f"[NOAPI] using known endpoints count={len(valid_endpoints)} for subj={subj}")
@@ -5863,6 +6788,10 @@ def handle_result_no_api(source: Source, query: str, subj: str, hard_image_cap: 
             js_mode="light",
             prompt_text=query,             # prompt rerank on final roots only
             max_roots=2, 
+            stage1_debug=stage1_trace,
+            stage1_source=source.name,
+            shared_roots_provider=_shared_roots_provider,
+            on_accepted_root=_on_stage1_root_accepted,
         )
         roots = {clean_url(k): v for k, v in (roots or {}).items() if k and not is_blocklisted_url(k)}
     else:
@@ -5873,7 +6802,16 @@ def handle_result_no_api(source: Source, query: str, subj: str, hard_image_cap: 
             js_mode="light",
             prompt_text=query,           
             max_roots=2,                  
+            stage1_debug=stage1_trace,
+            stage1_source=source.name,
+            shared_roots_provider=_shared_roots_provider,
+            on_accepted_root=_on_stage1_root_accepted,
         )
+
+    stage1_trace["duration_sec"] = float(_hdbg_now() - stage1_t0)
+    stage1_trace["roots_count"] = int(len(roots or {}))
+    stage1_trace["roots"] = list((roots or {}).keys())
+    _hdbg_append(heavy_debug_run, "stage1", stage1_trace)
 
     if not roots:
         dbg(f"[NOAPI] no roots after Stage 1 for {source.name}")
@@ -5889,6 +6827,9 @@ def handle_result_no_api(source: Source, query: str, subj: str, hard_image_cap: 
             pass
         source.img_paths = []
         return []
+
+    for r in roots:
+        _register_runtime_stage1_root(runtime_bucket, subject_key, r)
 
     # Persist roots we used (so next run can reuse)
     try:
@@ -5962,6 +6903,16 @@ def handle_result_no_api(source: Source, query: str, subj: str, hard_image_cap: 
 
     img_url_dedupe = set()
 
+    stage2_trace = {
+        "source_name": source.name,
+        "base_query": query,
+        "subject": subj,
+        "roots": list((roots or {}).keys()),
+        "events": [],
+        "images": [],
+        "started_at": _hdbg_iso_now(),
+    }
+
 
     saved = stage2_drill_search_and_images(
         roots=roots,
@@ -5997,8 +6948,11 @@ def handle_result_no_api(source: Source, query: str, subj: str, hard_image_cap: 
 
         terminal_no_accept_limit=20 ,
         global_image_cap=global_image_cap,
+        stage2_debug=stage2_trace,
 
     )
+    stage2_trace["saved_count"] = len(saved or [])
+    _hdbg_append(heavy_debug_run, "stage2", stage2_trace)
 
     source.img_paths = saved
     return saved
@@ -6063,6 +7017,7 @@ def collect_unique_images(
     unique_subdir: str | None = None,
     dbg=print,
     backend: SiglipBackend | None = None,
+    metadata_by_path: Optional[Dict[str, List[dict]]] = None,
 ):
     """
     Walks `images_root`, dedupes images, ranks them with SigLIP + context,
@@ -6087,6 +7042,7 @@ def collect_unique_images(
     sha1_to_canonical: Dict[str, str] = {}
     ahash_to_canonical: Dict[str, str] = {}
     canonical_metas: Dict[str, List[dict]] = {}
+    meta_store = metadata_by_path if metadata_by_path is not None else IMAGE_METADATA
 
     pf_norm = None
     if prompt_filter_text:
@@ -6119,7 +7075,7 @@ def collect_unique_images(
                     if ah is not None:
                         ahash_to_canonical[ah] = canonical
 
-            metas = IMAGE_METADATA.get(path)
+            metas = meta_store.get(path)
 
             if metas and pf_norm is not None:
                 metas = [
@@ -6392,6 +7348,103 @@ def collect_unique_images(
 
 
 
+def collect_unique_images_all_prompts(
+    images_root: str = IMAGES_PATH,
+    dbg=print,
+    backend: SiglipBackend | None = None,
+) -> Dict[str, List[str]]:
+    """
+    Standalone finalizer:
+    - reads temporary ranker payloads written during research()
+    - runs unique collection + SigLIP rerank for ALL prompts found there
+    """
+    out: Dict[str, List[str]] = {}
+    manifest_path = _ranker_prompt_manifest_path(images_root=images_root)
+
+    prompt_rows: List[dict] = []
+    if os.path.exists(manifest_path):
+        data = _load_json(manifest_path) or {}
+        rows = data.get("prompts") or []
+        if isinstance(rows, list):
+            prompt_rows = [r for r in rows if isinstance(r, dict)]
+
+    if not prompt_rows:
+        prompts_dir = os.path.join(_ranker_tmp_dir(images_root=images_root), "prompts")
+        if os.path.isdir(prompts_dir):
+            for fname in sorted(os.listdir(prompts_dir)):
+                if not fname.lower().endswith(".jsonl"):
+                    continue
+                pid = fname[:-6].strip()
+                if pid:
+                    prompt_rows.append({"prompt_id": pid, "prompt_text": "", "base_ctx_embedding": None})
+
+    if not prompt_rows:
+        dbg("[RANKER_TMP] no saved prompts to finalize")
+        return out
+
+    backend = backend or get_siglip_backend()
+    if backend is None:
+        dbg("[RANKER_TMP] SigLIP backend unavailable; finalize skipped")
+        return out
+
+    for row in prompt_rows:
+        pid = str((row or {}).get("prompt_id") or "").strip()
+        if not pid:
+            continue
+
+        metadata_by_path = _load_ranker_metadata_for_prompt(pid, images_root=images_root)
+        prompt_text = str((row or {}).get("prompt_text") or "").strip()
+        base_ctx_embedding = (row or {}).get("base_ctx_embedding")
+
+        if not prompt_text:
+            for metas in metadata_by_path.values():
+                for m in metas:
+                    bc = str((m or {}).get("base_context") or "").strip()
+                    if bc:
+                        prompt_text = bc
+                        break
+                if prompt_text:
+                    break
+
+        if base_ctx_embedding is None:
+            for metas in metadata_by_path.values():
+                for m in metas:
+                    pe = (m or {}).get("prompt_embedding") or (m or {}).get("base_ctx_embedding")
+                    if pe is not None:
+                        base_ctx_embedding = pe
+                        break
+                if base_ctx_embedding is not None:
+                    break
+
+        dbg(f"[RANKER_TMP] finalize prompt_id={pid} prompt='{prompt_text}' files={len(metadata_by_path)}")
+        winners = collect_unique_images(
+            images_root=images_root,
+            base_ctx_embedding=base_ctx_embedding,
+            prompt_text=prompt_text,
+            prompt_filter_text=(prompt_text or None),
+            unique_subdir=pid,
+            dbg=dbg,
+            backend=backend,
+            metadata_by_path=metadata_by_path,
+        )
+        out[prompt_text or pid] = winners
+
+    return out
+
+
+def finalize_research_from_saved_ranker_state(
+    images_root: str = IMAGES_PATH,
+    dbg=print,
+    backend: SiglipBackend | None = None,
+) -> Dict[str, List[str]]:
+    # Backward-compatible alias for external callers.
+    return collect_unique_images_all_prompts(
+        images_root=images_root,
+        dbg=dbg,
+        backend=backend,
+    )
+
+
 def _embed_prompt_to_list(text: str):
     if _EMBED_MODEL is None:
         return None
@@ -6411,6 +7464,42 @@ def _reset_research_images_dir() -> None:
     os.makedirs(IMAGES_PATH, exist_ok=True)
     IMAGE_METADATA.clear()
     dbg(f"[FS] reset folder: {IMAGES_PATH}")
+
+
+def research_many_mechanical(
+    prompt_to_topic: Dict[str, str],
+    max_workers: int = 3,
+    *,
+    reset_images_dir: bool = True,
+) -> None:
+    """
+    Mechanical-only gather phase:
+      - parallel crawl/download/metadata for each prompt
+      - NO SigLIP ranking/finalization
+    """
+    items = [
+        (p, t)
+        for p, t in (prompt_to_topic or {}).items()
+        if isinstance(p, str) and p.strip() and isinstance(t, str) and t.strip()
+    ]
+    if not items:
+        return
+
+    if reset_images_dir:
+        _reset_research_images_dir()
+
+    with ThreadPoolExecutor(max_workers=max(1, int(max_workers))) as ex:
+        futures = []
+        for prompt, topic in items:
+            pid = _prompt_key(prompt)
+            dbg(f"[MECH][SUBMIT] prompt='{prompt}' topic='{topic}' prompt_id={pid}")
+            futures.append(ex.submit(research, prompt, topic, pid, False, None))
+
+        for fut in as_completed(futures):
+            try:
+                fut.result()
+            except Exception as e:
+                dbg(f"[MECH][ERR] worker failed: {e}")
 
 
 def research_many(prompt_to_topic: Dict[str, str], max_workers: int = 3) -> Dict[str, List[str]]:
@@ -6443,25 +7532,15 @@ def research_many(prompt_to_topic: Dict[str, str], max_workers: int = 3) -> Dict
             except Exception as e:
                 dbg(f"[MULTI][ERR] worker failed: {e}")
 
-    # Phase B: serial rank, SigLIP loaded once
+    # Phase B: serial rank from saved ranker state, SigLIP loaded once
     backend = SiglipBackend()
-
-    for prompt, topic in items:
-        pid = _prompt_key(prompt)
-        dbg(f"[MULTI][RANK] prompt='{prompt}' prompt_id={pid}")
-
-        base_ctx_embedding = _embed_prompt_to_list(prompt)
-
-        winners = collect_unique_images(
-            IMAGES_PATH,
-            base_ctx_embedding=base_ctx_embedding,
-            prompt_text=prompt,
-            prompt_filter_text=prompt,
-            unique_subdir=pid,
-            dbg=dbg,
-            backend=backend,
-        )
-        out[prompt] = winners
+    ranked_all = collect_unique_images_all_prompts(
+        images_root=IMAGES_PATH,
+        dbg=dbg,
+        backend=backend,
+    )
+    for prompt, _topic in items:
+        out[prompt] = ranked_all.get(prompt, [])
 
     return out
 
@@ -6478,9 +7557,25 @@ def research(
     rank_images: bool = True,
     siglip_backend: SiglipBackend | None = None,
     api_fallback_only: bool = True,   # NEW: APIs run only if DDG + sources yield 0
+    heavy_debug: bool | None = None,
 ):
     prompt_id = prompt_id or _prompt_key(query)
+    heavy_debug_run = _hdbg_make_run(query=query, subj=subj, prompt_id=prompt_id, enabled=heavy_debug)
+    _hdbg_append(
+        heavy_debug_run,
+        "orchestration",
+        {"kind": "start", "ts": _hdbg_iso_now(), "rank_images": bool(rank_images), "api_fallback_only": bool(api_fallback_only)},
+    )
     base_ctx_embedding = _embed_prompt_to_list(query)
+    try:
+        _remember_prompt_for_ranker(
+            prompt_id=prompt_id,
+            prompt_text=query,
+            base_ctx_embedding=base_ctx_embedding,
+            images_root=IMAGES_PATH,
+        )
+    except Exception as e:
+        dbg(f"[RANKER_TMP][WARN] prompt manifest save failed prompt_id={prompt_id}: {e}")
 
     encoder = _EMBED_MODEL
     query_embedding = None
@@ -6509,8 +7604,10 @@ def research(
     # ---- 1) DDG in background (so Stage2 overlaps DDG wait times) ----
     ddg_done = threading.Event()
     ddg_err = {"exc": None}
+    ddg_t = {"start": None, "end": None}
 
     def _run_ddg():
+        ddg_t["start"] = _hdbg_now()
         try:
             ddg_cc_image_harvest(
                 query=query,
@@ -6522,7 +7619,9 @@ def research(
             )
         except Exception as e:
             ddg_err["exc"] = e
+            _hdbg_append(heavy_debug_run, "errors", {"kind": "ddg", "error": str(e)})
         finally:
+            ddg_t["end"] = _hdbg_now()
             ddg_done.set()
 
     ddg_thr = threading.Thread(target=_run_ddg, name=f"DDG-{prompt_id}", daemon=True)
@@ -6544,14 +7643,30 @@ def research(
             break
 
         dbg(f"opened source {src.name}, has no api, starting process.. (remaining_stage2_cap={remaining})")
-
-        saved = handle_result_no_api(
-            src, query, subj,
-            hard_image_cap=5,
-            encoder=encoder,
-            query_embedding=query_embedding,
-            base_ctx_embedding=base_ctx_embedding,
-            global_image_cap=remaining,
+        src_t0 = _hdbg_now()
+        host_key, host_sem = _host_guard_acquire(src.url, src.name)
+        try:
+            saved = handle_result_no_api(
+                src, query, subj,
+                hard_image_cap=5,
+                encoder=encoder,
+                query_embedding=query_embedding,
+                base_ctx_embedding=base_ctx_embedding,
+                global_image_cap=remaining,
+                heavy_debug_run=heavy_debug_run,
+            )
+        finally:
+            _host_guard_release(host_key, host_sem)
+        _hdbg_append(
+            heavy_debug_run,
+            "orchestration",
+            {
+                "kind": "web_source",
+                "source": src.name,
+                "saved_count": len(saved or []),
+                "remaining_cap_before": remaining,
+                "sec": float(_hdbg_now() - src_t0),
+            },
         )
 
         stage2_total += len(saved or [])
@@ -6559,6 +7674,10 @@ def research(
 
     # ---- wait for DDG to finish before deciding API fallback ----
     ddg_done.wait()
+    if ddg_t["start"] is not None:
+        ddg_sec = float((ddg_t["end"] or _hdbg_now()) - ddg_t["start"])
+        _hdbg_set_timing(heavy_debug_run, "ddg", ddg_sec)
+        _hdbg_append(heavy_debug_run, "orchestration", {"kind": "ddg_done", "sec": ddg_sec, "error": str(ddg_err["exc"]) if ddg_err["exc"] else None})
     if ddg_err["exc"] is not None:
         dbg(f"[DDG][ERR] {ddg_err['exc']}")
 
@@ -6575,10 +7694,15 @@ def research(
         dbg("[API] running APIs (fallback condition met)")
         for src in api_sources:
             dbg(f"opened source {src.name} as api (parser='{src.name}'), sending request..")
+            api_row = {"source": src.name, "started_at": _hdbg_iso_now()}
+            t_api0 = _hdbg_now()
 
             parser = PARSERS.get((src.name or "").lower())
             if not parser:
                 dbg(f"[API][{src.name}] no parser registered; skipping")
+                api_row["status"] = "no_parser"
+                api_row["duration_sec"] = float(_hdbg_now() - t_api0)
+                _hdbg_append(heavy_debug_run, "apis", api_row)
                 continue
 
             settings = {
@@ -6587,13 +7711,24 @@ def research(
                 "pagination_field": 1,
             }
 
-            status, data, built = send_request(src, settings)
+            host_key, host_sem = _host_guard_acquire(src.url, src.name)
+            try:
+                t_req0 = _hdbg_now()
+                status, data, built = send_request(src, settings)
+            finally:
+                _host_guard_release(host_key, host_sem)
+            api_row["request_sec"] = float(_hdbg_now() - t_req0)
+            api_row["http_status"] = status
             if not status or int(status) != 200:
                 dbg(f"[API][{src.name}] failed status={status}")
                 src.img_paths = []
+                api_row["status"] = "request_failed"
+                api_row["duration_sec"] = float(_hdbg_now() - t_api0)
+                _hdbg_append(heavy_debug_run, "apis", api_row)
                 continue
 
             try:
+                t_parse0 = _hdbg_now()
                 parser(
                     src,
                     data,
@@ -6603,11 +7738,20 @@ def research(
                     query_embedding=query_embedding,
                     base_ctx_embedding=base_ctx_embedding,
                 )
+                api_row["parse_sec"] = float(_hdbg_now() - t_parse0)
+                api_row["saved_count"] = len(getattr(src, "img_paths", None) or [])
+                api_row["status"] = "ok"
             except Exception as e:
                 dbg(f"[API][{src.name}] parse failed: {e}")
                 src.img_paths = []
+                api_row["status"] = "parse_failed"
+                api_row["error"] = str(e)
+                _hdbg_append(heavy_debug_run, "errors", {"kind": "api_parse", "source": src.name, "error": str(e)})
+            api_row["duration_sec"] = float(_hdbg_now() - t_api0)
+            _hdbg_append(heavy_debug_run, "apis", api_row)
     else:
         dbg("[API] skipped (non-api research produced images)")
+        _hdbg_append(heavy_debug_run, "orchestration", {"kind": "api_skipped", "reason": "non_api_research_produced_images"})
 
     # ---- 4) Ensure per-source images get prompt metadata (unchanged behavior) ----
     for src in sources:
@@ -6628,6 +7772,10 @@ def research(
 
     if not rank_images:
         dbg("[RANK] skipped (rank_images=False)")
+        _hdbg_set(heavy_debug_run, "result", {"ranked": False, "unique_images": []})
+        debug_path = _hdbg_finish_and_write(heavy_debug_run)
+        if debug_path:
+            dbg(f"[HDBG] wrote {debug_path}")
         return []
 
     unique = collect_unique_images(
@@ -6641,6 +7789,10 @@ def research(
     )
 
     dbg(f"Unique images:{unique}")
+    _hdbg_set(heavy_debug_run, "result", {"ranked": True, "unique_images": list(unique or [])})
+    debug_path = _hdbg_finish_and_write(heavy_debug_run)
+    if debug_path:
+        dbg(f"[HDBG] wrote {debug_path}")
     return unique
 
 
@@ -6658,11 +7810,16 @@ class _SharedMiniLMEncoder:
         if not texts:
             return np.array([], dtype=np.float32) if is_single else []
 
-        vecs = minilm_embed_texts(texts)
-        if not vecs:
-            raise RuntimeError("shared_models MiniLM worker unavailable")
+        chunk_size = 96
+        chunks = []
+        for i in range(0, len(texts), chunk_size):
+            part = texts[i:i + chunk_size]
+            vecs = minilm_embed_texts(part)
+            if not vecs:
+                raise RuntimeError("shared_models MiniLM worker unavailable")
+            chunks.extend(vecs)
 
-        arr = np.asarray(vecs, dtype=np.float32)
+        arr = np.asarray(chunks, dtype=np.float32)
         if is_single:
             return arr[0]
         return arr
@@ -6710,8 +7867,8 @@ if __name__ == "__main__":
     # This wires model workers from shared_models without modifying research() internals.
     from shared_models import init_siglip_minilm_hot
 
-    TEST_QUERY = "Eukaryotic cell"
-    TEST_SUBJECT = "Cell Biology"
+    TEST_QUERY = "Diagram of a eukaryotic cell with labeled nucleus, rough ER, smooth ER, Golgi, vesicle, lysosome, mitochondrion, plasma membrane"
+    TEST_SUBJECT = "Cell Biology - Organelle Overview"
 
     dbg("[MAIN] initializing shared model workers (SigLIP + MiniLM)")
     init_siglip_minilm_hot(
