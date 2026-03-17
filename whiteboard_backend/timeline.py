@@ -204,12 +204,6 @@ def _is_diagram_mode(v: Any) -> bool:
     return _normalize_diagram_mode(v) > 0
 
 
-def _merge_diagram_modes(a: Any, b: Any) -> int:
-    da = _normalize_diagram_mode(a)
-    db = _normalize_diagram_mode(b)
-    return max(da, db)
-
-
 # ----------------------------
 # Prompts
 # ----------------------------
@@ -1022,6 +1016,35 @@ class WhiteboardState:
                 self.objects.pop(target, None)
             return
 
+        if t in ("erase_by_id", "delete_by_id", "delete_image_by_id"):
+            image_id = str(
+                action.get("image_id", "")
+                or action.get("processed_id", "")
+                or action.get("target_id", "")
+                or action.get("id", "")
+                or action.get("target", "")
+                or ""
+            ).strip()
+            if not image_id:
+                return
+            image_id_l = image_id.lower()
+            to_delete: List[str] = []
+            for name, obj in self.objects.items():
+                meta = obj.meta if isinstance(obj.meta, dict) else {}
+                obj_id = str(
+                    meta.get("image_id", "")
+                    or meta.get("processed_id", "")
+                    or meta.get("id", "")
+                    or ""
+                ).strip()
+                if obj_id and obj_id.lower() == image_id_l:
+                    to_delete.append(name)
+            if not to_delete and image_id in self.objects:
+                to_delete.append(image_id)
+            for nm in to_delete:
+                self.objects.pop(nm, None)
+            return
+
         if t == "draw":
             target = str(action.get("target", "") or "").strip()
             if not target:
@@ -1030,6 +1053,10 @@ class WhiteboardState:
             y = float(action.get("y", 0.0) or 0.0)
             w, h = image_size_lookup.get(target, (400, 300))
             meta = dict(action.get("meta", {}) or {})
+            pid = str(action.get("processed_id", "") or action.get("image_id", "") or "").strip()
+            if pid:
+                meta["processed_id"] = pid
+                meta.setdefault("image_id", pid)
             self.objects[target] = BoardObject(
                 name=target,
                 kind="image",
@@ -1122,6 +1149,12 @@ class WhiteboardState:
             m = re.match(r"^erase\s*\[(.+?)\]\s*$", s, re.I)
             if m:
                 out.append({"type": "erase", "target": m.group(1).strip()})
+                continue
+
+            # erase id [processed_12] / delete id [processed_12]
+            m = re.match(r"^(?:erase|delete)\s*id\s*\[(.+?)\]\s*$", s, re.I)
+            if m:
+                out.append({"type": "erase_by_id", "image_id": m.group(1).strip()})
                 continue
 
             # shift whiteboard horizontally / vertically [ amount ]
@@ -1626,6 +1659,176 @@ def split_entries_by_deletion_silence(entries: List[Dict[str, Any]]) -> List[Dic
     return out
 
 
+def _entry_word_span(entry: Dict[str, Any]) -> Tuple[int, int]:
+    s = int(entry.get("range_start", 0) or 0)
+    e = int(entry.get("range_end", s) or s)
+    if e < s:
+        e = s
+    return int(s), int(e)
+
+
+def _diagram_identity_key_for_entry(entry: Dict[str, Any]) -> str:
+    pid = str(entry.get("processed_id", "") or "").strip()
+    if pid:
+        return f"pid:{pid.lower()}"
+    query = str(entry.get("query", "") or "").strip()
+    if query:
+        return f"query:{query.lower()}"
+    content = str(entry.get("content", "") or "").strip()
+    if content:
+        return f"content:{content.lower()}"
+    name = str(entry.get("name", "") or "").strip()
+    if name:
+        return f"name:{name.lower()}"
+    return ""
+
+
+def _center_from_print_bbox(entry: Dict[str, Any]) -> Tuple[int, int]:
+    pb = entry.get("print_bbox") if isinstance(entry.get("print_bbox"), dict) else {}
+    bx = _safe_int(pb.get("x", 0), 0)
+    by = _safe_int(pb.get("y", 0), 0)
+    bw = _safe_int(pb.get("w", 400), 400)
+    bh = _safe_int(pb.get("h", 300), 300)
+    if bw <= 0:
+        bw = 400
+    if bh <= 0:
+        bh = 300
+    return int(bx + (bw // 2)), int(by + (bh // 2))
+
+
+def _expand_repeated_diagram_ranges_in_chunk(entries: List[Dict[str, Any]]) -> Dict[str, Any]:
+    """
+    Post-static-plan pass:
+      - find repeated diagram entries (same identity key)
+      - extend first occurrence range to the last occurrence range_end
+      - mark later occurrences as context-only (not Qwen-processed)
+      - emit keepalive/delete-guard ranges and move specs for later occurrences
+    """
+    diagram_occurrences: Dict[str, List[Dict[str, Any]]] = {}
+    for idx, row in enumerate(entries or []):
+        if not isinstance(row, dict):
+            continue
+        if str(row.get("type", "") or "").strip().lower() != "image":
+            continue
+        if int(row.get("text_tag", 0) or 0) == 1:
+            continue
+        if not _is_diagram_mode(row.get("diagram", 0)):
+            continue
+        key = _diagram_identity_key_for_entry(row)
+        if not key:
+            continue
+        s, e = _entry_word_span(row)
+        diagram_occurrences.setdefault(key, []).append(
+            {
+                "entry_index": int(idx),
+                "start": int(s),
+                "end": int(e),
+            }
+        )
+
+    move_specs: List[Dict[str, Any]] = []
+    keepalive_ranges_by_name: Dict[str, List[Dict[str, Any]]] = {}
+    merged_groups: List[Dict[str, Any]] = []
+
+    for key, rows in diagram_occurrences.items():
+        if len(rows) < 2:
+            continue
+        rows.sort(key=lambda r: (int(r.get("start", 0)), int(r.get("entry_index", 0))))
+        first_info = rows[0]
+        last_info = rows[-1]
+        first_entry = entries[int(first_info["entry_index"])]
+        full_start = int(first_info["start"])
+        full_end = int(max(r.get("end", full_start) for r in rows))
+        primary_name = str(first_entry.get("name", "") or "").strip()
+        if not primary_name:
+            primary_name = str(entries[int(last_info["entry_index"])].get("name", "") or "").strip()
+
+        first_entry["range_start"] = int(full_start)
+        first_entry["range_end"] = int(full_end)
+        first_entry["diagram_repeat_primary"] = True
+        first_entry["diagram_repeat_occurrence_count"] = int(len(rows))
+        first_entry["diagram_repeat_key"] = key
+
+        if primary_name:
+            keepalive_ranges_by_name.setdefault(primary_name.casefold(), []).append(
+                {
+                    "start_word_index": int(full_start),
+                    "end_word_index": int(full_end),
+                    "diagram_key": key,
+                    "primary_name": primary_name,
+                }
+            )
+
+        for occ_idx, occ in enumerate(rows[1:], start=1):
+            row = entries[int(occ["entry_index"])]
+            occurrence_name = str(row.get("name", "") or "").strip()
+            row["diagram_repeat_context_only"] = True
+            row["diagram_repeat_primary_name"] = primary_name
+            row["diagram_repeat_key"] = key
+            row["diagram_repeat_occurrence_index"] = int(occ_idx)
+            row["diagram_repeat_occurrence_count"] = int(len(rows))
+            row["diagram_repeat_as_text_context"] = True
+            row["diagram_repeat_occurrence_name"] = occurrence_name
+            if primary_name:
+                row["name"] = primary_name
+
+            cx, cy = _center_from_print_bbox(row)
+            rs, re = _entry_word_span(row)
+            move_specs.append(
+                {
+                    "diagram_key": key,
+                    "primary_name": primary_name,
+                    "occurrence_name": occurrence_name or primary_name,
+                    "chapter_entry_index": int(occ["entry_index"]),
+                    "range_start": int(rs),
+                    "range_end": int(re),
+                    "new_x": int(cx),
+                    "new_y": int(cy),
+                    "step_key": str(row.get("step_key", "") or ""),
+                }
+            )
+
+        merged_groups.append(
+            {
+                "diagram_key": key,
+                "primary_name": primary_name,
+                "occurrence_count": int(len(rows)),
+                "full_range_start": int(full_start),
+                "full_range_end": int(full_end),
+            }
+        )
+
+    return {
+        "merged_groups": merged_groups,
+        "keepalive_ranges_by_name": keepalive_ranges_by_name,
+        "move_specs": move_specs,
+    }
+
+
+def _name_is_protected_by_diagram_keepalive(
+    *,
+    name: str,
+    silence_start_word_index: int,
+    keepalive_ranges_by_name: Dict[str, List[Dict[str, Any]]],
+) -> bool:
+    lk = str(name or "").strip().casefold()
+    if not lk:
+        return False
+    ranges = keepalive_ranges_by_name.get(lk) or []
+    if not ranges:
+        return False
+    s = int(silence_start_word_index)
+    for r in ranges:
+        rs = int(r.get("start_word_index", 0) or 0)
+        re = int(r.get("end_word_index", rs) or rs)
+        if re < rs:
+            re = rs
+        # Protected while still active (strictly before range end).
+        if s >= rs and s < re:
+            return True
+    return False
+
+
 def _chunk_list(items: List[Any], size: int) -> List[List[Any]]:
     size = max(1, int(size))
     out: List[List[Any]] = []
@@ -1761,6 +1964,11 @@ _VISUAL_ACTION_ALIAS_STATIC: Dict[str, str] = {
     "link": "link_to_image",
     "delete_self": "delete_self",
     "delete_by_name": "delete_by_name",
+    "delete_by_id": "delete_by_id",
+    "delete_image_by_id": "delete_by_id",
+    "delete_by_image_id": "delete_by_id",
+    "delete_by_processed_id": "delete_by_id",
+    "delete_processed_id": "delete_by_id",
     "highlight_cluster": "highlight_cluster",
     "unhighlight_cluster": "unhighlight_cluster",
     "zoom_cluster": "zoom_cluster",
@@ -1918,6 +2126,19 @@ def normalize_static_visual_action(
         if not tgt:
             return None
         out["target"] = tgt
+    elif t == "delete_by_id":
+        image_id = str(
+            action.get("image_id", "")
+            or action.get("processed_id", "")
+            or action.get("target_id", "")
+            or action.get("id", "")
+            or action.get("target", "")
+            or req.get("processed_id", "")
+            or ""
+        ).strip()
+        if not image_id:
+            return None
+        out["image_id"] = image_id
     elif t in _DIAGRAM_ACTION_TYPES_STATIC:
         objects = req.get("objects_that_comprise_image") if isinstance(req.get("objects_that_comprise_image"), list) else []
         first_obj = str(objects[0] if objects else "").strip()
@@ -2962,19 +3183,10 @@ class LessonTimeline:
         all_prompts_meta.clear()
         all_prompts_meta.update(collapsed_prompts_meta)
 
-        # 2) Keep ONLY representative required objects (no union/merge from replaced prompts).
+        # 2) Keep ONLY representative required objects (strict replace, no fallback merge).
         collapsed_required_objects: Dict[str, List[str]] = {}
         for new_p in collapsed_prompts_meta.keys():
             rep_objs = src_required_objs.get(new_p)
-            if not isinstance(rep_objs, list) or not rep_objs:
-                # fallback only if representative had none
-                for old_p, mapped in changed_map.items():
-                    if mapped != new_p:
-                        continue
-                    cand = src_required_objs.get(old_p)
-                    if isinstance(cand, list) and cand:
-                        rep_objs = cand
-                        break
             if not isinstance(rep_objs, list):
                 continue
             cleaned = [str(x).strip() for x in rep_objs if str(x).strip()]
@@ -3657,32 +3869,37 @@ class LessonTimeline:
             minilm_bundle=get_minilm(),
         )
 
-        # NEW: pass required diagram objects map into ImagePipeline
-        handle = ImagePipeline.start_pipeline_background(
-            workers=workers,
-            model_id=(qb.model_id if qb is not None else "Qwen/Qwen3-VL-2B-Instruct"),
-            gpu_index=self.gpu_index,
+        handle = None
+        if diagram_misses:
             # Strict routing: only diagram requests go through ImagePipeline.
-            allowed_base_contexts=list(diagram_misses.keys()),
-            diagram_base_contexts=list(diagram_misses.keys()),
-            diagram_mode_by_base_context={
-                p: _normalize_diagram_mode((prompt_meta.get(p) or {}).get("diagram", 0))
-                for p in diagram_misses.keys()
-            },
-            diagram_required_objects_by_base_context=(diagram_required_objects_by_base_context or {}),
-        )
-        debug["pipeline_started"] = True
+            handle = ImagePipeline.start_pipeline_background(
+                workers=workers,
+                model_id=(qb.model_id if qb is not None else "Qwen/Qwen3-VL-2B-Instruct"),
+                gpu_index=self.gpu_index,
+                allowed_base_contexts=list(diagram_misses.keys()),
+                diagram_base_contexts=list(diagram_misses.keys()),
+                diagram_mode_by_base_context={
+                    p: _normalize_diagram_mode((prompt_meta.get(p) or {}).get("diagram", 0))
+                    for p in diagram_misses.keys()
+                },
+                diagram_required_objects_by_base_context=(diagram_required_objects_by_base_context or {}),
+            )
+            debug["pipeline_started"] = True
 
-        with self._timed("image_pipeline.wait_selection_done"):
-            handle.selection_done.wait()
-        self._dbg("Image pipeline selection_done", data={"cuda_mem": self._cuda_mem_snapshot()})
-        debug["selection_done"] = True
+            with self._timed("image_pipeline.wait_selection_done"):
+                handle.selection_done.wait()
+            self._dbg("Image pipeline selection_done", data={"cuda_mem": self._cuda_mem_snapshot()})
+            debug["selection_done"] = True
 
-        by_ctx = getattr(handle, "selected_ids_by_base_context", {}) or {}
-        for p in misses.keys():
-            picked = by_ctx.get(p, []) or []
-            if picked:
-                assets[p].processed_ids = [str(x) for x in picked if str(x)]
+            by_ctx = getattr(handle, "selected_ids_by_base_context", {}) or {}
+            for p in diagram_misses.keys():
+                picked = by_ctx.get(p, []) or []
+                if picked:
+                    assets[p].processed_ids = [str(x) for x in picked if str(x)]
+        else:
+            self._dbg("Skipping ImagePipeline for diagram parsing", data={"reason": "no_diagram_misses"})
+            debug["selection_done"] = True
+            debug["colours_done"] = True
 
         debug["selected_ids_by_prompt"] = {
             str(p): list(a.processed_ids)
@@ -4017,8 +4234,29 @@ class LessonTimeline:
 
         planned_chunks.sort(key=lambda x: int(x.get("chapter_index", 0) or 0))
 
+        # Post-static-plan pass:
+        #   - merge repeated diagram active ranges
+        #   - mark later repeats as context-only
+        #   - precompute keepalive ranges + manual move specs
+        repeated_diagram_debug_rows: List[Dict[str, Any]] = []
+        with self._timed("qwen.merge_repeated_diagram_ranges", chunks=len(planned_chunks or [])):
+            for ch in planned_chunks:
+                entries = ch.get("entries") if isinstance(ch.get("entries"), list) else []
+                repeat_meta = _expand_repeated_diagram_ranges_in_chunk(entries)
+                ch["entries"] = entries
+                ch["_repeated_diagram_merge"] = repeat_meta
+                merged_groups = repeat_meta.get("merged_groups") if isinstance(repeat_meta, dict) else []
+                if isinstance(merged_groups, list) and merged_groups:
+                    repeated_diagram_debug_rows.append(
+                        {
+                            "chapter_index": int(ch.get("chapter_index", 0) or 0),
+                            "groups": merged_groups,
+                        }
+                    )
+
         # 2) Build image jobs for Qwen; text and deletion silences are deterministic/manual.
         visual_events_out: List[Dict[str, Any]] = []
+        diagram_repeat_move_events_out: List[Dict[str, Any]] = []
         text_events_out: List[Dict[str, Any]] = []
         silence_events_out: List[Dict[str, Any]] = []
         visual_batch_jobs: List[Dict[str, Any]] = []
@@ -4031,7 +4269,10 @@ class LessonTimeline:
             for row in (visual_rows or []):
                 if not isinstance(row, dict):
                     continue
-                nm = str(row.get("name", "") or "").strip()
+                is_repeat_context = bool(row.get("diagram_repeat_context_only", False))
+                nm = str(
+                    row.get("diagram_repeat_primary_name", "") if is_repeat_context else row.get("name", "")
+                ).strip()
                 if not nm:
                     continue
                 lk = nm.lower()
@@ -4069,6 +4310,8 @@ class LessonTimeline:
                 if not isinstance(entries, list):
                     entries = []
                 entries.sort(key=lambda e: (int(e.get("range_start", 0) or 0), 0 if str(e.get("type", "") or "") == "silence" else 1))
+                repeat_meta = ch.get("_repeated_diagram_merge") if isinstance(ch.get("_repeated_diagram_merge"), dict) else {}
+                keepalive_ranges_by_name = repeat_meta.get("keepalive_ranges_by_name") if isinstance(repeat_meta.get("keepalive_ranges_by_name"), dict) else {}
 
                 split_groups = split_entries_by_deletion_silence(entries)
 
@@ -4084,15 +4327,24 @@ class LessonTimeline:
                         context_rows = []
                         prev_slice = segment_visuals[max(0, row_i - 6):row_i]
                         for prev in prev_slice:
+                            is_repeat_context = bool(prev.get("diagram_repeat_context_only", False))
+                            prev_type = str(prev.get("type", "") or "")
+                            if is_repeat_context:
+                                prev_type = "text"
+                            prev_name = str(
+                                prev.get("diagram_repeat_primary_name", "") if is_repeat_context else prev.get("name", "")
+                            ).strip()
                             context_rows.append(
                                 {
-                                    "name": str(prev.get("name", "") or ""),
-                                    "type": str(prev.get("type", "") or ""),
+                                    "name": prev_name,
+                                    "type": prev_type,
                                     "print_bbox": prev.get("print_bbox"),
+                                    "processed_id": prev.get("processed_id"),
                                     "range_start": int(prev.get("range_start", 0) or 0),
                                     "range_end": int(prev.get("range_end", 0) or 0),
-                                    "diagram": int(prev.get("diagram", 0) or 0),
+                                    "diagram": 0 if is_repeat_context else int(prev.get("diagram", 0) or 0),
                                     "text_tag": int(prev.get("text_tag", 0) or 0),
+                                    "diagram_repeat_context_only": bool(is_repeat_context),
                                 }
                             )
 
@@ -4120,6 +4372,70 @@ class LessonTimeline:
                             "static_plan_context": context_rows,
                         }
                         _blank_non_priority_overlaps(req, priority="name", fields=["name", "content", "query"])
+
+                        if bool(row.get("diagram_repeat_context_only", False)):
+                            move_target = str(row.get("diagram_repeat_primary_name", "") or req.get("name", "") or "").strip()
+                            if move_target:
+                                rs = int(req.get("range_start", 0) or 0)
+                                re = int(req.get("range_end", rs) or rs)
+                                if re < rs:
+                                    re = rs
+                                span = max(0, re - rs)
+                                pb = req.get("print_bbox") if isinstance(req.get("print_bbox"), dict) else {"x": 0, "y": 0, "w": 400, "h": 300}
+                                cx = _safe_int(pb.get("x", 0), 0) + max(1, _safe_int(pb.get("w", 400), 400)) // 2
+                                cy = _safe_int(pb.get("y", 0), 0) + max(1, _safe_int(pb.get("h", 300), 300)) // 2
+                                move_action = {
+                                    "type": "move_inside_bbox",
+                                    "target": move_target,
+                                    "new_x": int(cx),
+                                    "new_y": int(cy),
+                                    "source": "diagram_repeat_manual_move",
+                                    "sync_local": {"start_word_offset": 0, "end_word_offset": int(min(span, 1))},
+                                }
+                                parsed_actions = [
+                                    convert_local_sync_to_absolute(
+                                        move_action,
+                                        event_start_word=rs,
+                                        event_end_word=re,
+                                    )
+                                ]
+                                duration_words = max(1, re - rs + 1)
+                                duration_sec = float(max(1.0, min(12.0, duration_words / 2.5)))
+                                diagram_repeat_move_events_out.append(
+                                    {
+                                        "event": {
+                                            "kind": "image",
+                                            "chapter_index": int(req["chapter_index"]),
+                                            "chunk_index": int(req["chunk_index"]),
+                                            "segment_index": int(req["segment_index"]),
+                                            "batch_index": -1,
+                                            "name": move_target,
+                                            "image_name": move_target,
+                                            "type": req.get("type"),
+                                            "start_word_index": int(rs),
+                                            "end_word_index": int(re),
+                                            "duration_sec": duration_sec,
+                                            "step_key": req.get("step_key"),
+                                        },
+                                        "planner": "diagram_repeat_move_static",
+                                        "qwen_payload": {
+                                            "name": move_target,
+                                            "image_name": move_target,
+                                            "actions": [],
+                                            "repeat_occurrence_name": req.get("name"),
+                                        },
+                                        "base_actions_parsed": parsed_actions,
+                                    }
+                                )
+                                _blank_non_priority_overlaps(diagram_repeat_move_events_out[-1]["event"], priority="name", fields=["name", "image_name"])
+                                if isinstance(diagram_repeat_move_events_out[-1].get("qwen_payload"), dict):
+                                    _blank_non_priority_overlaps(diagram_repeat_move_events_out[-1]["qwen_payload"], priority="name", fields=["name", "image_name"])
+                                debug_action_events_count += 1
+                                _flush_action_planner_debug(
+                                    reason=f"diagram_repeat_move_event_{debug_action_events_count}",
+                                    latest_action_event=diagram_repeat_move_events_out[-1],
+                                )
+                            continue
 
                         if row_type == "text":
                             parsed_actions = _build_manual_text_write_actions(req)
@@ -4165,6 +4481,20 @@ class LessonTimeline:
                     if isinstance(del_sil, dict):
                         static_objects_rows = _build_static_cleanup_objects(segment_visuals)
                         delete_targets = [str(r.get("name", "") or "") for r in static_objects_rows if str(r.get("name", "") or "")]
+                        delete_targets_original = list(delete_targets)
+                        delete_targets_blocked: List[str] = []
+                        silence_start = int(del_sil.get("range_start", 0) or 0)
+                        filtered_delete_targets: List[str] = []
+                        for nm in delete_targets:
+                            if _name_is_protected_by_diagram_keepalive(
+                                name=nm,
+                                silence_start_word_index=silence_start,
+                                keepalive_ranges_by_name=keepalive_ranges_by_name,
+                            ):
+                                delete_targets_blocked.append(nm)
+                                continue
+                            filtered_delete_targets.append(nm)
+                        delete_targets = filtered_delete_targets
 
                         silence_jobs.append(
                             {
@@ -4180,6 +4510,9 @@ class LessonTimeline:
                                 "active_objects": static_objects_rows,
                                 "active_objects_count": len(delete_targets),
                                 "delete_targets": delete_targets,
+                                "delete_all_requested": True,
+                                "delete_targets_original": delete_targets_original,
+                                "delete_targets_blocked_due_active_diagram": delete_targets_blocked,
                             }
                         )
 
@@ -4201,9 +4534,11 @@ class LessonTimeline:
             "Static planner jobs built",
             data={
                 "text_events_manual": len(text_events_out),
+                "diagram_repeat_move_events_manual": len(diagram_repeat_move_events_out),
                 "visual_reqs_total": len(all_image_reqs),
                 "visual_batches": len(visual_batch_jobs),
                 "silence_jobs": len(silence_jobs),
+                "repeated_diagram_groups": int(sum(len((row.get("groups") or [])) for row in repeated_diagram_debug_rows)),
                 "cuda_mem": self._cuda_mem_snapshot(),
             },
         )
@@ -4329,6 +4664,7 @@ class LessonTimeline:
                             "batch_index": int(req["batch_index"]),
                             "name": req.get("name"),
                             "image_name": req.get("name"),
+                            "processed_id": req.get("processed_id"),
                             "type": req.get("type"),
                             "start_word_index": int(req.get("range_start", 0) or 0),
                             "end_word_index": int(req.get("range_end", 0) or 0),
@@ -4439,7 +4775,14 @@ class LessonTimeline:
                             "step_key": str(job.get("step_key", "") or ""),
                         },
                         "planner": "silence_static",
-                        "qwen_payload": {"name": str(job.get("name", "") or ""), "image_name": "", "actions": []},
+                        "qwen_payload": {
+                            "name": str(job.get("name", "") or ""),
+                            "image_name": "",
+                            "actions": [],
+                            "delete_all_requested": bool(job.get("delete_all_requested", True)),
+                            "delete_targets_original": job.get("delete_targets_original") if isinstance(job.get("delete_targets_original"), list) else [],
+                            "delete_targets_blocked_due_active_diagram": job.get("delete_targets_blocked_due_active_diagram") if isinstance(job.get("delete_targets_blocked_due_active_diagram"), list) else [],
+                        },
                         "base_actions_parsed": parsed_actions,
                     }
                 )
@@ -4449,7 +4792,7 @@ class LessonTimeline:
                     latest_action_event=silence_events_out[-1],
                 )
 
-        all_events = visual_events_out + text_events_out + silence_events_out
+        all_events = visual_events_out + diagram_repeat_move_events_out + text_events_out + silence_events_out
         all_events.sort(
             key=lambda p: (
                 int((p.get("event") or {}).get("chapter_index", 0) or 0),
@@ -4486,6 +4829,7 @@ class LessonTimeline:
             "events_count": len(all_events),
             "events": all_events,
             "space_planner_chunks": planned_chunks,
+            "repeated_diagram_merge": repeated_diagram_debug_rows,
             "active_objects_final": [],
         }
         if action_debug_saved_path is not None:
@@ -5203,7 +5547,7 @@ class LessonTimeline:
                 if not isinstance(a, dict):
                     continue
                 one: Dict[str, Any] = {"type": str(a.get("type", "") or "")}
-                for k in ("target", "image_name", "cluster_name", "x", "y", "w", "h", "scale", "source"):
+                for k in ("target", "image_name", "image_id", "processed_id", "cluster_name", "x", "y", "w", "h", "scale", "source"):
                     if k in a:
                         one[k] = a.get(k)
                 if isinstance(a.get("sync_absolute"), dict):
@@ -5404,8 +5748,9 @@ class LessonTimeline:
                         one[k] = a.get(k)
                 compact_attempts.append(one)
 
-            requested_mode = int(base.get("diagram_mode_requested", 0) or 0)
-            final_mode = int(max(requested_mode, _normalize_diagram_mode(asset.get("diagram", 0))))
+            requested_mode = int(_normalize_diagram_mode(base.get("diagram_mode_requested", 0)))
+            # Strict mode ownership: use the requested prompt mode directly (no merges/escalation).
+            final_mode = requested_mode
             diagram_mode_by_name[prompt] = final_mode
 
             status = "selected" if selected_ids else "not_selected"
@@ -5723,7 +6068,7 @@ class LessonTimeline:
                 image_text_maps = build_image_text_maps(speech_flat, images_plan)
 
             local_prompts_meta: Dict[str, Dict[str, Any]] = {}
-            local_required_objs: Dict[str, List[str]] = {}  # NEW
+            local_required_objs: Dict[str, List[str]] = {}
 
             for img in images_plan.get("images", []):
                 # skip text-tag entries for image pipeline orchestration
@@ -5736,22 +6081,20 @@ class LessonTimeline:
 
                 d = _normalize_diagram_mode(img.get("diagram", 0))
                 topic_val = str(img.get("topic", "") or "").strip()
-                prev_meta = local_prompts_meta.get(query) or {}
-                prev_d = _normalize_diagram_mode(prev_meta.get("diagram", 0))
-                prev_t = str(prev_meta.get("topic", "") or "").strip()
-                local_prompts_meta[query] = {
-                    "topic": topic_val or prev_t or str(topic or "").strip(),
-                    "diagram": _merge_diagram_modes(prev_d, d),
-                }
+                # Strict parsing contract: first prompt entry wins, no merging.
+                if query not in local_prompts_meta:
+                    local_prompts_meta[query] = {
+                        "topic": topic_val or str(topic or "").strip(),
+                        "diagram": d,
+                    }
 
-                # NEW: accumulate required objects only for diagrams
+                # Strict parsing contract: no required-object merge across repeats.
                 if d > 0:
                     dro = img.get("diagram_required_objects") or []
-                    if not isinstance(dro, list):
-                        dro = []
-                    dro = [str(x).strip() for x in dro if str(x).strip()]
-                    if dro:
-                        _merge_unique_str_list(local_required_objs.setdefault(query, []), dro, cap=80)
+                    if isinstance(dro, list) and query not in local_required_objs:
+                        cleaned = [str(x).strip() for x in dro if str(x).strip()]
+                        if cleaned:
+                            local_required_objs[query] = cleaned[:80]
 
             return {
                 "chapter_index": i,
@@ -5787,29 +6130,6 @@ class LessonTimeline:
                     image_models[slot] = str(res["image_model"])
 
                     local_pm = res.get("prompts_meta") or {}
-                    for query, meta in local_pm.items():
-                        if not isinstance(meta, dict):
-                            continue
-                        d = _normalize_diagram_mode(meta.get("diagram", 0))
-                        t = str(meta.get("topic", "") or "").strip()
-
-                        prev = all_prompts_meta.get(query) or {}
-                        prev_d = _normalize_diagram_mode(prev.get("diagram", 0))
-                        prev_t = str(prev.get("topic", "") or "").strip()
-
-                        all_prompts_meta[query] = {
-                            "topic": prev_t or t or str(topic or "").strip(),
-                            "diagram": _merge_diagram_modes(prev_d, d),
-                        }
-
-                    # NEW: merge required objects upward
-                    local_ro = res.get("required_objects_by_prompt") or {}
-                    if isinstance(local_ro, dict):
-                        for query, objs in local_ro.items():
-                            if not isinstance(objs, list):
-                                continue
-                            _merge_unique_str_list(all_diagram_required_objects.setdefault(query, []), objs, cap=80)
-
                     self._dbg(
                         "Chapter complete",
                         data={"chapter_index": int(res["chapter_index"]), "prompts_found": len(local_pm)},
@@ -5820,6 +6140,39 @@ class LessonTimeline:
         out["models_used"]["speech"] = [m or "" for m in speech_models]
         out["models_used"]["images"] = [m or "" for m in image_models]
         out["chapters"] = [c for c in chapter_slots if c is not None]
+
+        # Deterministic prompt parsing in chapter order.
+        # Strict behavior: do NOT merge diagram modes or required objects across repeated prompts.
+        all_prompts_meta.clear()
+        all_diagram_required_objects.clear()
+        for ch in out["chapters"]:
+            if not isinstance(ch, dict):
+                continue
+            plan = ch.get("image_plan") or {}
+            imgs = plan.get("images") if isinstance(plan, dict) else None
+            if not isinstance(imgs, list):
+                continue
+            for img in imgs:
+                if not isinstance(img, dict):
+                    continue
+                if int(img.get("text", 0) or 0) == 1:
+                    continue
+                query = str(img.get("content", "") or "").strip()
+                if not query:
+                    continue
+                d = _normalize_diagram_mode(img.get("diagram", 0))
+                t = str(img.get("topic", "") or "").strip() or str(topic or "").strip()
+                if query not in all_prompts_meta:
+                    all_prompts_meta[query] = {
+                        "topic": t,
+                        "diagram": d,
+                    }
+                if d > 0 and query not in all_diagram_required_objects:
+                    dro = img.get("diagram_required_objects") or []
+                    if isinstance(dro, list):
+                        cleaned = [str(x).strip() for x in dro if str(x).strip()]
+                        if cleaned:
+                            all_diagram_required_objects[query] = cleaned[:80]
 
         diagram_prompt_grouping_debug: Dict[str, Any] = {
             "ok": True,

@@ -653,9 +653,6 @@ def _norm_diagram_mode(v: Any) -> int:
         return 1
     if d == 2:
         return 2
-    # Internal mixed mode: both visual and schematic for same base_context.
-    if d == 3:
-        return 3
     return 0
 
 
@@ -932,8 +929,7 @@ def _pipeline_worker(
     out_dir.mkdir(parents=True, exist_ok=True)
 
     # normalized diagram modes by base context:
-    # 0 = visual image (non-diagram), 1 = visual diagram, 2 = schematic diagram,
-    # 3 = mixed visual+schematic (run both downstream branches)
+    # 0 = bypass pipeline stages, 1 = visual diagram, 2 = schematic diagram
     diagram_mode_map: Dict[str, int] = {}
     if isinstance(diagram_mode_by_base_context, dict):
         for k, v in diagram_mode_by_base_context.items():
@@ -1044,18 +1040,18 @@ def _pipeline_worker(
             it["base_context"] = path_base_context.get(it["source_path"], "")
 
         diagram_items: List[Dict[str, Any]] = []
-        visual_items: List[Dict[str, Any]] = []
         for it in img_items:
             bc = str(it.get("base_context", "") or "").strip()
             mode = int(diagram_mode_map.get(bc, 0) or 0)
             if mode > 0:
                 diagram_items.append(it)
             else:
-                visual_items.append(it)
+                # Strict routing: diagram=0 bypasses ImageText/selection/labels/clusters/descriptors.
+                continue
 
         print(
             "[4/10] Process image ids by mode "
-            f"(diagram_items={len(diagram_items)} visual_items={len(visual_items)})..."
+            f"(diagram_items={len(diagram_items)} visual_items=0)..."
         )
 
         text_items: List[Dict[str, Any]] = []
@@ -1071,17 +1067,6 @@ def _pipeline_worker(
                 )
             text_items.extend(d_text_items or [])
             unique_to_processed.update(d_map or {})
-
-        if visual_items:
-            with stage("ImageTranslate.translate_images_in_memory.visual"):
-                v_text_items, v_map = ImageTranslate.translate_images_in_memory(
-                    image_items=visual_items,
-                    start_index=0,
-                    save_outputs=True,
-                    return_path_map=True,
-                )
-            text_items.extend(v_text_items or [])
-            unique_to_processed.update(v_map or {})
 
         if not text_items:
             handle.errors["pipeline"] = "image_translation_no_outputs"
@@ -1108,7 +1093,7 @@ def _pipeline_worker(
         # =========================
         # Qwen selection step (EXTERNAL worker)
         # =========================
-        print("[5/10] selection routing (diagram-only qwentest; non-diagram pass-through)...")
+        print("[5/10] selection routing (diagram-only qwentest)...")
 
         qwen_model = workers.qwen_model
         qwen_processor = workers.qwen_processor
@@ -1133,24 +1118,8 @@ def _pipeline_worker(
                     continue
 
                 mode = int(diagram_mode_map.get(bc, 0) or 0)
-
-                # Non-diagram images (e.g. Comfy-generated visual images) are ready:
-                # keep all and skip qwentest selection.
                 if mode <= 0:
-                    picked_passthrough: List[str] = []
-                    for t in items:
-                        pid = str(t.get("processed_id", "") or "").strip()
-                        if pid and pid not in picked_passthrough:
-                            picked_passthrough.append(pid)
-                    selected_ids_by_ctx[bc] = picked_passthrough
-                    selection_payload_by_ctx[bc] = {
-                        "selection_mode": "passthrough_non_diagram",
-                        "count_in": len(items),
-                        "count_out": len(picked_passthrough),
-                    }
-                    for pid in picked_passthrough:
-                        if pid and pid not in selected_ids_all:
-                            selected_ids_all.append(pid)
+                    # Defensive guard; mode<=0 items are filtered out earlier.
                     continue
 
                 # Diagram with 0/1 candidate does not need qwentest cutdown.
@@ -1472,9 +1441,6 @@ def _pipeline_worker(
                     if mode == 1:
                         visual_diagram_keep.add(pid)
                     elif mode == 2:
-                        schematic_diagram_keep.add(pid)
-                    elif mode == 3:
-                        visual_diagram_keep.add(pid)
                         schematic_diagram_keep.add(pid)
         try:
             print(
@@ -1967,6 +1933,9 @@ def get_images_background(
         return results, None, diagram_flags
 
     diagram_prompts = [p for p in misses.keys() if int(diagram_flags.get(p, 0) or 0) > 0]
+    if not diagram_prompts:
+        # Strict routing: diagram=0 requests do not run ImagePipeline stages.
+        return results, None, diagram_flags
     diagram_mode_map = {p: int(diagram_flags.get(p, 0) or 0) for p in diagram_prompts}
 
     h = start_pipeline_background(

@@ -3080,6 +3080,9 @@ def _compact_visual_event_for_prompt(ev: Dict[str, Any]) -> Dict[str, Any]:
             "name": _clip_str(c.get("name", ""), 56),
             "type": ctype,
         }
+        cpid = _clip_str(c.get("processed_id", ""), 40)
+        if cpid:
+            crow["processed_id"] = cpid
         if isinstance(c.get("print_bbox"), dict):
             crow["print_bbox"] = c.get("print_bbox")
         if ctype == "image" and int(c.get("diagram", 0) or 0) > 0:
@@ -3099,6 +3102,9 @@ def _compact_visual_event_for_prompt(ev: Dict[str, Any]) -> Dict[str, Any]:
         "range_end": int(ev.get("range_end", 0) or 0),
         "static_plan_context": ctx_out,
     }
+    pid = _clip_str(ev.get("processed_id", ""), 40)
+    if pid:
+        out["processed_id"] = pid
     _blank_non_priority_overlaps(out, priority="name", fields=["name", "image_name"])
     if isinstance(ev.get("print_bbox"), dict):
         out["print_bbox"] = ev.get("print_bbox")
@@ -3594,15 +3600,17 @@ def plan_space_timeline_batch_transformers(
             board_height=int(board_height),
         )
         prompt = (
-            "You are managing where images will be printed on a whiteboard.\n"
-            "Goal: assign each image/text a non-overlapping print_bbox and choose which silence rows should be cleanup points.\n"
-            "Entires are chronogically synced with range_start/range_end and speech_text_in_range.\n"
-            "For each image/text entry you MUST output print_bbox.\n"
-            "For each silence you MUST output delete_all true/false.\n"
-            "Set delete_all=true only for pauses where board cleanup is useful and appropriate before the next cluster of visuals.\n"
-            "Keep nearby chronology conceptually close where possible.\n"
+            "You are managing where images will be printed on a whiteboard\n"
+            "Goal: assign each image/text a non-overlapping print_bbox and choose which silence rows should be cleanup points\n"
+            "Entires are chronogically synced with range_start/range_end and speech_text_in_range\n"
+            "For each image/text entry you MUST output print_bbox\n"
+            "For each silence you MUST output delete_all true/false\n"
+            "Set delete_all=true only for pauses where board cleanup is useful and appropriate before the next cluster of visuals\n"
+            "Keep nearby chronology conceptually close where possible\n"
             "Use large boxes, stay inside board bounds.\n"
-            "Try and fill up the board as much a possible before deletion (cram optimized close bboxes)"
+            "Try and fill up the board as much a possible before deletion (cram optimized close bboxes)\n"
+            "For images with long ranges you might have to use manual delete actions around them to make space, while they are still active\n"
+            "With that, and as a general rule, only delete an image after it's active range is ended\n"
             "Output JSON only.\n\n"
             "ADDED RULES FOR TEXT ENTRIES (append-only):\n"
             "- For each entry where type='text', also output text_coord with exact write coordinates.\n"
@@ -3713,6 +3721,11 @@ _VISUAL_ACTION_ALIASES = {
     "link_to_previous": "link_to_image",
     "link": "link_to_image",
     "delete_self": "delete_self",
+    "delete_by_id": "delete_by_id",
+    "delete_image_by_id": "delete_by_id",
+    "delete_by_image_id": "delete_by_id",
+    "delete_by_processed_id": "delete_by_id",
+    "delete_processed_id": "delete_by_id",
     "highlight_cluster": "highlight_cluster",
     "unhighlight_cluster": "unhighlight_cluster",
     "zoom_cluster": "zoom_cluster",
@@ -3822,6 +3835,19 @@ def _clean_visual_action_for_event(ev: Dict[str, Any], a: Dict[str, Any], *, act
         out["image_name"] = other
     elif t == "delete_self":
         pass
+    elif t == "delete_by_id":
+        image_id = str(
+            a.get("image_id", "")
+            or a.get("processed_id", "")
+            or a.get("target_id", "")
+            or a.get("id", "")
+            or a.get("target", "")
+            or ev.get("processed_id", "")
+            or ""
+        ).strip()
+        if not image_id:
+            return None
+        out["image_id"] = image_id
     elif t in diagram_types:
         objs = ev.get("objects_that_comprise_image") if isinstance(ev.get("objects_that_comprise_image"), list) else []
         first_obj = str(objs[0] if objs else "").strip()
@@ -3870,7 +3896,8 @@ def plan_visual_actions_batch_transformers(
                     "write_text: {type,target,text,x,y,scale,sync_local}",
                     "move_inside_bbox: {type,target,new_x,new_y,sync_local}",
                     "link_to_image: {type,target,image_name,sync_local}",
-                    "delete_self: {type,sync_local}"
+                    "delete_self: {type,sync_local}",
+                    "delete_by_id: {type,image_id,sync_local}"
                 ],
                 "diagram_extra": [
                     "highlight_cluster",
@@ -3886,6 +3913,7 @@ def plan_visual_actions_batch_transformers(
                 "all_actions_inside_print_bbox": True,
                 "generic_delete_not_allowed": True,
                 "delete_self_only_for_temporary_non_diagram": True,
+                "delete_by_id_only_for_targeted_single_image_cleanup": True,
                 "must_emit_sync_local_per_action": True,
                 "sync_local_is_relative_to_event_range": True,
             },
@@ -3896,12 +3924,15 @@ def plan_visual_actions_batch_transformers(
             "Every action MUST include sync_local {start_word_offset,end_word_offset} to link it to parts of the speech\n"
             "All actions must happen only inside print_bbox - respect image dimentions when picking print coords\n"
             "Sometimes images come with  diagram = 1 - for them you have an list of interactable objects that comprise them\n"
+            "Diagrams often come with large ranges with many inner objects mentioned - highlight and interact with them at every possible point.\n"
+            "Minding that you'll also have to use the counter actions to deactivate objects after relevancy.\n"
             "Always start with draw_image - self innit\n"
             "You can use extra write_text actions to add detail in unused spacew\n"
             "Create the most rich and complex sync -> match what is said with as many actions as possible\n"
             "For digram == 0 - only base actions, for diagram == 1, also diagram_extra\n"
             "You are also given a rought timeline of other images on the board, interact with them!\n"
-            "Use delete_self only if image is very temporary - unrelated to other images / speech"
+            "Use delete_self only if image is very temporary - unrelated to other images / speech\n"
+            "When you need targeted cleanup, use delete_by_id with image_id from event/static_plan_context processed_id values.\n"
             "Return JSON only.\n"
 
             "Input:\n"
@@ -3913,6 +3944,7 @@ def plan_visual_actions_batch_transformers(
                         {"type": "draw_image", "target": "img_name", "x": 100, "y": 180, "sync_local": {"start_word_offset": 0, "end_word_offset": 2}},
                         {"type": "write_text", "target": "img_name__text_1", "text": "label", "x": 120, "y": 260, "scale": 1.0, "sync_local": {"start_word_offset": 2, "end_word_offset": 4}},
                         {"type": "move_inside_bbox", "target": "img_name", "new_x": 180, "new_y": 220, "sync_local": {"start_word_offset": 4, "end_word_offset": 6}},
+                        {"type": "delete_by_id", "image_id": "processed_12", "sync_local": {"start_word_offset": 6, "end_word_offset": 6}},
                         {"type": "highlight_cluster", "cluster_name": "nucleus", "sync_local": {"start_word_offset": 7, "end_word_offset": 9}},
                         {"type": "write_label", "cluster_name": "nucleus", "text": "Nucleus", "sync_local": {"start_word_offset": 8, "end_word_offset": 10}},
                     ]

@@ -7688,11 +7688,37 @@ def research(
         sources_used += 1
 
     # ---- wait for DDG to finish before deciding API fallback ----
-    ddg_done.wait()
+    try:
+        ddg_wait_timeout_s = float(os.getenv("RESEARCH_DDG_WAIT_TIMEOUT_SEC", "90") or 90.0)
+    except Exception:
+        ddg_wait_timeout_s = 90.0
+    if ddg_wait_timeout_s <= 0:
+        ddg_wait_timeout_s = 90.0
+
+    ddg_completed = ddg_done.wait(timeout=ddg_wait_timeout_s)
+    if not ddg_completed:
+        dbg(f"[DDG][WARN] timeout waiting {ddg_wait_timeout_s:.1f}s; continuing without DDG completion")
+        _hdbg_append(
+            heavy_debug_run,
+            "errors",
+            {
+                "kind": "ddg_timeout",
+                "timeout_sec": float(ddg_wait_timeout_s),
+            },
+        )
+
     if ddg_t["start"] is not None:
         ddg_sec = float((ddg_t["end"] or _hdbg_now()) - ddg_t["start"])
         _hdbg_set_timing(heavy_debug_run, "ddg", ddg_sec)
-        _hdbg_append(heavy_debug_run, "orchestration", {"kind": "ddg_done", "sec": ddg_sec, "error": str(ddg_err["exc"]) if ddg_err["exc"] else None})
+        _hdbg_append(
+            heavy_debug_run,
+            "orchestration",
+            {
+                "kind": "ddg_done" if ddg_completed else "ddg_timeout",
+                "sec": ddg_sec,
+                "error": str(ddg_err["exc"]) if ddg_err["exc"] else None,
+            },
+        )
     if ddg_err["exc"] is not None:
         dbg(f"[DDG][ERR] {ddg_err['exc']}")
 

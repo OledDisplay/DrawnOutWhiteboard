@@ -22,6 +22,11 @@ MERGE_ADJACENT_STRAIGHT_ANGLE_DEG = 8.0
 MERGE_ADJACENT_CURVE_TURN_DEG = 18.0
 CURVE_MIN_TOTAL_TURN_DEG = 12.0
 CHUNK_MIN_POINTS = 3
+MERGE_TINY_BRIDGE_REL_LEN = 0.025
+MERGE_TINY_BRIDGE_MIN_PX = 6.0
+TRACE_SIMPLIFY_REL_EPS = 0.0015
+TRACE_SIMPLIFY_MIN_EPS_PX = 0.8
+TRACE_SIMPLIFY_MAX_EPS_PX = 3.0
 
 # conservative endpoint-touch grouping
 ENDPOINT_TOUCH_MAX_PX = 8.0
@@ -38,7 +43,7 @@ ANGLE_RAY_LOOKAHEAD_POINTS = 3
 
 # output compactness
 # Set these to an integer to re-enable truncation limits.
-TRACE_SENTENCE_LIMIT: Optional[int] = None
+TRACE_SENTENCE_LIMIT: Optional[int] = 30
 MAX_LINE_DESCRIPTION_CHARS: Optional[int] = None
 MAX_GROUP_DESCRIPTION_CHARS: Optional[int] = None
 
@@ -149,6 +154,57 @@ def resample_polyline(pts: np.ndarray, sample_count: int) -> np.ndarray:
         p = pts[j] + (pts[j + 1] - pts[j]) * float(r)
         out.append(p.astype(np.float32))
     return np.asarray(out, dtype=np.float32)
+
+
+def point_to_segment_distance(pt: Sequence[float], a: Sequence[float], b: Sequence[float]) -> float:
+    ax, ay = float(a[0]), float(a[1])
+    bx, by = float(b[0]), float(b[1])
+    px, py = float(pt[0]), float(pt[1])
+    abx = bx - ax
+    aby = by - ay
+    ab2 = abx * abx + aby * aby
+    if ab2 <= 1e-12:
+        return math.hypot(px - ax, py - ay)
+    t = ((px - ax) * abx + (py - ay) * aby) / ab2
+    t = clamp(t, 0.0, 1.0)
+    qx = ax + t * abx
+    qy = ay + t * aby
+    return math.hypot(px - qx, py - qy)
+
+
+def simplify_polyline_rdp(pts: np.ndarray, epsilon: float) -> np.ndarray:
+    pts = dedupe_points(pts)
+    n = int(pts.shape[0])
+    if n <= 2 or epsilon <= 0.0:
+        return pts.astype(np.float32)
+
+    keep = np.zeros((n,), dtype=bool)
+    keep[0] = True
+    keep[-1] = True
+    stack: List[Tuple[int, int]] = [(0, n - 1)]
+
+    while stack:
+        start_idx, end_idx = stack.pop()
+        if end_idx - start_idx <= 1:
+            continue
+        a = pts[start_idx]
+        b = pts[end_idx]
+        max_dist = -1.0
+        max_idx = -1
+        for i in range(start_idx + 1, end_idx):
+            d = point_to_segment_distance(pts[i], a, b)
+            if d > max_dist:
+                max_dist = d
+                max_idx = i
+        if max_idx >= 0 and max_dist > epsilon:
+            keep[max_idx] = True
+            stack.append((start_idx, max_idx))
+            stack.append((max_idx, end_idx))
+
+    out = pts[keep]
+    if out.shape[0] < 2:
+        return pts[[0, -1]].astype(np.float32)
+    return dedupe_points(out.astype(np.float32))
 
 
 def heading_deg_between(a: Sequence[float], b: Sequence[float]) -> float:
@@ -318,24 +374,24 @@ def straight_phrase(start_pt: np.ndarray, end_pt: np.ndarray, angle_deg: float, 
     if rel_len < 0.04:
         size = "short"
     elif rel_len < 0.12:
-        size = "medium-length"
+        size = "medium"
     else:
         size = "long"
-    return f"{size} {slope} straight run heading {direction}" 
+    return f"straight {size}; {slope}; {direction}; {round2(length)} px"
 
 
 def curve_style_phrase(abs_turn: float, monotonicity: float, rel_len: float, signed_turn: float) -> str:
     rot = "clockwise" if signed_turn > 0 else "counterclockwise"
     if abs_turn < 22.0:
-        base = f"slight {rot} bend"
+        base = "slight bend"
     elif abs_turn < 45.0:
-        base = f"gentle {rot} arc"
+        base = "gentle arc"
     elif abs_turn < 80.0:
-        base = f"balanced {rot} curve"
+        base = "curve"
     elif abs_turn < 135.0:
-        base = f"strong {rot} sweep"
+        base = "sweep"
     else:
-        base = f"tight {rot} hook"
+        base = "hook"
 
     if monotonicity >= 0.88:
         balance = "clean"
@@ -353,12 +409,14 @@ def curve_style_phrase(abs_turn: float, monotonicity: float, rel_len: float, sig
     else:
         span = "long"
 
-    return f"{span} {balance} {base}"
+    return f"curve {span}; {balance}; {rot}; {base}; {round2(abs_turn)} deg"
 
 
 
 def chunk_polyline_trace(pts: np.ndarray, image_diag: float) -> List[TraceChunk]:
     pts = dedupe_points(pts)
+    simplify_eps = clamp(image_diag * TRACE_SIMPLIFY_REL_EPS, TRACE_SIMPLIFY_MIN_EPS_PX, TRACE_SIMPLIFY_MAX_EPS_PX)
+    pts = simplify_polyline_rdp(pts, simplify_eps)
     if pts.shape[0] < 2:
         return []
     if pts.shape[0] == 2:
@@ -504,28 +562,50 @@ def chunk_polyline_trace(pts: np.ndarray, image_diag: float) -> List[TraceChunk]
             )
         ]
 
+    def _curve_rotation_sign(ch: TraceChunk) -> int:
+        if abs(ch.signed_turn_deg) <= 1e-4:
+            return 0
+        return 1 if ch.signed_turn_deg > 0 else -1
+
+    def _pair_mergeable(a: TraceChunk, b: TraceChunk, *, relaxed: bool = False) -> bool:
+        if a.kind != b.kind:
+            return False
+
+        if a.kind == "straight":
+            angle_limit = MERGE_ADJACENT_STRAIGHT_ANGLE_DEG + (5.0 if relaxed else 0.0)
+            delta = angle_diff_deg(a.heading_deg, b.heading_deg)
+            if delta <= angle_limit:
+                return True
+            if relaxed and a.details.get("slope_class") == b.details.get("slope_class"):
+                return delta <= angle_limit + 4.0
+            return False
+
+        rot_a = _curve_rotation_sign(a)
+        rot_b = _curve_rotation_sign(b)
+        if rot_a != 0 and rot_b != 0 and rot_a != rot_b:
+            return False
+
+        turn_limit = MERGE_ADJACENT_CURVE_TURN_DEG + (10.0 if relaxed else 0.0)
+        if abs(a.total_turn_deg - b.total_turn_deg) > turn_limit:
+            return False
+
+        mono_a = float(a.details.get("monotonicity", 1.0))
+        mono_b = float(b.details.get("monotonicity", 1.0))
+        mono_limit = 0.28 if not relaxed else 0.42
+        if abs(mono_a - mono_b) > mono_limit:
+            return False
+
+        return True
+
+    def _tiny_bridge(ch: TraceChunk) -> bool:
+        return ch.length <= max(MERGE_TINY_BRIDGE_MIN_PX, image_diag * MERGE_TINY_BRIDGE_REL_LEN)
+
     merged: List[TraceChunk] = [chunks[0]]
     for ch in chunks[1:]:
         prev = merged[-1]
-        if prev.kind != ch.kind:
+        if not _pair_mergeable(prev, ch, relaxed=False):
             merged.append(ch)
             continue
-
-        can_merge = False
-        if ch.kind == "straight":
-            if angle_diff_deg(prev.heading_deg, ch.heading_deg) <= MERGE_ADJACENT_STRAIGHT_ANGLE_DEG:
-                can_merge = True
-        else:
-            if (
-                (prev.signed_turn_deg == 0.0 or ch.signed_turn_deg == 0.0 or np.sign(prev.signed_turn_deg) == np.sign(ch.signed_turn_deg))
-                and abs(prev.total_turn_deg - ch.total_turn_deg) <= MERGE_ADJACENT_CURVE_TURN_DEG
-            ):
-                can_merge = True
-
-        if not can_merge:
-            merged.append(ch)
-            continue
-
         start_idx = prev.start_idx
         end_idx = ch.end_idx
         merged_slice = pts[start_idx:end_idx + 1]
@@ -534,7 +614,46 @@ def chunk_polyline_trace(pts: np.ndarray, image_diag: float) -> List[TraceChunk]
         else:
             merged.append(ch)
 
-    return merged
+    i = 0
+    while i + 2 < len(merged):
+        a = merged[i]
+        b = merged[i + 1]
+        c = merged[i + 2]
+        can_bridge_merge = (
+            a.kind == c.kind
+            and a.kind != b.kind
+            and _tiny_bridge(b)
+            and _pair_mergeable(a, c, relaxed=True)
+        )
+        if not can_bridge_merge:
+            i += 1
+            continue
+        start_idx = a.start_idx
+        end_idx = c.end_idx
+        merged_slice = pts[start_idx:end_idx + 1]
+        if merged_slice.shape[0] < 2:
+            i += 1
+            continue
+        merged_chunk = _build_chunk_from_slice(merged_slice, a.kind, start_idx, end_idx)
+        merged[i:i + 3] = [merged_chunk]
+        if i > 0:
+            i -= 1
+
+    final_chunks: List[TraceChunk] = [merged[0]]
+    for ch in merged[1:]:
+        prev = final_chunks[-1]
+        if not _pair_mergeable(prev, ch, relaxed=True):
+            final_chunks.append(ch)
+            continue
+        start_idx = prev.start_idx
+        end_idx = ch.end_idx
+        merged_slice = pts[start_idx:end_idx + 1]
+        if merged_slice.shape[0] >= 2:
+            final_chunks[-1] = _build_chunk_from_slice(merged_slice, prev.kind, start_idx, end_idx)
+        else:
+            final_chunks.append(ch)
+
+    return final_chunks
 
 
 
@@ -759,7 +878,7 @@ def edge_relation(bbox: Tuple[float, float, float, float], width: int, height: i
         "nearest_edge": nearest,
         "edge_distances": {k: round2(v) for k, v in distances.items()},
         "edge_band": edge_band,
-        "phrase": f"{edge_band}, nearest to the {nearest} boundary",
+        "phrase": f"{edge_band}; nearest edge {nearest}",
     }
 
 
@@ -773,15 +892,15 @@ def axis_relation(centered_centroid: Tuple[float, float], bbox: Tuple[float, flo
     dist_x_axis = abs(cy)
 
     if crosses_vertical and crosses_horizontal:
-        phrase = "crosses both central axes"
+        phrase = "crosses both axes"
     elif crosses_vertical:
-        phrase = "crosses the vertical center axis"
+        phrase = "crosses vertical axis"
     elif crosses_horizontal:
-        phrase = "crosses the horizontal center axis"
+        phrase = "crosses horizontal axis"
     else:
         x_band = "near" if dist_x_axis <= 0.08 * height else "away from"
         y_band = "near" if dist_y_axis <= 0.08 * width else "away from"
-        phrase = f"{x_band} the horizontal axis and {y_band} the vertical axis"
+        phrase = f"h-axis {x_band}; v-axis {y_band}"
 
     return {
         "crosses_vertical_axis": crosses_vertical,
@@ -807,17 +926,16 @@ def location_summary_for_line(poly: np.ndarray, bbox: Tuple[float, float, float,
 
     qdx = centered[0] - q_center[0]
     qdy = centered[1] - q_center[1]
-    side_x = "right of" if qdx > 0 else "left of"
-    side_y = "above" if qdy > 0 else "below"
+    side_x = "x-right" if qdx > 0 else "x-left"
+    side_y = "y-above" if qdy > 0 else "y-below"
     if abs(qdx) <= width * 0.03:
-        side_x = "aligned with"
+        side_x = "x-aligned"
     if abs(qdy) <= height * 0.03:
-        side_y = "aligned with"
+        side_y = "y-aligned"
 
     location_phrase = (
-        f"Centroid sits in {quad}, with centered coordinates {pt_to_list(centered)}; "
-        f"{axis['phrase']}; {edge['phrase']}; "
-        f"relative to its quadrant center it is {distance_band(q_dist, diag)} and {side_x} that center, {side_y} it vertically."
+        f"loc {quad}; centered {pt_to_list(centered)}; {axis['phrase']}; {edge['phrase']}; "
+        f"q-center {distance_band(q_dist, diag)} ({side_x}, {side_y})"
     )
 
     return {
@@ -883,8 +1001,8 @@ def line_size_summary(poly: np.ndarray, bbox: Tuple[float, float, float, float],
         peer_rank = "among the smallest lines"
 
     phrase = (
-        f"Overall size is {size_band}; arc length {round2(length)} px, bounding span {round2(span_w)}Ã—{round2(span_h)} px, "
-        f"{span_type}, {peer_rank}."
+        f"size {size_band}; len {round2(length)} px ({round2(rel)} diag); "
+        f"span {round2(span_w)}x{round2(span_h)} px {span_type}; peer {peer_rank}"
     )
 
     return {
@@ -925,20 +1043,84 @@ def relative_direction_phrase(source: Tuple[float, float], target: Tuple[float, 
 def tracing_summary(line: PreparedStroke, width: int, height: int) -> Dict[str, Any]:
     diag = math.hypot(width, height)
     chunks = chunk_polyline_trace(line.polyline, diag)
-    abs_turn, signed_turn = overall_turn_metrics(line.polyline)
+    if chunks:
+        abs_turn = float(sum(float(ch.total_turn_deg) for ch in chunks))
+        signed_turn = float(sum(float(ch.signed_turn_deg) for ch in chunks))
+    else:
+        abs_turn, signed_turn = overall_turn_metrics(line.polyline)
 
-    chunk_phrases = [str(ch.phrase) for ch in chunks if str(ch.phrase).strip()]
+    compact_runs: List[Dict[str, Any]] = []
+    for ch in chunks:
+        if ch.kind == "straight":
+            run_key = (
+                "straight",
+                str(ch.details.get("slope_class", "")),
+                str(ch.details.get("direction", "")),
+            )
+            run_mono = 1.0
+        else:
+            run_key = (
+                "curve",
+                str(ch.details.get("rotation", "")),
+                str(ch.details.get("curve_balance", "")),
+                int(round(float(ch.total_turn_deg) / 35.0)),
+            )
+            run_mono = float(ch.details.get("monotonicity", 1.0))
+
+        if compact_runs and compact_runs[-1]["key"] == run_key:
+            compact_runs[-1]["count"] += 1
+            compact_runs[-1]["length"] += float(ch.length)
+            compact_runs[-1]["abs_turn"] += float(ch.total_turn_deg)
+            compact_runs[-1]["signed_turn"] += float(ch.signed_turn_deg)
+            compact_runs[-1]["mono_sum"] += run_mono
+            compact_runs[-1]["last_heading"] = float(ch.heading_deg)
+            continue
+
+        compact_runs.append({
+            "key": run_key,
+            "kind": ch.kind,
+            "count": 1,
+            "length": float(ch.length),
+            "abs_turn": float(ch.total_turn_deg),
+            "signed_turn": float(ch.signed_turn_deg),
+            "mono_sum": run_mono,
+            "last_heading": float(ch.heading_deg),
+        })
+
+    chunk_phrases: List[str] = []
+    for run in compact_runs:
+        if run["kind"] == "straight":
+            phrase = straight_phrase(
+                np.zeros((2,), dtype=np.float32),
+                np.zeros((2,), dtype=np.float32),
+                float(run["last_heading"]),
+                float(run["length"]),
+                diag,
+            )
+        else:
+            avg_mono = float(run["mono_sum"]) / max(int(run["count"]), 1)
+            rel_len = float(run["length"]) / max(diag, 1e-6)
+            phrase = curve_style_phrase(
+                float(run["abs_turn"]),
+                avg_mono,
+                rel_len,
+                float(run["signed_turn"]),
+            )
+        if int(run["count"]) > 1:
+            phrase += f" x{int(run['count'])}"
+        chunk_phrases.append(phrase)
+
     if TRACE_SENTENCE_LIMIT is None or TRACE_SENTENCE_LIMIT <= 0:
         preview = list(chunk_phrases)
     else:
         preview = chunk_phrases[:TRACE_SENTENCE_LIMIT]
     omitted = max(0, len(chunk_phrases) - len(preview))
     if preview:
-        trace_profile = "; ".join(preview)
+        trace_profile = " | ".join(preview)
         if omitted > 0:
-            trace_profile += f"; plus {omitted} additional trace sections"
+            trace_profile += f" | +{omitted} more"
     else:
-        trace_profile = "no stable trace sections"
+        trace_profile = "none"
 
     start_ray = {
         "heading_deg": round2(line.start_heading_deg),
@@ -949,16 +1131,16 @@ def tracing_summary(line: PreparedStroke, width: int, height: int) -> Dict[str, 
         "direction": direction_phrase(line.end_heading_deg),
     }
     overall_angle_phrase = (
-        f"Starts {direction_phrase(line.start_heading_deg)} ({round2(line.start_heading_deg)} deg) and ends "
-        f"{direction_phrase(line.end_heading_deg)} ({round2(line.end_heading_deg)} deg); chord heading "
-        f"{round2(line.chord_heading_deg)} deg, accumulated turn {round2(abs_turn)} deg."
+        f"start {direction_phrase(line.start_heading_deg)} {round2(line.start_heading_deg)} deg; "
+        f"end {direction_phrase(line.end_heading_deg)} {round2(line.end_heading_deg)} deg; "
+        f"chord {round2(line.chord_heading_deg)} deg; turn abs {round2(abs_turn)} deg, signed {round2(signed_turn)} deg"
     )
 
     trace_phrase_cap: Optional[int] = None
     if MAX_LINE_DESCRIPTION_CHARS is not None and MAX_LINE_DESCRIPTION_CHARS > 0:
         trace_phrase_cap = MAX_LINE_DESCRIPTION_CHARS // 2
     phrase = clamp_text(
-        f"Trace profile: {trace_profile}. {overall_angle_phrase}".strip(),
+        f"trace {trace_profile}; {overall_angle_phrase}".strip(),
         trace_phrase_cap,
     )
 
@@ -1006,8 +1188,8 @@ def line_neighbor_relation(source: PreparedStroke, target: PreparedStroke, width
         orientation_relation = "differently oriented"
 
     phrase = (
-        f"{direction}, {distance_band(center_distance, diag)} by centroid and {distance_band(bbox_distance, diag)} by box gap; "
-        f"the neighbor is {size_relation} and {orientation_relation}."
+        f"{direction}; centroid {distance_band(center_distance, diag)}; "
+        f"box-gap {distance_band(bbox_distance, diag)}; {size_relation}; {orientation_relation}"
     )
 
     return {
@@ -1030,10 +1212,10 @@ def build_full_description(trace: Dict[str, Any], size: Dict[str, Any], location
     layer1 = neighbors.get("layer1", [])
     layer2 = neighbors.get("layer2", [])
     if layer1:
-        parts.append("Nearest neighbors: " + " ".join(n["phrase"] for n in layer1))
+        parts.append("near " + " | ".join(n["phrase"] for n in layer1))
     if layer2:
-        parts.append("Second-layer neighbors: " + " ".join(n["phrase"] for n in layer2))
-    return clamp_text(" ".join(p for p in parts if p).strip(), MAX_LINE_DESCRIPTION_CHARS)
+        parts.append("next " + " | ".join(n["phrase"] for n in layer2))
+    return clamp_text(" || ".join(p for p in parts if p).strip(), MAX_LINE_DESCRIPTION_CHARS)
 
 
 
@@ -1095,19 +1277,19 @@ def describe_two_way_junction(cluster: Dict[str, Any]) -> Dict[str, Any]:
     ang = angle_diff_deg(m1["out_heading_deg"], m2["out_heading_deg"])
     if ang <= 20.0:
         shape_name = "narrow merge"
-        desc = f"Two-line near-parallel merge with only {round2(ang)}Â° between the rays."
+        desc = f"2-line near-parallel merge, {round2(ang)} deg."
     elif ang <= 70.0:
         shape_name = "acute corner"
-        desc = f"Two-line acute turn with a junction angle of {round2(ang)}Â°."
+        desc = f"2-line acute turn, {round2(ang)} deg."
     elif ang <= 110.0:
         shape_name = "right-angle corner"
-        desc = f"Two-line right-angle style turn with a junction angle of {round2(ang)}Â°."
+        desc = f"2-line right-angle turn, {round2(ang)} deg."
     elif ang <= 160.0:
         shape_name = "obtuse corner"
-        desc = f"Two-line obtuse corner with a junction angle of {round2(ang)}Â°."
+        desc = f"2-line obtuse corner, {round2(ang)} deg."
     else:
         shape_name = "straight continuation"
-        desc = f"Two-line near-straight continuation with rays separated by {round2(ang)}Â°."
+        desc = f"2-line near-straight continuation, {round2(ang)} deg."
     return {
         "shape_type": "shared_endpoint_junction",
         "shape_name": shape_name,
@@ -1134,28 +1316,28 @@ def describe_multiway_junction(cluster: Dict[str, Any]) -> Dict[str, Any]:
     if n == 3:
         if any(abs(d - 180.0) <= 25.0 for d in diffs):
             shape_name = "T-junction"
-            desc = "Three-line T-style junction with one near-opposite pair and one branch entering from the side."
+            desc = "3-line T-junction, one near-opposite pair."
         elif max(abs(d - 120.0) for d in diffs) <= 25.0:
             shape_name = "Y-junction"
-            desc = "Three-line balanced Y-style junction with roughly even angular spacing."
+            desc = "3-line Y-junction, near-even spacing."
         else:
             shape_name = "3-way junction"
-            desc = "Three-line junction with uneven branch spacing."
+            desc = "3-line junction, uneven spacing."
     elif n == 4:
         rightish = sum(1 for d in diffs if 65.0 <= d <= 115.0)
         oppositeish = sum(1 for d in diffs if abs(d - 180.0) <= 20.0)
         if rightish >= 3:
             shape_name = "cross junction"
-            desc = "Four-line cross-style junction with roughly orthogonal branch spacing."
+            desc = "4-line cross junction, near-orthogonal spacing."
         elif oppositeish >= 2:
             shape_name = "4-way aligned junction"
-            desc = "Four-line junction with opposite branch pairs and aligned rays."
+            desc = "4-line aligned junction, opposite branch pairs."
         else:
             shape_name = "4-way junction"
-            desc = "Four-line junction with irregular branch spacing."
+            desc = "4-line junction, irregular spacing."
     else:
         shape_name = f"{n}-way junction"
-        desc = f"Multi-line junction with {n} incident lines."
+        desc = f"{n}-way junction."
 
     pairwise = []
     for i in range(len(members)):
@@ -1247,7 +1429,7 @@ def infer_group_shapes(group: Dict[str, Any], strokes: List[PreparedStroke], wid
                 "shape_name": name,
                 "line_indices": sorted(comp_lines),
                 "node_cluster_indices": sorted(comp_nodes),
-                "description": f"Far-endpoint closed loop consistent with a {name}, spanning the group bounding box.",
+                "description": f"far-endpoint closed loop, {name}.",
             })
 
     endpoint_cluster_json = []
@@ -1268,7 +1450,7 @@ def infer_group_shapes(group: Dict[str, Any], strokes: List[PreparedStroke], wid
             ],
         })
 
-    shape_summary = " ".join(shape["description"] for shape in shapes) if shapes else "No stable group-level shape inference was found beyond the loose endpoint-touch grouping."
+    shape_summary = " ".join(shape["description"] for shape in shapes) if shapes else "no stable group-level shape beyond loose endpoint-touch grouping."
     return {
         "bbox": {
             "min_x": round2(bbox[0]),
