@@ -20,7 +20,7 @@ import traceback
 import json
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Tuple
 from collections import Counter, defaultdict
 from contextlib import contextmanager
 
@@ -34,11 +34,13 @@ except Exception:
     pass
 
 import ImageText
+import ImageTranslate
 import ImagePreprocessor
 import ImageSkeletonizer
 import ImageVectorizer
 import ImageClusters
 import ImageColours
+import LineDescriptors
 
 import PineconeSave
 import PineconeFetch
@@ -480,6 +482,7 @@ def _build_pinecone_jobs_from_text_items(
 
         ctx_vec = None
         final_score = None
+        meta_entry = None
         try:
             if src:
                 meta_entry = _resolve_meta_for_source(meta_ctx_map, src)
@@ -489,8 +492,12 @@ def _build_pinecone_jobs_from_text_items(
         except Exception:
             ctx_vec = None
 
-        if ctx_vec is None:
-            ctx_vec = pvec
+        # If live SigLIP image embedding is unavailable, reuse metadata clip embedding when present.
+        if cvec is None and isinstance(meta_entry, dict):
+            try:
+                cvec = _pick_clip_embedding(meta_entry)
+            except Exception:
+                cvec = None
 
         # -------------------------
         # Diagram label + tag
@@ -579,6 +586,52 @@ def qwen_lock() -> threading.Lock:
     return _QWEN_LOCK
 
 
+def unload_hot_qwen() -> None:
+    """
+    Best-effort release for ImagePipeline's own hot Qwen registry.
+    This avoids accidental double residency when another module also owns Qwen.
+    """
+    global _HOT_QWEN
+    with _HOT_INIT_LOCK:
+        if _HOT_QWEN is None:
+            return
+        _log("Unloading ImagePipeline hot Qwen...")
+        bundle = _HOT_QWEN
+        _HOT_QWEN = None
+        try:
+            if hasattr(bundle.model, "cpu"):
+                bundle.model.cpu()
+        except Exception:
+            pass
+        try:
+            bundle.model = None
+        except Exception:
+            pass
+        try:
+            bundle.processor = None
+        except Exception:
+            pass
+        try:
+            import gc
+            gc.collect()
+        except Exception:
+            pass
+        try:
+            import torch
+            if torch.cuda.is_available():
+                try:
+                    torch.cuda.synchronize()
+                except Exception:
+                    pass
+                torch.cuda.empty_cache()
+                try:
+                    torch.cuda.ipc_collect()
+                except Exception:
+                    pass
+        except Exception:
+            pass
+
+
 # Optional: expose hot SigLIP/MiniLM to other scripts in the SAME process
 def hot_siglip_bundle() -> Optional[_SiglipBundle]:
     return _HOT_SIGLIP
@@ -589,6 +642,21 @@ def hot_minilm_bundle() -> Optional[_MiniLMBundle]:
 
 def _norm_path(p: str | Path) -> str:
     return os.path.normcase(os.path.normpath(str(p)))
+
+
+def _norm_diagram_mode(v: Any) -> int:
+    try:
+        d = int(v)
+    except Exception:
+        return 0
+    if d == 1:
+        return 1
+    if d == 2:
+        return 2
+    # Internal mixed mode: both visual and schematic for same base_context.
+    if d == 3:
+        return 3
+    return 0
 
 
 IMG_EXTS = {".png", ".jpg", ".jpeg", ".webp", ".bmp", ".tif", ".tiff"}
@@ -747,6 +815,13 @@ def _pick_best_context_embedding(meta_entry: Dict[str, Any]) -> Optional[List[fl
     return best_vec
 
 
+def _pick_clip_embedding(meta_entry: Dict[str, Any]) -> Optional[List[float]]:
+    vec = meta_entry.get("clip_embedding")
+    if isinstance(vec, list) and vec and all(isinstance(x, (int, float)) for x in vec):
+        return vec
+    return None
+
+
 def _resolve_meta_for_source(meta_map: Dict[str, Dict[str, Any]], source_path: str) -> Optional[Dict[str, Any]]:
     sp = str(source_path)
 
@@ -849,16 +924,33 @@ def _pipeline_worker(
     gpu_index: int,
     allowed_base_contexts: Optional[List[str]] = None,
     diagram_base_contexts: Optional[List[str]] = None,
+    diagram_mode_by_base_context: Optional[Dict[str, int]] = None,
     diagram_required_objects_by_base_context: Optional[Dict[str, List[str]]] = None,
 ) -> None:
 
     out_dir = handle.out_dir
     out_dir.mkdir(parents=True, exist_ok=True)
 
-    # normalized set for diagram prompts
-    diagram_set: set[str] = set()
+    # normalized diagram modes by base context:
+    # 0 = visual image (non-diagram), 1 = visual diagram, 2 = schematic diagram,
+    # 3 = mixed visual+schematic (run both downstream branches)
+    diagram_mode_map: Dict[str, int] = {}
+    if isinstance(diagram_mode_by_base_context, dict):
+        for k, v in diagram_mode_by_base_context.items():
+            kk = str(k or "").strip()
+            if not kk:
+                continue
+            diagram_mode_map[kk] = _norm_diagram_mode(v)
+
     if diagram_base_contexts:
-        diagram_set = {str(x or "").strip() for x in diagram_base_contexts if str(x or "").strip()}
+        # Backward-compatible fallback for callers that only pass a diagram context list.
+        for x in diagram_base_contexts:
+            kk = str(x or "").strip()
+            if not kk:
+                continue
+            diagram_mode_map.setdefault(kk, 1)
+
+    diagram_set: set[str] = {k for k, v in diagram_mode_map.items() if int(v) > 0}
 
     req_map: Dict[str, List[str]] = {}
     if isinstance(diagram_required_objects_by_base_context, dict):
@@ -951,17 +1043,51 @@ def _pipeline_worker(
         for it in img_items:
             it["base_context"] = path_base_context.get(it["source_path"], "")
 
-        print("[4/10] ImageText (in-memory)...")
-        with stage("ImageText.process_images_in_memory"):
-            text_items, unique_to_processed = ImageText.process_images_in_memory(
-                image_items=img_items,
-                start_index=0,
-                save_outputs=True,
-                return_path_map=True,
-            )
+        diagram_items: List[Dict[str, Any]] = []
+        visual_items: List[Dict[str, Any]] = []
+        for it in img_items:
+            bc = str(it.get("base_context", "") or "").strip()
+            mode = int(diagram_mode_map.get(bc, 0) or 0)
+            if mode > 0:
+                diagram_items.append(it)
+            else:
+                visual_items.append(it)
+
+        print(
+            "[4/10] Process image ids by mode "
+            f"(diagram_items={len(diagram_items)} visual_items={len(visual_items)})..."
+        )
+
+        text_items: List[Dict[str, Any]] = []
+        unique_to_processed: Dict[str, str] = {}
+
+        if diagram_items:
+            with stage("ImageText.process_images_in_memory.diagrams"):
+                d_text_items, d_map = ImageText.process_images_in_memory(
+                    image_items=diagram_items,
+                    start_index=0,
+                    save_outputs=True,
+                    return_path_map=True,
+                )
+            text_items.extend(d_text_items or [])
+            unique_to_processed.update(d_map or {})
+
+        if visual_items:
+            with stage("ImageTranslate.translate_images_in_memory.visual"):
+                v_text_items, v_map = ImageTranslate.translate_images_in_memory(
+                    image_items=visual_items,
+                    start_index=0,
+                    save_outputs=True,
+                    return_path_map=True,
+                )
+            text_items.extend(v_text_items or [])
+            unique_to_processed.update(v_map or {})
+
         if not text_items:
-            handle.errors["pipeline"] = "imagetext_no_outputs"
+            handle.errors["pipeline"] = "image_translation_no_outputs"
             return
+
+        text_items.sort(key=lambda x: int(x.get("idx", 0) or 0))
         
         text_items_all_for_pinecone = list(text_items)
 
@@ -982,12 +1108,12 @@ def _pipeline_worker(
         # =========================
         # Qwen selection step (EXTERNAL worker)
         # =========================
-        print("[5/10] qwentest selection (processed images, external worker)...")
-        import qwentest
+        print("[5/10] selection routing (diagram-only qwentest; non-diagram pass-through)...")
 
         qwen_model = workers.qwen_model
         qwen_processor = workers.qwen_processor
         qwen_device = workers.qwen_device
+        qwentest_mod = None
 
         selected_ids_all: List[str] = []
         selection_payload_by_ctx: Dict[str, Any] = {}
@@ -1006,20 +1132,58 @@ def _pipeline_worker(
                 if not items:
                     continue
 
+                mode = int(diagram_mode_map.get(bc, 0) or 0)
+
+                # Non-diagram images (e.g. Comfy-generated visual images) are ready:
+                # keep all and skip qwentest selection.
+                if mode <= 0:
+                    picked_passthrough: List[str] = []
+                    for t in items:
+                        pid = str(t.get("processed_id", "") or "").strip()
+                        if pid and pid not in picked_passthrough:
+                            picked_passthrough.append(pid)
+                    selected_ids_by_ctx[bc] = picked_passthrough
+                    selection_payload_by_ctx[bc] = {
+                        "selection_mode": "passthrough_non_diagram",
+                        "count_in": len(items),
+                        "count_out": len(picked_passthrough),
+                    }
+                    for pid in picked_passthrough:
+                        if pid and pid not in selected_ids_all:
+                            selected_ids_all.append(pid)
+                    continue
+
+                # Diagram with 0/1 candidate does not need qwentest cutdown.
+                if len(items) <= 1:
+                    picked_single: List[str] = []
+                    for t in items:
+                        pid = str(t.get("processed_id", "") or "").strip()
+                        if pid and pid not in picked_single:
+                            picked_single.append(pid)
+                    selected_ids_by_ctx[bc] = picked_single
+                    selection_payload_by_ctx[bc] = {
+                        "selection_mode": "passthrough_single_diagram_candidate",
+                        "count_in": len(items),
+                        "count_out": len(picked_single),
+                    }
+                    for pid in picked_single:
+                        if pid and pid not in selected_ids_all:
+                            selected_ids_all.append(pid)
+                    continue
+
                 processed_items_for_qwen: List[Dict[str, Any]] = []
+                comfy_passthrough_ids: List[str] = []
                 for t in items:
                     pid = str(t.get("processed_id", "") or "").strip()
-                    mbgr = t.get("masked_bgr")
-                    if not pid or mbgr is None:
+                    if not pid:
                         continue
                     try:
-                        pil = _bgr_to_pil_fast(mbgr, longest_side=600)
-
                         src = str(t.get("source_path", "") or "")
                         if not src:
                             src = str(handle.processed_to_unique.get(pid, "") or "")
 
                         final_score = None
+                        meta_entry = None
                         try:
                             if src:
                                 meta_entry = _resolve_meta_for_source(meta_ctx_map, src)
@@ -1027,6 +1191,29 @@ def _pipeline_worker(
                                     final_score = meta_entry.get("final_score", None)
                         except Exception:
                             final_score = None
+
+                        is_comfy_source = False
+                        if isinstance(meta_entry, dict):
+                            try:
+                                src_bits = []
+                                for kk in ("source", "source_name", "source_kind"):
+                                    vv = meta_entry.get(kk)
+                                    if isinstance(vv, str) and vv.strip():
+                                        src_bits.append(vv.strip().lower())
+                                if src_bits and "comfy" in " ".join(src_bits):
+                                    is_comfy_source = True
+                            except Exception:
+                                is_comfy_source = False
+
+                        if is_comfy_source:
+                            if pid not in comfy_passthrough_ids:
+                                comfy_passthrough_ids.append(pid)
+                            continue
+
+                        mbgr = t.get("masked_bgr")
+                        if mbgr is None:
+                            continue
+                        pil = _bgr_to_pil_fast(mbgr, longest_side=600)
 
                         processed_items_for_qwen.append({
                             "processed_id": pid,
@@ -1038,15 +1225,33 @@ def _pipeline_worker(
                     except Exception:
                         continue
 
-                if not processed_items_for_qwen:
+                if len(processed_items_for_qwen) <= 1:
+                    picked_passthrough: List[str] = list(comfy_passthrough_ids)
+                    for it in processed_items_for_qwen:
+                        pid = str(it.get("processed_id", "") or "").strip()
+                        if pid and pid not in picked_passthrough:
+                            picked_passthrough.append(pid)
+                    if picked_passthrough:
+                        selected_ids_by_ctx[bc] = picked_passthrough
+                        selection_payload_by_ctx[bc] = {
+                            "selection_mode": "passthrough_diagram_comfy_or_single_candidate",
+                            "count_in": len(items),
+                            "count_out": len(picked_passthrough),
+                        }
+                        for pid in picked_passthrough:
+                            if pid and pid not in selected_ids_all:
+                                selected_ids_all.append(pid)
                     continue
 
                 picked: List[str] = []
                 payload: Dict[str, Any] = {}
 
                 try:
+                    if qwentest_mod is None:
+                        import qwentest as qwentest_mod  # type: ignore
+
                     with workers.qwen_lock:
-                        payload = qwentest.pick_two_processed_candidates_transformers(
+                        payload = qwentest_mod.pick_two_processed_candidates_transformers(
                             model=qwen_model,
                             processor=qwen_processor,
                             device=qwen_device,
@@ -1072,13 +1277,25 @@ def _pipeline_worker(
 
                 if len(picked) < 1:
                     tmp = []
-                    for t in items:
-                        pid = str(t.get("processed_id", "") or "").strip()
+                    for it in processed_items_for_qwen:
+                        pid = str(it.get("processed_id", "") or "").strip()
                         if pid:
                             tmp.append(pid)
                         if len(tmp) >= 2:
                             break
                     picked = tmp[:1]
+
+                if comfy_passthrough_ids:
+                    merged: List[str] = []
+                    for pid in list(comfy_passthrough_ids) + list(picked):
+                        if pid and pid not in merged:
+                            merged.append(pid)
+                    picked = merged
+                    try:
+                        payload["selection_mode"] = "diagram_qwen_plus_comfy_passthrough"
+                        payload["comfy_passthrough_ids"] = list(comfy_passthrough_ids)
+                    except Exception:
+                        pass
 
                 selection_payload_by_ctx[bc] = payload
                 selected_ids_by_ctx[bc] = list(picked)
@@ -1163,8 +1380,10 @@ def _pipeline_worker(
                     raw_candidates = merged[:80]
 
                     try:
+                        if qwentest_mod is None:
+                            import qwentest as qwentest_mod  # type: ignore
                         with workers.qwen_lock:
-                            refined = qwentest.refine_candidate_labels_with_qwen(
+                            refined = qwentest_mod.refine_candidate_labels_with_qwen(
                                 model=qwen_model,
                                 processor=qwen_processor,
                                 device=qwen_device,
@@ -1243,17 +1462,24 @@ def _pipeline_worker(
         # Clustering remains diagram-only later.
         # ---------------------------------------------------------
         selected_keep: set[str] = set()
-        diagram_keep: set[str] = set()
+        visual_diagram_keep: set[str] = set()
+        schematic_diagram_keep: set[str] = set()
         for bc, picked in selected_ids_by_ctx.items():
+            mode = int(diagram_mode_map.get(bc, 0) or 0)
             for pid in picked:
                 if pid:
                     selected_keep.add(pid)
-                    if bc in diagram_set:
-                        diagram_keep.add(pid)
+                    if mode == 1:
+                        visual_diagram_keep.add(pid)
+                    elif mode == 2:
+                        schematic_diagram_keep.add(pid)
+                    elif mode == 3:
+                        visual_diagram_keep.add(pid)
+                        schematic_diagram_keep.add(pid)
         try:
             print(
-                "[dbg][clusters] selected_keep=%d diagram_keep=%d"
-                % (len(selected_keep), len(diagram_keep))
+                "[dbg][diagram-modes] selected_keep=%d visual_keep=%d schematic_keep=%d"
+                % (len(selected_keep), len(visual_diagram_keep), len(schematic_diagram_keep))
             )
         except Exception:
             pass
@@ -1342,64 +1568,105 @@ def _pipeline_worker(
         )
         handle.pinecone_done.set()
 
-        if not diagram_keep:
-            # nothing diagram-like: skip clusters only
+        if not visual_diagram_keep and not schematic_diagram_keep:
             handle.colours_done.set()
             print("[done] no diagram prompts -> finished after colours.")
             return
 
-        diagram_text_items = [
+        # Schematic diagrams: build line descriptions from StrokeVectors (no clusters).
+        if schematic_diagram_keep:
+            schematic_indices: set[int] = set()
+            for t in text_items:
+                pid = str(t.get("processed_id", "") or "").strip()
+                if pid not in schematic_diagram_keep:
+                    continue
+                try:
+                    schematic_indices.add(int(t.get("idx")))
+                except Exception:
+                    continue
+
+            vec_json_paths: List[Path] = []
+            for idx in sorted(schematic_indices):
+                p = BASE_DIR / "StrokeVectors" / f"processed_{idx}.json"
+                if p.is_file():
+                    vec_json_paths.append(p)
+
+            if vec_json_paths:
+                print(f"[10/10] LineDescriptors (schematic) for {len(vec_json_paths)} files...")
+                with stage("LineDescriptors.describe_vectorizer_jsons_batch"):
+                    desc_summary = LineDescriptors.describe_vectorizer_jsons_batch(
+                        vec_json_paths,
+                        output_dir=BASE_DIR / "StrokeDescriptions",
+                        max_workers=min(8, max(1, len(vec_json_paths))),
+                    )
+                try:
+                    (out_dir / "line_descriptors_summary.json").write_text(
+                        json.dumps(desc_summary, ensure_ascii=False, indent=2),
+                        encoding="utf-8",
+                    )
+                except Exception:
+                    pass
+                if desc_summary.get("errors"):
+                    handle.errors["line_descriptors"] = json.dumps(desc_summary.get("errors", [])[:5], ensure_ascii=False)
+            else:
+                handle.errors["line_descriptors"] = "no_strokevectors_for_schematic_indices"
+
+        # Visual diagrams: keep existing cluster generation path.
+        if not visual_diagram_keep:
+            handle.colours_done.set()
+            print("[done] no visual diagram prompts -> finished after colours.")
+            return
+
+        visual_diagram_text_items = [
             t for t in text_items
-            if str(t.get("processed_id", "") or "").strip() in diagram_keep
+            if str(t.get("processed_id", "") or "").strip() in visual_diagram_keep
         ]
-        # IMPORTANT:
-        # preproc/vectors are keyed by ImageText "idx" (e.g. 134), NOT list position.
-        diagram_indices: set[int] = set()
+        visual_diagram_indices: set[int] = set()
         for t in text_items:
             pid = str(t.get("processed_id", "") or "").strip()
-            if pid not in diagram_keep:
+            if pid not in visual_diagram_keep:
                 continue
             try:
-                diagram_indices.add(int(t.get("idx")))
+                visual_diagram_indices.add(int(t.get("idx")))
             except Exception:
                 continue
 
-        diagram_preproc_by_idx = {idx: preproc_by_idx[idx] for idx in diagram_indices if idx in preproc_by_idx}
-        diagram_vectors_by_idx = {idx: vectors_by_idx[idx] for idx in diagram_indices if idx in vectors_by_idx}
+        visual_preproc_by_idx = {idx: preproc_by_idx[idx] for idx in visual_diagram_indices if idx in preproc_by_idx}
+        visual_vectors_by_idx = {idx: vectors_by_idx[idx] for idx in visual_diagram_indices if idx in vectors_by_idx}
 
         try:
             print(
-                "[dbg][clusters] diagram_text_items=%d diagram_indices=%d preproc_hits=%d vector_hits=%d"
+                "[dbg][clusters] visual_diagram_text_items=%d visual_indices=%d preproc_hits=%d vector_hits=%d"
                 % (
-                    len(diagram_text_items),
-                    len(diagram_indices),
-                    len(diagram_preproc_by_idx),
-                    len(diagram_vectors_by_idx),
+                    len(visual_diagram_text_items),
+                    len(visual_diagram_indices),
+                    len(visual_preproc_by_idx),
+                    len(visual_vectors_by_idx),
                 )
             )
         except Exception:
             pass
-        if not diagram_text_items or not diagram_preproc_by_idx or not diagram_vectors_by_idx:
+        if not visual_diagram_text_items or not visual_preproc_by_idx or not visual_vectors_by_idx:
             try:
                 pre_keys = set(int(k) for k in preproc_by_idx.keys())
                 vec_keys = set(int(k) for k in vectors_by_idx.keys())
-                miss_pre = sorted(diagram_indices - pre_keys)
-                miss_vec = sorted(diagram_indices - vec_keys)
+                miss_pre = sorted(visual_diagram_indices - pre_keys)
+                miss_vec = sorted(visual_diagram_indices - vec_keys)
                 print(
-                    "[dbg][clusters] empty_input_details missing_preproc=%s missing_vectors=%s"
+                    "[dbg][clusters] empty_visual_input_details missing_preproc=%s missing_vectors=%s"
                     % (miss_pre[:10], miss_vec[:10])
                 )
             except Exception:
                 pass
             handle.colours_done.set()
-            print("[done] no diagram items available for clusters -> finished after colours.")
+            print("[done] no visual diagram items available for clusters -> finished after colours.")
             return
 
-        print("[10/10] ImageClusters (in-memory)...")
+        print("[11/11] ImageClusters (visual diagrams, in-memory)...")
         with stage("ImageClusters.cluster_in_memory"):
-            clusters_by_idx = ImageClusters.cluster_in_memory(
-                preproc_by_idx=diagram_preproc_by_idx,
-                vectors_by_idx=diagram_vectors_by_idx,
+            ImageClusters.cluster_in_memory(
+                preproc_by_idx=visual_preproc_by_idx,
+                vectors_by_idx=visual_vectors_by_idx,
                 save_outputs=True,
             )
 
@@ -1429,6 +1696,7 @@ def start_pipeline_background(
     gpu_index: int = 0,
     allowed_base_contexts: Optional[List[str]] = None,
     diagram_base_contexts: Optional[List[str]] = None,
+    diagram_mode_by_base_context: Optional[Dict[str, int]] = None,
     diagram_required_objects_by_base_context: Optional[Dict[str, List[str]]] = None,
 ) -> PipelineHandle:
 
@@ -1441,6 +1709,7 @@ def start_pipeline_background(
             gpu_index=gpu_index,
             allowed_base_contexts=allowed_base_contexts,
             diagram_base_contexts=diagram_base_contexts,
+            diagram_mode_by_base_context=diagram_mode_by_base_context,
             diagram_required_objects_by_base_context=diagram_required_objects_by_base_context,
         )
 
@@ -1482,6 +1751,7 @@ def start_pipeline_background(
             gpu_index=gpu_index,
             allowed_base_contexts=allowed_base_contexts,
             diagram_base_contexts=diagram_base_contexts,
+            diagram_mode_by_base_context=diagram_mode_by_base_context,
             diagram_required_objects_by_base_context=diagram_required_objects_by_base_context,
         ),
     )
@@ -1499,6 +1769,7 @@ def run_pipeline_blocking(
     gpu_index: int = 0,
     allowed_base_contexts: Optional[List[str]] = None,
     diagram_base_contexts: Optional[List[str]] = None,
+    diagram_mode_by_base_context: Optional[Dict[str, int]] = None,
     diagram_required_objects_by_base_context: Optional[Dict[str, List[str]]] = None,
 ) -> PipelineHandle:
     if REMOTE_API:
@@ -1511,6 +1782,7 @@ def run_pipeline_blocking(
                 "gpu_index": int(gpu_index),
                 "allowed_base_contexts": allowed_base_contexts or [],
                 "diagram_base_contexts": diagram_base_contexts or [],
+                "diagram_mode_by_base_context": diagram_mode_by_base_context or {},
                 "diagram_required_objects_by_base_context": diagram_required_objects_by_base_context or {},
             },
             timeout=3600,
@@ -1551,6 +1823,7 @@ def run_pipeline_blocking(
         gpu_index=gpu_index,
         allowed_base_contexts=allowed_base_contexts,
         diagram_base_contexts=diagram_base_contexts,
+        diagram_mode_by_base_context=diagram_mode_by_base_context,
         diagram_required_objects_by_base_context=diagram_required_objects_by_base_context,
     )
     h.pipeline_done.wait()
@@ -1605,7 +1878,7 @@ def get_images_background(
 ) -> tuple[Dict[str, List[str]], Optional[PipelineHandle], Dict[str, int]]:
     """
     Returns:
-      (pinecone_hits, pipeline_handle_or_none, diagram_flags_by_prompt)
+      (pinecone_hits, pipeline_handle_or_none, diagram_mode_by_prompt)
 
     - Pinecone is checked first.
     - If misses exist, this function ONLY starts ImagePipeline for those prompts.
@@ -1643,10 +1916,7 @@ def get_images_background(
                     continue
                 prompt_to_topic[prompt] = topic
                 d = v.get("diagram", 0)
-                try:
-                    diagram_flags[prompt] = 1 if int(d) == 1 else 0
-                except Exception:
-                    diagram_flags[prompt] = 0
+                diagram_flags[prompt] = _norm_diagram_mode(d)
 
     if not prompt_to_topic:
         return {}, None, {}
@@ -1663,17 +1933,29 @@ def get_images_background(
 
     results: Dict[str, List[str]] = {}
     misses: Dict[str, str] = {}
+    fetch_attempts: List[Tuple[float, int, bool]] = [
+        (float(min_final_score), int(min_modalities), True),
+        (0.62, 2, True),
+    ]
+    allow_lax_reuse = str(os.getenv("PINECONE_ALLOW_LAX_REUSE", "0")).strip().lower() in {"1", "true", "yes", "on"}
+    if allow_lax_reuse:
+        fetch_attempts.append((0.55, 1, False))
 
     for prompt, topic in prompt_to_topic.items():
         try:
-            ids = PineconeFetch.fetch_processed_ids_for_prompt(
-                prompt,
-                top_n=top_n_per_prompt,
-                top_k_per_modality=top_k_per_modality,
-                min_modalities=min_modalities,
-                min_final_score=min_final_score,
-                require_base_context_match=True,
-            )
+            ids: List[str] = []
+            for score_floor, min_mods, require_ctx in fetch_attempts:
+                cur = PineconeFetch.fetch_processed_ids_for_prompt(
+                    prompt,
+                    top_n=top_n_per_prompt,
+                    top_k_per_modality=top_k_per_modality,
+                    min_modalities=int(min_mods),
+                    min_final_score=float(score_floor),
+                    require_base_context_match=bool(require_ctx),
+                )
+                if cur:
+                    ids = [str(x) for x in cur if str(x)]
+                    break
             if ids:
                 results[prompt] = ids
             else:
@@ -1684,7 +1966,8 @@ def get_images_background(
     if not misses:
         return results, None, diagram_flags
 
-    diagram_prompts = [p for p in misses.keys() if diagram_flags.get(p, 0) == 1]
+    diagram_prompts = [p for p in misses.keys() if int(diagram_flags.get(p, 0) or 0) > 0]
+    diagram_mode_map = {p: int(diagram_flags.get(p, 0) or 0) for p in diagram_prompts}
 
     h = start_pipeline_background(
         workers=workers,
@@ -1694,6 +1977,7 @@ def get_images_background(
         gpu_index=gpu_index,
         allowed_base_contexts=list(misses.keys()),
         diagram_base_contexts=diagram_prompts,
+        diagram_mode_by_base_context=diagram_mode_map,
     )
     return results, h, diagram_flags
 

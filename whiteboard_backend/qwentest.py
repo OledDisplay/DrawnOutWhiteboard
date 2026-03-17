@@ -36,6 +36,7 @@ CLUSTER_RENDER_DIR = BASE_DIR / "ClusterRenders"
 CLUSTER_MAP_DIR = BASE_DIR / "ClusterMaps"
 
 OUT_DIR = BASE_DIR / "ClustersLabeled"
+SCHEMATIC_OUT_DIR = BASE_DIR / "LineLabels"
 CACHE_DIR = BASE_DIR / "_path_cache"
 CACHE_DIR.mkdir(parents=True, exist_ok=True)
 IMG_CACHE_PATH = CACHE_DIR / "processed_png_index.json"
@@ -90,8 +91,7 @@ def _env_flag(name: str, default: bool) -> bool:
     return raw not in ("0", "false", "no", "off", "")
 
 
-PLAN_PROMPT_CHAR_CAP = max(512, int(os.getenv("QWEN_PLAN_PROMPT_CHAR_CAP", "12000") or 12000))
-PLAN_BATCH_CHAR_BUDGET = max(1024, int(os.getenv("QWEN_PLAN_BATCH_CHAR_BUDGET", "18000") or 18000))
+PLAN_PROMPT_CHAR_CAP = max(512, int(os.getenv("QWEN_PLAN_PROMPT_CHAR_CAP", "6000") or 6000))
 PLAN_DO_SAMPLE = _env_flag("QWEN_PLAN_DO_SAMPLE", False)
 PLAN_USE_CACHE = _env_flag("QWEN_PLAN_USE_CACHE", True)
 
@@ -898,7 +898,11 @@ def build_postfacto_label_match_prompt(
         "REFINED LABELS:\n"
         f"{json.dumps(labels, ensure_ascii=False)}\n\n"
         "OBJECT VISUAL MAP, INDEXED:\n"
-        f"{json.dumps(clusters_compact, ensure_ascii=False)}\n"
+        f"{json.dumps(clusters_compact, ensure_ascii=False)}\n\n"
+        "ADDITIONAL HARD CONSTRAINTS:\n"
+        "- Use each refined label at most once across all matches.\n"
+        "- If multiple objects fit one label, keep only the single best object for that label.\n"
+        "- Prefer covering more different refined labels when confidence is similar.\n"
     )
 
 
@@ -911,7 +915,14 @@ def _parse_postfacto_matches(text_out: str, refined_labels: List[str]) -> Dict[s
     if not isinstance(matches, list):
         return {}
 
-    allowed = {str(x) for x in (refined_labels or []) if isinstance(x, str) and x.strip()}
+    allowed: Dict[str, str] = {}
+    for x in (refined_labels or []):
+        if not isinstance(x, str):
+            continue
+        sx = x.strip()
+        if not sx:
+            continue
+        allowed[sx.lower()] = sx
     out: Dict[str, Dict[str, Any]] = {}
 
     for it in matches:
@@ -923,8 +934,11 @@ def _parse_postfacto_matches(text_out: str, refined_labels: List[str]) -> Dict[s
         ck = ck.strip()
 
         lab = it.get("label")
-        if lab is not None and (not isinstance(lab, str) or lab not in allowed):
-            lab = None
+        if lab is not None:
+            if not isinstance(lab, str):
+                lab = None
+            else:
+                lab = allowed.get(lab.strip().lower())
 
         conf = it.get("confidence", 0.0)
         try:
@@ -943,6 +957,127 @@ def _parse_postfacto_matches(text_out: str, refined_labels: List[str]) -> Dict[s
         }
 
     return out
+
+
+def _dedupe_matches_by_label(
+    matches: Dict[str, Dict[str, Any]],
+    cluster_order: List[str],
+) -> Dict[str, Dict[str, Any]]:
+    if not matches:
+        return {}
+
+    order_rank: Dict[str, int] = {str(k): i for i, k in enumerate(cluster_order or [])}
+    best_by_label: Dict[str, Dict[str, Any]] = {}
+
+    for ck, m in matches.items():
+        if not isinstance(m, dict):
+            continue
+        lab = m.get("label")
+        if not isinstance(lab, str) or not lab.strip():
+            continue
+        conf = float(m.get("confidence", 0.0) or 0.0)
+        rank = int(order_rank.get(str(ck), 10**9))
+
+        prev = best_by_label.get(lab)
+        if prev is None or conf > float(prev["confidence"]) or (conf == float(prev["confidence"]) and rank < int(prev["rank"])):
+            best_by_label[lab] = {"cluster_key": str(ck), "confidence": conf, "rank": rank}
+
+    out: Dict[str, Dict[str, Any]] = {}
+    for ck, m in matches.items():
+        if not isinstance(m, dict):
+            continue
+        row = dict(m)
+        lab = row.get("label")
+        if isinstance(lab, str) and lab.strip():
+            keep = best_by_label.get(lab)
+            if not keep or str(keep.get("cluster_key")) != str(ck):
+                prev_reason = str(row.get("reason", "") or "").strip()
+                row["label"] = None
+                row["confidence"] = 0.0
+                row["reason"] = (prev_reason + " | duplicate_label_dropped").strip(" |")
+        out[str(ck)] = row
+
+    return out
+
+
+def _infer_cluster_index(cluster_key: str, entry: Dict[str, Any]) -> Optional[int]:
+    if isinstance(entry, dict):
+        for k in ("cluster_index", "cluster_idx", "index"):
+            v = entry.get(k)
+            try:
+                if v is not None:
+                    return int(v)
+            except Exception:
+                pass
+    m = re.match(r"^(\d+)_", str(cluster_key or "").strip())
+    if m:
+        try:
+            return int(m.group(1))
+        except Exception:
+            return None
+    return None
+
+
+def _build_label_cluster_outputs(
+    *,
+    refined_labels: List[str],
+    clusters: Dict[str, Dict[str, Any]],
+    cluster_order: List[str],
+) -> Tuple[Dict[str, Any], List[Dict[str, Any]]]:
+    label_cluster_map: Dict[str, Any] = {}
+    cleaned_labels: List[str] = []
+    seen_labels = set()
+    for x in (refined_labels or []):
+        sx = str(x).strip()
+        if not sx:
+            continue
+        k = sx.lower()
+        if k in seen_labels:
+            continue
+        seen_labels.add(k)
+        cleaned_labels.append(sx)
+
+    rows: List[Dict[str, Any]] = []
+    for ck in (cluster_order or []):
+        rec = clusters.get(ck) if isinstance(clusters, dict) else None
+        if not isinstance(rec, dict):
+            continue
+        entry = rec.get("entry") if isinstance(rec.get("entry"), dict) else {}
+        rows.append({
+            "cluster_key": str(ck),
+            "cluster_index": _infer_cluster_index(str(ck), entry),
+            "mask_name": str(entry.get("crop_file_mask", "") or "") if isinstance(entry, dict) else "",
+            "visual": rec.get("visual") if isinstance(rec.get("visual"), dict) else {},
+            "matched_label": rec.get("matched_label"),
+            "match_confidence": rec.get("match_confidence"),
+            "match_reason": rec.get("match_reason", ""),
+        })
+
+    by_label: Dict[str, Dict[str, Any]] = {}
+    for row in rows:
+        lab = row.get("matched_label")
+        if not isinstance(lab, str) or not lab.strip():
+            continue
+        by_label[lab] = {
+            "cluster_key": row.get("cluster_key"),
+            "cluster_index": row.get("cluster_index"),
+            "mask_name": row.get("mask_name"),
+            "visual": row.get("visual", {}),
+            "confidence": row.get("match_confidence"),
+            "reason": row.get("match_reason", ""),
+        }
+
+    for lab in cleaned_labels:
+        label_cluster_map[lab] = by_label.get(lab, {
+            "cluster_key": None,
+            "cluster_index": None,
+            "mask_name": None,
+            "visual": None,
+            "confidence": 0.0,
+            "reason": "",
+        })
+
+    return label_cluster_map, rows
 
 
 def postfacto_match_labels_with_qwen(
@@ -1390,6 +1525,7 @@ def label_clusters_transformers(
     device: torch.device,
     *,
     save_outputs: bool = False,
+    skip_existing_labels: Optional[bool] = None,
 ) -> Dict[int, Dict[str, Any]]:
 
     out_dir = (Path(__file__).resolve().parent / "ClustersLabeled")
@@ -1405,6 +1541,7 @@ def label_clusters_transformers(
     )
 
     results_by_idx: Dict[int, Dict[str, Any]] = {}
+    do_skip_existing = SKIP_EXISTING_LABELS if skip_existing_labels is None else bool(skip_existing_labels)
 
     for idx in sorted(clusters_state.keys()):
 
@@ -1412,7 +1549,7 @@ def label_clusters_transformers(
         folder.mkdir(parents=True, exist_ok=True)
         labels_path = folder / "labels.json"
 
-        if save_outputs and SKIP_EXISTING_LABELS and labels_path.exists():
+        if save_outputs and do_skip_existing and labels_path.exists():
             try:
                 results_by_idx[idx] = json.loads(labels_path.read_text(encoding="utf-8"))
                 print(f"[skip] idx={idx}: existing labels.json loaded")
@@ -1452,6 +1589,8 @@ def label_clusters_transformers(
             "clusters": {},
             "cluster_order": [],
             "postfacto_matches": {},
+            "label_cluster_map": {},
+            "cluster_label_rows": [],
         }
         results_by_idx[idx] = results
 
@@ -1568,6 +1707,7 @@ def label_clusters_transformers(
                     "ci": ci,
                     "cluster_key": cluster_key,
                     "entry": entry,
+                    "mask_name": task["mask_name"],
                     "colour_hint": colour_hint,
                     "bbox_xyxy": bbox_xyxy,
                     "bbox_right_panel_xyxy": bbox_panel,
@@ -1612,7 +1752,9 @@ def label_clusters_transformers(
                 parsed_visual = _parse_cluster_visual(text_out)
 
                 _store(meta["cluster_key"], {
+                    "cluster_index": int(meta["ci"]),
                     "entry": meta["entry"],
+                    "mask_name": meta.get("mask_name"),
                     "colour_hint": meta["colour_hint"],
                     "bbox_xyxy": meta["bbox_xyxy"],
                     "bbox_right_panel_xyxy": meta["bbox_right_panel_xyxy"],
@@ -1640,6 +1782,7 @@ def label_clusters_transformers(
             refined_labels=refined_labels,
             cluster_visual_map=cluster_visual_map,
         )
+        matches = _dedupe_matches_by_label(matches, results.get("cluster_order", []))
 
         results["postfacto_matches"] = matches
 
@@ -1649,12 +1792,477 @@ def label_clusters_transformers(
                 results["clusters"][ck]["match_confidence"] = m.get("confidence")
                 results["clusters"][ck]["match_reason"] = m.get("reason", "")
 
+        label_cluster_map, cluster_label_rows = _build_label_cluster_outputs(
+            refined_labels=refined_labels,
+            clusters=results.get("clusters", {}),
+            cluster_order=results.get("cluster_order", []),
+        )
+        results["label_cluster_map"] = label_cluster_map
+        results["cluster_label_rows"] = cluster_label_rows
+
         if save_outputs:
             labels_path.write_text(json.dumps(results, ensure_ascii=False, indent=2), encoding="utf-8")
 
         print(f"[ok] idx={idx}: clusters={len(tasks)} dt={time.time()-t0:.2f}s")
 
     return results_by_idx
+
+
+def _as_float_pair(v: Any) -> Tuple[float, float]:
+    if not isinstance(v, (list, tuple)) or len(v) < 2:
+        return (0.0, 0.0)
+    try:
+        return (float(v[0]), float(v[1]))
+    except Exception:
+        return (0.0, 0.0)
+
+
+def _build_schematic_key_payload(line_desc: Dict[str, Any]) -> Dict[str, Any]:
+    described_lines = line_desc.get("described_lines") if isinstance(line_desc, dict) else None
+    groups = line_desc.get("groups") if isinstance(line_desc, dict) else None
+    described_lines = described_lines if isinstance(described_lines, list) else []
+    groups = groups if isinstance(groups, list) else []
+
+    line_rows: List[Dict[str, Any]] = []
+    for src_order, row in enumerate(described_lines):
+        if not isinstance(row, dict):
+            continue
+        line_idx = row.get("described_line_index", row.get("line_index"))
+        try:
+            line_idx_i = int(line_idx)
+        except Exception:
+            continue
+
+        geom = row.get("geometry") if isinstance(row.get("geometry"), dict) else {}
+        centroid = _as_float_pair(row.get("centroid"))
+        if centroid == (0.0, 0.0):
+            centroid = _as_float_pair(geom.get("centroid"))
+
+        bbox0 = {}
+        if isinstance(row.get("bbox"), dict):
+            bbox0 = row.get("bbox") or {}
+        elif isinstance(geom.get("bbox"), dict):
+            bbox0 = geom.get("bbox") or {}
+        elif isinstance(geom.get("bbox_xyxy"), dict):
+            bbox0 = geom.get("bbox_xyxy") or {}
+        bbox = {
+            "min_x": float(bbox0.get("min_x", 0.0) or 0.0),
+            "min_y": float(bbox0.get("min_y", 0.0) or 0.0),
+            "max_x": float(bbox0.get("max_x", 0.0) or 0.0),
+            "max_y": float(bbox0.get("max_y", 0.0) or 0.0),
+        }
+        group_index = row.get("group_index", None)
+        try:
+            group_index = int(group_index) if group_index is not None else None
+        except Exception:
+            group_index = None
+
+        desc = str(row.get("description", "") or row.get("full_description", "") or "").strip()
+        if len(desc) > 320:
+            desc = desc[:320].rstrip() + "..."
+
+        left_to_right_rank = row.get("left_to_right_rank", src_order)
+        try:
+            left_to_right_rank = int(left_to_right_rank)
+        except Exception:
+            left_to_right_rank = int(src_order)
+
+        line_rows.append(
+            {
+                "line_index": line_idx_i,
+                "source_stroke_index": int(row.get("source_stroke_index", line_idx_i) or line_idx_i),
+                "group_index": group_index,
+                "centroid": [round(centroid[0], 2), round(centroid[1], 2)],
+                "bbox_xyxy": bbox,
+                "description": desc,
+                "_left_to_right_rank": left_to_right_rank,
+            }
+        )
+
+    line_rows.sort(
+        key=lambda r: (
+            int(r.get("_left_to_right_rank", 10**9)),
+            float(r["centroid"][0]),
+            float(r["centroid"][1]),
+            int(r["line_index"]),
+        )
+    )
+
+    line_key_order: List[str] = []
+    line_keyed: Dict[str, Dict[str, Any]] = {}
+    line_key_by_index: Dict[int, str] = {}
+    line_rank: Dict[int, int] = {}
+    for rank, row in enumerate(line_rows):
+        key = f"L{int(row['line_index']):04d}"
+        line_key_order.append(key)
+        line_rank[int(row["line_index"])] = rank
+        line_key_by_index[int(row["line_index"])] = key
+        row_out = dict(row)
+        row_out.pop("_left_to_right_rank", None)
+        line_keyed[key] = row_out
+
+    group_rows: List[Dict[str, Any]] = []
+    for g in groups:
+        if not isinstance(g, dict):
+            continue
+        gi = g.get("group_index", None)
+        try:
+            gi_i = int(gi)
+        except Exception:
+            continue
+
+        members_raw = g.get("member_line_indices")
+        members_raw = members_raw if isinstance(members_raw, list) else []
+        members: List[int] = []
+        for m in members_raw:
+            try:
+                members.append(int(m))
+            except Exception:
+                continue
+
+        member_keys = [line_key_by_index[m] for m in members if m in line_key_by_index]
+        if not member_keys:
+            continue
+        member_keys.sort(key=lambda k: line_rank.get(int(line_keyed.get(k, {}).get("line_index", -1)), 10**9))
+
+        centroid = _as_float_pair(g.get("centroid"))
+        shape = g.get("shape_inference") if isinstance(g.get("shape_inference"), dict) else {}
+        g_desc = str(
+            g.get("description")
+            or g.get("shape_summary")
+            or shape.get("group_summary")
+            or shape.get("shape_summary")
+            or ""
+        ).strip()
+        if len(g_desc) > 240:
+            g_desc = g_desc[:240].rstrip() + "..."
+
+        rank_min = min((line_rank.get(int(x), 10**9) for x in members), default=10**9)
+        group_rows.append(
+            {
+                "group_index": gi_i,
+                "member_line_keys": member_keys,
+                "centroid": [round(centroid[0], 2), round(centroid[1], 2)],
+                "description": g_desc,
+                "_rank_min": rank_min,
+            }
+        )
+
+    group_rows.sort(key=lambda r: (int(r.get("_rank_min", 10**9)), float(r["centroid"][0]), int(r["group_index"])))
+
+    group_keyed: Dict[str, Dict[str, Any]] = {}
+    for g in group_rows:
+        key = f"G{int(g['group_index']):04d}"
+        out = dict(g)
+        out.pop("_rank_min", None)
+        group_keyed[key] = out
+
+    return {
+        "line_key_order": line_key_order,
+        "line_keyed": line_keyed,
+        "group_keyed": group_keyed,
+    }
+
+
+def _build_schematic_label_prompt(
+    *,
+    base_context: str,
+    refined_labels: List[str],
+    key_payload: Dict[str, Any],
+) -> str:
+    ctx = str(base_context or "").strip() or "unknown"
+    labels = [str(x).strip() for x in (refined_labels or []) if str(x).strip()][:140]
+    line_key_order = key_payload.get("line_key_order") if isinstance(key_payload, dict) else []
+    line_keyed = key_payload.get("line_keyed") if isinstance(key_payload, dict) else {}
+    group_keyed = key_payload.get("group_keyed") if isinstance(key_payload, dict) else {}
+
+    return (
+        "You are matching refined diagram labels to schematic lines/groups.\n"
+        "The line keys are already sorted LEFT to RIGHT.\n"
+        "Use line geometry/location/group context only; infer meaning by structure and context.\n"
+        "Every label must map to one unique line key or one unique group key.\n"
+        "Do not reuse a target for multiple labels unless absolutely unavoidable.\n"
+        "Output JSON only.\n\n"
+        f"BASE_CONTEXT:\n{ctx}\n\n"
+        f"REFINED_LABELS:\n{json.dumps(labels, ensure_ascii=False)}\n\n"
+        f"LINE_KEY_ORDER_LEFT_TO_RIGHT:\n{json.dumps(line_key_order, ensure_ascii=False)}\n\n"
+        f"LINES_KEYED:\n{json.dumps(line_keyed, ensure_ascii=False)}\n\n"
+        f"GROUPS_KEYED:\n{json.dumps(group_keyed, ensure_ascii=False)}\n\n"
+        "Return this JSON schema exactly:\n"
+        "{"
+        "\"matches\":["
+        "{\"label\":\"...\",\"target_type\":\"line|group|null\",\"target_key\":\"L0001|G0001|null\",\"line_keys\":[\"L0001\"],\"confidence\":0.0,\"reason\":\"short\"}"
+        "]"
+        "}\n"
+    )
+
+
+def _parse_schematic_matches(
+    text_out: str,
+    *,
+    refined_labels: List[str],
+    line_key_order: List[str],
+    group_keyed: Dict[str, Dict[str, Any]],
+) -> Tuple[Dict[str, Dict[str, Any]], List[Dict[str, Any]]]:
+    line_set = {str(k) for k in (line_key_order or [])}
+    group_to_lines: Dict[str, List[str]] = {}
+    for gk, gv in (group_keyed or {}).items():
+        if not isinstance(gv, dict):
+            continue
+        raw = gv.get("member_line_keys")
+        if not isinstance(raw, list):
+            continue
+        group_to_lines[str(gk)] = [str(x) for x in raw if str(x) in line_set]
+
+    labels_clean: List[str] = []
+    label_set = set()
+    for lb in (refined_labels or []):
+        s = str(lb or "").strip()
+        if not s:
+            continue
+        lk = s.lower()
+        if lk in label_set:
+            continue
+        label_set.add(lk)
+        labels_clean.append(s)
+
+    obj = extract_json_object(text_out or "")
+    raw_matches = obj.get("matches") if isinstance(obj, dict) else None
+    if not isinstance(raw_matches, list):
+        raw_matches = []
+
+    by_label: Dict[str, Dict[str, Any]] = {}
+    for it in raw_matches:
+        if not isinstance(it, dict):
+            continue
+        label = str(it.get("label", "") or "").strip()
+        if label.lower() not in label_set:
+            continue
+
+        ttype = str(it.get("target_type", "") or "").strip().lower()
+        if ttype not in ("line", "group"):
+            ttype = "line"
+
+        target_key = str(it.get("target_key", "") or "").strip()
+        raw_line_keys = it.get("line_keys")
+        if not isinstance(raw_line_keys, list):
+            raw_line_keys = []
+        line_keys = [str(x) for x in raw_line_keys if str(x) in line_set]
+
+        if ttype == "group":
+            if target_key in group_to_lines:
+                line_keys = group_to_lines[target_key]
+            elif target_key in line_set:
+                ttype = "line"
+                line_keys = [target_key]
+        else:
+            if not line_keys and target_key in line_set:
+                line_keys = [target_key]
+            if not line_keys and target_key in group_to_lines:
+                ttype = "group"
+                line_keys = group_to_lines[target_key]
+
+        if not line_keys:
+            continue
+
+        conf = 0.0
+        try:
+            conf = float(it.get("confidence", 0.0) or 0.0)
+        except Exception:
+            conf = 0.0
+        conf = max(0.0, min(1.0, conf))
+
+        reason = str(it.get("reason", "") or "").strip()
+        if len(reason) > 200:
+            reason = reason[:200].rstrip() + "..."
+
+        rec = {
+            "label": label,
+            "target_type": ttype,
+            "target_key": target_key if target_key else (line_keys[0] if ttype == "line" else ""),
+            "line_keys": line_keys,
+            "confidence": conf,
+            "reason": reason,
+        }
+        prev = by_label.get(label.lower())
+        if prev is None or float(rec["confidence"]) > float(prev.get("confidence", 0.0)):
+            by_label[label.lower()] = rec
+
+    # enforce one unique target per label map
+    used_targets: Dict[Tuple[str, ...], str] = {}
+    deduped_rows: List[Dict[str, Any]] = []
+    for lb in labels_clean:
+        rec = by_label.get(lb.lower())
+        if not isinstance(rec, dict):
+            deduped_rows.append(
+                {
+                    "label": lb,
+                    "target_type": None,
+                    "target_key": None,
+                    "line_keys": [],
+                    "confidence": 0.0,
+                    "reason": "unmatched",
+                }
+            )
+            continue
+
+        rec = dict(rec)
+        rec["label"] = lb
+        sig = tuple(sorted(str(x) for x in (rec.get("line_keys") or [])))
+        prev_label = used_targets.get(sig)
+        if sig and prev_label and prev_label != lb:
+            deduped_rows.append(
+                {
+                    "label": lb,
+                    "target_type": None,
+                    "target_key": None,
+                    "line_keys": [],
+                    "confidence": 0.0,
+                    "reason": "target_already_used",
+                }
+            )
+            continue
+        if sig:
+            used_targets[sig] = lb
+        deduped_rows.append(rec)
+
+    out_map: Dict[str, Dict[str, Any]] = {}
+    for row in deduped_rows:
+        out_map[str(row.get("label", ""))] = {
+            "target_type": row.get("target_type"),
+            "target_key": row.get("target_key"),
+            "line_keys": row.get("line_keys") if isinstance(row.get("line_keys"), list) else [],
+            "confidence": float(row.get("confidence", 0.0) or 0.0),
+            "reason": str(row.get("reason", "") or ""),
+        }
+    return out_map, deduped_rows
+
+
+def label_schematic_lines_transformers(
+    schematic_state: Dict[int, Dict[str, Any]],
+    model,
+    processor,
+    device: torch.device,
+    *,
+    batch_size: int = 8,
+    save_outputs: bool = False,
+    skip_existing_labels: Optional[bool] = None,
+) -> Dict[int, Dict[str, Any]]:
+    SCHEMATIC_OUT_DIR.mkdir(parents=True, exist_ok=True)
+    do_skip_existing = SKIP_EXISTING_LABELS if skip_existing_labels is None else bool(skip_existing_labels)
+
+    jobs: List[Dict[str, Any]] = []
+    results_by_idx: Dict[int, Dict[str, Any]] = {}
+    total_inputs = 0
+    skipped_missing_labels_or_lines = 0
+
+    for idx in sorted((schematic_state or {}).keys()):
+        total_inputs += 1
+        folder = SCHEMATIC_OUT_DIR / f"processed_{idx}"
+        folder.mkdir(parents=True, exist_ok=True)
+        labels_path = folder / "labels.json"
+
+        if save_outputs and do_skip_existing and labels_path.exists():
+            try:
+                results_by_idx[idx] = json.loads(labels_path.read_text(encoding="utf-8"))
+                print(f"[skip] schematic idx={idx}: existing labels.json loaded")
+                continue
+            except Exception:
+                pass
+
+        pack = schematic_state[idx] if isinstance(schematic_state.get(idx), dict) else {}
+        base_context = str(pack.get("base_context", "") or "").strip()
+        labels = list(pack.get("candidate_labels_refined", []) or pack.get("candidate_labels_raw", []) or [])
+        labels = [str(x).strip() for x in labels if str(x).strip()]
+        labels = labels[:140]
+        line_desc = pack.get("line_descriptions") if isinstance(pack.get("line_descriptions"), dict) else {}
+        key_payload = _build_schematic_key_payload(line_desc)
+
+        if not labels or not key_payload.get("line_key_order"):
+            skipped_missing_labels_or_lines += 1
+            results_by_idx[idx] = {
+                "image_index": int(idx),
+                "base_context": base_context,
+                "candidate_labels_refined": labels,
+                "line_key_order": key_payload.get("line_key_order", []),
+                "line_keyed": key_payload.get("line_keyed", {}),
+                "group_keyed": key_payload.get("group_keyed", {}),
+                "label_line_map": {},
+                "line_label_rows": [],
+                "error": "missing_labels_or_lines",
+            }
+            print(
+                f"[qwen][DBG] schematic idx={idx} skipped: missing_labels_or_lines "
+                f"(labels={len(labels)} lines={len(key_payload.get('line_key_order', []))})"
+            )
+            continue
+
+        prompt = _build_schematic_label_prompt(
+            base_context=base_context,
+            refined_labels=labels,
+            key_payload=key_payload,
+        )
+        jobs.append(
+            {
+                "idx": int(idx),
+                "prompt": prompt,
+                "labels": labels,
+                "key_payload": key_payload,
+                "labels_path": labels_path,
+                "base_context": base_context,
+            }
+        )
+
+    print(
+        f"[qwen][DBG] schematic prepare total={total_inputs} "
+        f"jobs={len(jobs)} skipped_missing={skipped_missing_labels_or_lines}"
+    )
+
+    if jobs:
+        prompts = [j["prompt"] for j in jobs]
+        _parsed_objs, raw_texts = _generate_json_objects_from_prompts(
+            model=model,
+            processor=processor,
+            device=device,
+            prompts=prompts,
+            temperature=0.10,
+            max_new_tokens=420,
+            batch_size=max(1, int(batch_size)),
+            debug_label="schematic_line_match",
+        )
+
+        for i, job in enumerate(jobs):
+            idx = int(job["idx"])
+            raw = raw_texts[i] if i < len(raw_texts) else ""
+            labels = job["labels"]
+            key_payload = job["key_payload"]
+            label_line_map, line_label_rows = _parse_schematic_matches(
+                str(raw),
+                refined_labels=labels,
+                line_key_order=key_payload.get("line_key_order", []),
+                group_keyed=key_payload.get("group_keyed", {}),
+            )
+
+            out = {
+                "image_index": int(idx),
+                "base_context": job.get("base_context", ""),
+                "candidate_labels_refined": labels,
+                "line_key_order": key_payload.get("line_key_order", []),
+                "line_keyed": key_payload.get("line_keyed", {}),
+                "group_keyed": key_payload.get("group_keyed", {}),
+                "label_line_map": label_line_map,
+                "line_label_rows": line_label_rows,
+                "model_raw": raw,
+            }
+            results_by_idx[idx] = out
+            if save_outputs:
+                Path(job["labels_path"]).write_text(json.dumps(out, ensure_ascii=False, indent=2), encoding="utf-8")
+            print(f"[ok] schematic idx={idx}: labels={len(labels)} lines={len(key_payload.get('line_key_order', []))}")
+    else:
+        print("[qwen][DBG] schematic no generation jobs were created.")
+
+    return results_by_idx
+
 
 def build_stage1_visual_probe_prompt() -> str:
     # Strict schema; no semantic inference; small + consistent keys for stage2.
@@ -2258,6 +2866,38 @@ def _normalize_print_bbox(
     return {"x": x, "y": y, "w": int(w), "h": int(h)}
 
 
+def _normalize_text_coord(
+    tc: Optional[Dict[str, Any]],
+    *,
+    print_bbox: Dict[str, int],
+    text_w: int,
+    text_h: int,
+    board_w: int,
+    board_h: int,
+) -> Dict[str, int]:
+    pbx = int(print_bbox.get("x", 0) or 0)
+    pby = int(print_bbox.get("y", 0) or 0)
+    pbw = int(print_bbox.get("w", 0) or 0)
+    pbh = int(print_bbox.get("h", 0) or 0)
+
+    min_x = pbx
+    max_x = pbx + max(0, pbw - max(1, int(text_w)))
+    min_y = pby
+    max_y = pby + max(0, pbh - max(1, int(text_h)))
+
+    if not isinstance(tc, dict):
+        tc = {}
+    x = int(tc.get("x", pbx) or pbx)
+    y_default = pby + min(max(0, pbh - 1), max(0, int(text_h)))
+    y = int(tc.get("y", y_default) or y_default)
+
+    x = _clamp_i(x, min_x, max_x if max_x >= min_x else min_x)
+    y = _clamp_i(y, min_y, max_y if max_y >= min_y else min_y)
+    x = _clamp_i(x, 0, max(0, int(board_w) - 1))
+    y = _clamp_i(y, 0, max(0, int(board_h) - 1))
+    return {"x": int(x), "y": int(y)}
+
+
 def _find_non_overlapping_box(
     desired: Dict[str, int],
     *,
@@ -2341,6 +2981,26 @@ def _clip_str_list(values: Any, *, max_items: int, max_chars: int) -> List[str]:
     return out
 
 
+def _same_ci(a: Any, b: Any) -> bool:
+    sa = str(a or "").strip()
+    sb = str(b or "").strip()
+    return bool(sa) and bool(sb) and sa.casefold() == sb.casefold()
+
+
+def _blank_non_priority_overlaps(payload: Dict[str, Any], *, priority: str, fields: List[str]) -> Dict[str, Any]:
+    if not isinstance(payload, dict):
+        return {}
+    pval = str(payload.get(priority, "") or "").strip()
+    if not pval:
+        return payload
+    for k in fields:
+        if k == priority:
+            continue
+        if _same_ci(payload.get(k, ""), pval):
+            payload[k] = ""
+    return payload
+
+
 def _compact_space_chunk_for_prompt(chunk: Dict[str, Any], *, board_width: int, board_height: int) -> Dict[str, Any]:
     steps_src = chunk.get("steps") if isinstance(chunk, dict) else None
     entries_src = chunk.get("entries") if isinstance(chunk, dict) else None
@@ -2352,7 +3012,7 @@ def _compact_space_chunk_for_prompt(chunk: Dict[str, Any], *, board_width: int, 
         steps_out.append(
             {
                 "key": _clip_str(s.get("key", ""), 24),
-                "timeline_text": _clip_str(s.get("timeline_text", ""), 180),
+                "timeline_text": _clip_str(s.get("timeline_text", ""), 96),
                 "start_word_index": int(s.get("start_word_index", 0) or 0),
                 "end_word_index": int(s.get("end_word_index", 0) or 0),
             }
@@ -2362,28 +3022,44 @@ def _compact_space_chunk_for_prompt(chunk: Dict[str, Any], *, board_width: int, 
     for e in (entries_src or []):
         if not isinstance(e, dict):
             continue
+        et = _clip_str(e.get("type", ""), 16)
+        name = _clip_str(e.get("name", ""), 56)
         row: Dict[str, Any] = {
             "entry_index": int(e.get("entry_index", 0) or 0),
-            "type": _clip_str(e.get("type", ""), 16),
-            "name": _clip_str(e.get("name", ""), 80),
+            "type": et,
+            "name": name,
             "step_key": _clip_str(e.get("step_key", ""), 24),
             "range_start": int(e.get("range_start", 0) or 0),
             "range_end": int(e.get("range_end", 0) or 0),
-            "duration_sec": float(e.get("duration_sec", 0.0) or 0.0),
-            "diagram": int(e.get("diagram", 0) or 0),
-            "text_tag": int(e.get("text_tag", 0) or 0),
-            "write_text": _clip_str(e.get("write_text", ""), 180),
-            "bbox_px": e.get("bbox_px") if isinstance(e.get("bbox_px"), dict) else None,
-            "delete_all": bool(e.get("delete_all", False)),
-            "speech_text_in_range": _clip_str(e.get("speech_text_in_range", ""), 220),
         }
-        if row["type"] != "silence":
-            row["content"] = _clip_str(e.get("content", ""), 160)
-            row["objects_that_comprise_image"] = _clip_str_list(
-                e.get("objects_that_comprise_image"),
-                max_items=32,
-                max_chars=64,
-            )
+        bbox_px = e.get("bbox_px") if isinstance(e.get("bbox_px"), dict) else None
+        if isinstance(bbox_px, dict):
+            row["bbox_px"] = bbox_px
+        speech_span = _clip_str(e.get("speech_text_in_range", ""), 64)
+        if speech_span:
+            row["speech_text_in_range"] = speech_span
+
+        if et == "image":
+            row["content"] = _clip_str(e.get("content", ""), 96)
+            row["query"] = _clip_str(e.get("query", ""), 96)
+            _blank_non_priority_overlaps(row, priority="name", fields=["name", "content", "query"])
+
+            if int(e.get("diagram", 0) or 0) > 0:
+                row["diagram"] = 1
+                objs = _clip_str_list(
+                    e.get("objects_that_comprise_image"),
+                    max_items=12,
+                    max_chars=40,
+                )
+                if objs:
+                    row["objects_that_comprise_image"] = objs
+        elif et == "text":
+            wt = _clip_str(e.get("write_text", "") or e.get("content", ""), 96)
+            if wt:
+                row["write_text"] = wt
+        elif et == "silence":
+            if bool(e.get("delete_all", False)):
+                row["delete_all"] = True
         entries_out.append(row)
 
     return {
@@ -2399,85 +3075,61 @@ def _compact_visual_event_for_prompt(ev: Dict[str, Any]) -> Dict[str, Any]:
     for c in (ev.get("static_plan_context") or []):
         if not isinstance(c, dict):
             continue
-        ctx_out.append(
-            {
-                "name": _clip_str(c.get("name", ""), 80),
-                "type": _clip_str(c.get("type", ""), 16),
-                "print_bbox": c.get("print_bbox") if isinstance(c.get("print_bbox"), dict) else None,
-                "range_start": int(c.get("range_start", 0) or 0),
-                "range_end": int(c.get("range_end", 0) or 0),
-                "diagram": int(c.get("diagram", 0) or 0),
-                "text_tag": int(c.get("text_tag", 0) or 0),
-                "speech_text_in_range": _clip_str(c.get("speech_text_in_range", ""), 180),
-            }
-        )
-        if len(ctx_out) >= 12:
+        ctype = _clip_str(c.get("type", ""), 16)
+        crow: Dict[str, Any] = {
+            "name": _clip_str(c.get("name", ""), 56),
+            "type": ctype,
+        }
+        if isinstance(c.get("print_bbox"), dict):
+            crow["print_bbox"] = c.get("print_bbox")
+        if ctype == "image" and int(c.get("diagram", 0) or 0) > 0:
+            crow["diagram"] = 1
+        ctx_out.append(crow)
+        if len(ctx_out) >= 6:
             break
 
-    return {
-        "name": _clip_str(ev.get("name", ""), 80),
+    ev_type = _clip_str(ev.get("type", ""), 16)
+    name = _clip_str(ev.get("name", ""), 56)
+    image_name = _clip_str(ev.get("image_name", "") or name, 56)
+    out: Dict[str, Any] = {
+        "name": _clip_str(ev.get("name", ""), 56),
+        "image_name": image_name,
         "type": _clip_str(ev.get("type", ""), 16),
-        "content": _clip_str(ev.get("content", ""), 180),
-        "write_text": _clip_str(ev.get("write_text", ""), 180),
-        "diagram": int(ev.get("diagram", 0) or 0),
-        "text_tag": int(ev.get("text_tag", 0) or 0),
         "range_start": int(ev.get("range_start", 0) or 0),
         "range_end": int(ev.get("range_end", 0) or 0),
-        "speech_text_in_range": _clip_str(ev.get("speech_text_in_range", ""), 260),
-        "print_bbox": ev.get("print_bbox") if isinstance(ev.get("print_bbox"), dict) else None,
-        "bbox_px": ev.get("bbox_px") if isinstance(ev.get("bbox_px"), dict) else None,
-        "objects_that_comprise_image": _clip_str_list(
-            ev.get("objects_that_comprise_image"),
-            max_items=48,
-            max_chars=64,
-        ),
         "static_plan_context": ctx_out,
     }
+    _blank_non_priority_overlaps(out, priority="name", fields=["name", "image_name"])
+    if isinstance(ev.get("print_bbox"), dict):
+        out["print_bbox"] = ev.get("print_bbox")
+    speech_span = _clip_str(ev.get("speech_text_in_range", ""), 120)
+    if speech_span:
+        out["speech_text_in_range"] = speech_span
 
-
-def _compact_active_objects_for_prompt(ev: Dict[str, Any]) -> List[Dict[str, Any]]:
-    out: List[Dict[str, Any]] = []
-    src = ev.get("active_objects")
-    if not isinstance(src, list):
+    is_text = int(ev.get("text_tag", 0) or 0) == 1 or ev_type == "text"
+    if is_text:
+        out["text_tag"] = 1
+        wt = _clip_str(ev.get("write_text", "") or ev.get("content", ""), 120)
+        if wt:
+            out["write_text"] = wt
         return out
-    for idx, row in enumerate(src):
-        if not isinstance(row, dict):
-            continue
-        bb0 = row.get("bbox")
-        bb = bb0 if isinstance(bb0, dict) else {}
-        one = {
-            "name": _clip_str(row.get("name", ""), 96),
-            "kind": _clip_str(row.get("kind", ""), 20),
-            "bbox": {
-                "x": int(bb.get("x", row.get("x", 0)) or 0),
-                "y": int(bb.get("y", row.get("y", 0)) or 0),
-                "w": int(bb.get("w", row.get("w", 0)) or 0),
-                "h": int(bb.get("h", row.get("h", 0)) or 0),
-            },
-            "source_type": _clip_str(row.get("source_type", ""), 16),
-            "created_order": int(row.get("created_order", idx) or idx),
-        }
-        if one["name"]:
-            out.append(one)
-        if len(out) >= 96:
-            break
+
+    content = _clip_str(ev.get("content", ""), 120)
+    query = _clip_str(ev.get("query", ""), 120)
+    out["content"] = content
+    out["query"] = query
+    _blank_non_priority_overlaps(out, priority="name", fields=["name", "content", "query"])
+
+    if int(ev.get("diagram", 0) or 0) > 0:
+        out["diagram"] = 1
+        objs = _clip_str_list(
+            ev.get("objects_that_comprise_image"),
+            max_items=20,
+            max_chars=48,
+        )
+        if objs:
+            out["objects_that_comprise_image"] = objs
     return out
-
-
-def _compact_silence_event_for_prompt(ev: Dict[str, Any]) -> Dict[str, Any]:
-    active_objs = _compact_active_objects_for_prompt(ev)
-    active_names = [str(x.get("name", "")) for x in active_objs if str(x.get("name", ""))]
-    return {
-        "chapter_index": int(ev.get("chapter_index", 0) or 0),
-        "chunk_index": int(ev.get("chunk_index", 0) or 0),
-        "segment_index": int(ev.get("segment_index", 0) or 0),
-        "name": _clip_str(ev.get("name", ""), 80),
-        "start_word_index": int(ev.get("start_word_index", 0) or 0),
-        "end_word_index": int(ev.get("end_word_index", 0) or 0),
-        "duration_sec": float(ev.get("duration_sec", 0.0) or 0.0),
-        "active_names": _clip_str_list(active_names, max_items=128, max_chars=96),
-        "active_objects": active_objs,
-    }
 
 
 def _generate_json_objects_from_prompts(
@@ -2505,7 +3157,6 @@ def _generate_json_objects_from_prompts(
     bs = max(1, int(batch_size or 1))
     all_raws: List[str] = []
     empty_cache_each_batch = str(os.getenv("QWEN_PLAN_EMPTY_CACHE_EACH_BATCH", "1")).strip().lower() not in ("0", "false", "no")
-    batch_char_budget = max(1024, int(os.getenv("QWEN_PLAN_BATCH_CHAR_BUDGET", str(PLAN_BATCH_CHAR_BUDGET)) or PLAN_BATCH_CHAR_BUDGET))
 
     def _cleanup_cuda_cache() -> None:
         try:
@@ -2535,13 +3186,15 @@ def _generate_json_objects_from_prompts(
                 inputs = _processor_batch(processor, text=texts_batch)
                 inputs = _move_inputs_to_device(inputs, device)
 
+                use_cache_now = bool(PLAN_USE_CACHE)
+
                 gen_kwargs = {
                     "max_new_tokens": int(max_new_tokens),
                     "do_sample": bool(PLAN_DO_SAMPLE),
                     "temperature": float(temperature),
                     "top_p": 0.9,
                     "num_beams": 1,
-                    "use_cache": bool(PLAN_USE_CACHE),
+                    "use_cache": bool(use_cache_now),
                 }
                 out_ids = _safe_generate(model, inputs=inputs, gen_kwargs=gen_kwargs)
 
@@ -2567,44 +3220,9 @@ def _generate_json_objects_from_prompts(
             except Exception:
                 pass
 
-    def _run_with_backoff(texts_batch: List[str], *, global_start: int) -> List[str]:
-        if not texts_batch:
-            return []
-        try:
-            return _run_generate(texts_batch)
-        except RuntimeError as e:
-            msg = str(e).lower()
-            is_oom = ("out of memory" in msg) or ("cuda error: out of memory" in msg)
-            if is_oom and len(texts_batch) > 1:
-                print(
-                    f"[qwen][DBG] {debug_label} split_after_oom start={global_start} "
-                    f"size={len(texts_batch)} -> {len(texts_batch) // 2}+{len(texts_batch) - (len(texts_batch) // 2)}"
-                )
-                _cleanup_cuda_cache()
-                mid = max(1, len(texts_batch) // 2)
-                left = _run_with_backoff(texts_batch[:mid], global_start=global_start)
-                right = _run_with_backoff(texts_batch[mid:], global_start=global_start + mid)
-                return left + right
-
-            print(f"[qwen][DBG] {debug_label} single_fail idx={global_start} err={type(e).__name__}: {e}")
-            _cleanup_cuda_cache()
-            return [""] * len(texts_batch)
-        except Exception as e:
-            print(f"[qwen][DBG] {debug_label} batch_fail start={global_start} size={len(texts_batch)} err={type(e).__name__}: {e}")
-            _cleanup_cuda_cache()
-            return [""] * len(texts_batch)
-
     start = 0
     while start < len(chat_texts):
-        cur_bs = min(bs, len(chat_texts) - start)
-        if batch_char_budget > 0:
-            while cur_bs > 1:
-                cand = chat_texts[start:start + cur_bs]
-                if sum(len(x) for x in cand) <= batch_char_budget:
-                    break
-                cur_bs = max(1, cur_bs // 2)
-
-        batch = chat_texts[start:start + cur_bs]
+        batch = chat_texts[start:start + bs]
         if not batch:
             continue
 
@@ -2616,7 +3234,11 @@ def _generate_json_objects_from_prompts(
             f"chars_total={batch_chars} chars_max={max_chars} vram={_vram_str()}"
         )
         try:
-            batch_raws = _run_with_backoff(batch, global_start=start)
+            batch_raws = _run_generate(batch)
+        except Exception as e:
+            print(f"[qwen][DBG] {debug_label} batch_fail start={start} size={len(batch)} err={type(e).__name__}: {e}")
+            _cleanup_cuda_cache()
+            batch_raws = [""] * len(batch)
         finally:
             print(
                 f"[qwen][DBG] {debug_label} batch_end start={start} size={len(batch)} "
@@ -2668,7 +3290,7 @@ def plan_whiteboard_actions_transformers(
 
     # Build instruction prompt (NO loops/state management here)
     kind = str(event.get("kind", "") or "")
-    is_diagram = int(event.get("diagram", 0) or 0) == 1
+    is_diagram = int(event.get("diagram", 0) or 0) > 0
 
     # NEW: text tag (0/1). When 1, this "image event" represents board text.
     text_tag = int(event.get("text", 0) or 0)
@@ -2881,6 +3503,16 @@ def _repair_space_plan_chunk(
                 board_w=board_w,
                 board_h=board_h,
             )
+            if t == "text":
+                tc = p.get("text_coord") if isinstance(p, dict) else None
+                out["text_coord"] = _normalize_text_coord(
+                    tc if isinstance(tc, dict) else None,
+                    print_bbox=out["print_bbox"],
+                    text_w=bw,
+                    text_h=bh,
+                    board_w=board_w,
+                    board_h=board_h,
+                )
         elif t == "silence":
             default_delete = bool(out.get("chunk_boundary_silence", False))
             out["delete_all"] = bool((p.get("delete_all") if isinstance(p, dict) else default_delete) if isinstance(p, dict) else default_delete)
@@ -2905,6 +3537,18 @@ def _repair_space_plan_chunk(
         )
         fixed = _find_non_overlapping_box(desired, placed=placed, board_w=board_w, board_h=board_h, step=40)
         row["print_bbox"] = fixed
+        if str(row.get("type", "") or "").strip().lower() == "text":
+            bbox_px = row.get("bbox_px") if isinstance(row.get("bbox_px"), dict) else {}
+            tw = int(bbox_px.get("w", 200) or 200)
+            th = int(bbox_px.get("h", 50) or 50)
+            row["text_coord"] = _normalize_text_coord(
+                row.get("text_coord") if isinstance(row.get("text_coord"), dict) else None,
+                print_bbox=fixed,
+                text_w=tw,
+                text_h=th,
+                board_w=board_w,
+                board_h=board_h,
+            )
         placed.append(fixed)
 
     merged.sort(key=lambda x: (int(x.get("range_start", 0) or 0), 0 if str(x.get("type", "") or "") == "silence" else 1))
@@ -2951,14 +3595,21 @@ def plan_space_timeline_batch_transformers(
         )
         prompt = (
             "You are managing where images will be printed on a whiteboard.\n"
-            "Goal: assign each image/text entry to a non-overlapping print_bbox and choose which silence rows should be cleanup points.\n"
-            "You receive chronologically synced entries with range_start/range_end and speech_text_in_range.\n"
+            "Goal: assign each image/text a non-overlapping print_bbox and choose which silence rows should be cleanup points.\n"
+            "Entires are chronogically synced with range_start/range_end and speech_text_in_range.\n"
             "For each image/text entry you MUST output print_bbox.\n"
             "For each silence you MUST output delete_all true/false.\n"
-            "Set delete_all=true only for pauses where board cleanup is useful before the next cluster of visuals.\n"
+            "Set delete_all=true only for pauses where board cleanup is useful and appropriate before the next cluster of visuals.\n"
             "Keep nearby chronology conceptually close where possible.\n"
-            "Use large boxes, avoid overlap, stay inside board bounds.\n"
+            "Use large boxes, stay inside board bounds.\n"
+            "Try and fill up the board as much a possible before deletion (cram optimized close bboxes)"
             "Output JSON only.\n\n"
+            "ADDED RULES FOR TEXT ENTRIES (append-only):\n"
+            "- For each entry where type='text', also output text_coord with exact write coordinates.\n"
+            "- text_coord must be: {\"x\": <int>, \"y\": <int>}.\n"
+            "- Keep text_coord inside its print_bbox.\n"
+            "- Text width estimate is 10 px per character; text height is 50 px.\n"
+            "- Keep providing print_bbox for text entries as usual.\n\n"
             "Input chunk:\n"
             + json.dumps(payload, ensure_ascii=False, indent=2)
             + "\n\nOutput schema:\n"
@@ -2966,13 +3617,13 @@ def plan_space_timeline_batch_transformers(
                 {
                     "entries": [
                         {"entry_index": 0, "type": "image", "print_bbox": {"x": 0, "y": 0, "w": 800, "h": 800}},
-                        {"entry_index": 1, "type": "text", "print_bbox": {"x": 900, "y": 100, "w": 500, "h": 300}},
+                        {"entry_index": 1, "type": "text", "print_bbox": {"x": 900, "y": 100, "w": 500, "h": 300}, "text_coord": {"x": 920, "y": 140}},
                         {"entry_index": 2, "type": "silence", "delete_all": False},
                     ],
                     "notes": "short optional note",
                 },
                 ensure_ascii=False,
-                indent=2,
+                separators=(",", ":"),
             )
         )
         prompts.append(prompt)
@@ -3036,7 +3687,7 @@ def _default_visual_actions_for_event(ev: Dict[str, Any]) -> List[Dict[str, Any]
             "sync_local": {"start_word_offset": 0, "end_word_offset": min(span, 2)},
         }
     )
-    if int(ev.get("diagram", 0) or 0) == 1:
+    if int(ev.get("diagram", 0) or 0) > 0:
         objs = ev.get("objects_that_comprise_image") or []
         first_obj = str(objs[0] if isinstance(objs, list) and objs else "").strip()
         acts.append(
@@ -3119,7 +3770,7 @@ def _clean_visual_action_for_event(ev: Dict[str, Any], a: Dict[str, Any], *, act
     if not t:
         return None
 
-    is_diagram = int(ev.get("diagram", 0) or 0) == 1
+    is_diagram = int(ev.get("diagram", 0) or 0) > 0
     diagram_types = ("highlight_cluster", "unhighlight_cluster", "zoom_cluster", "unzoom_cluster", "write_label")
     if t in diagram_types and not is_diagram:
         return None
@@ -3214,19 +3865,20 @@ def plan_visual_actions_batch_transformers(
         payload = {
             "event": _compact_visual_event_for_prompt(ev),
             "allowed_actions": {
-                "base": [
-                    "draw_image",
-                    "write_text",
-                    "move_inside_bbox",
-                    "link_to_image",
-                    "delete_self",
+                "Base actions schema": [
+                    "draw_image: {type,target,x,y,sync_local}",
+                    "write_text: {type,target,text,x,y,scale,sync_local}",
+                    "move_inside_bbox: {type,target,new_x,new_y,sync_local}",
+                    "link_to_image: {type,target,image_name,sync_local}",
+                    "delete_self: {type,sync_local}"
                 ],
                 "diagram_extra": [
                     "highlight_cluster",
                     "unhighlight_cluster",
                     "zoom_cluster",
                     "unzoom_cluster",
-                    "write_label",
+                    "(all above use {type,cluster_name,sync_local} !!",
+                    "write_label: {type,cluster_name,text,sync_local}"
                 ],
             },
             "rules": {
@@ -3239,24 +3891,19 @@ def plan_visual_actions_batch_transformers(
             },
         }
         prompt = (
-            "You plan actions for one visual event on a whiteboard timeline.\n"
-            "Use ONLY the allowed actions and exactly their field names.\n"
-            "Every action MUST include sync_local {start_word_offset,end_word_offset} inside the event range.\n"
-            "Coordinates must stay inside the event print_bbox.\n"
-            "For diagram events, clusters in objects_that_comprise_image are interactable.\n"
-            "Use diagram actions only when diagram=1.\n"
-            "For text_tag=1 prioritize write_text.\n"
-            "Base actions schema:\n"
-            "- draw_image: {type,target,x,y,sync_local}\n"
-            "- write_text: {type,target,text,x,y,scale,sync_local}\n"
-            "- move_inside_bbox: {type,target,new_x,new_y,sync_local}\n"
-            "- link_to_image: {type,target,image_name,sync_local}\n"
-            "- delete_self: {type,sync_local}\n"
-            "Diagram actions schema:\n"
-            "- highlight_cluster/unhighlight_cluster/zoom_cluster/unzoom_cluster: {type,cluster_name,sync_local}\n"
-            "- write_label: {type,cluster_name,text,sync_local}\n"
+            "You plan actions around drawing an image on a whiteboard under speech\n"
+            "Use ONLY the allowed actions and exactly their field names\n"
+            "Every action MUST include sync_local {start_word_offset,end_word_offset} to link it to parts of the speech\n"
+            "All actions must happen only inside print_bbox - respect image dimentions when picking print coords\n"
+            "Sometimes images come with  diagram = 1 - for them you have an list of interactable objects that comprise them\n"
+            "Always start with draw_image - self innit\n"
+            "You can use extra write_text actions to add detail in unused spacew\n"
+            "Create the most rich and complex sync -> match what is said with as many actions as possible\n"
+            "For digram == 0 - only base actions, for diagram == 1, also diagram_extra\n"
+            "You are also given a rought timeline of other images on the board, interact with them!\n"
+            "Use delete_self only if image is very temporary - unrelated to other images / speech"
             "Return JSON only.\n"
-            "Input includes static_plan_context with all prior entries from this batch.\n\n"
+
             "Input:\n"
             + json.dumps(payload, ensure_ascii=False, indent=2)
             + "\n\nOutput schema:\n"
@@ -3266,11 +3913,9 @@ def plan_visual_actions_batch_transformers(
                         {"type": "draw_image", "target": "img_name", "x": 100, "y": 180, "sync_local": {"start_word_offset": 0, "end_word_offset": 2}},
                         {"type": "write_text", "target": "img_name__text_1", "text": "label", "x": 120, "y": 260, "scale": 1.0, "sync_local": {"start_word_offset": 2, "end_word_offset": 4}},
                         {"type": "move_inside_bbox", "target": "img_name", "new_x": 180, "new_y": 220, "sync_local": {"start_word_offset": 4, "end_word_offset": 6}},
-                        {"type": "link_to_image", "target": "img_name", "image_name": "previous_img", "sync_local": {"start_word_offset": 6, "end_word_offset": 8}},
                         {"type": "highlight_cluster", "cluster_name": "nucleus", "sync_local": {"start_word_offset": 7, "end_word_offset": 9}},
                         {"type": "write_label", "cluster_name": "nucleus", "text": "Nucleus", "sync_local": {"start_word_offset": 8, "end_word_offset": 10}},
-                    ],
-                    "notes": "short note",
+                    ]
                 },
                 ensure_ascii=False,
                 indent=2,
@@ -3278,7 +3923,7 @@ def plan_visual_actions_batch_transformers(
         )
         prompts.append(prompt)
 
-    parsed_objs, raws = _generate_json_objects_from_prompts(
+    parsed_objs, _ = _generate_json_objects_from_prompts(
         model=model,
         processor=processor,
         device=device,
@@ -3308,187 +3953,22 @@ def plan_visual_actions_batch_transformers(
         if not cleaned:
             cleaned = _default_visual_actions_for_event(ev)
 
-        out_items.append(
-            {
-                "actions": cleaned,
-                "notes": str(obj.get("notes", "") or ""),
-                "raw_text": raws[i] if i < len(raws) else "",
-            }
-        )
-
-    return {"items": out_items}
-
-
-def _ordered_active_names_for_silence(ev: Dict[str, Any]) -> List[str]:
-    src = ev.get("active_objects")
-    rows: List[Dict[str, Any]] = src if isinstance(src, list) else []
-    sortable: List[Tuple[int, int, int, str]] = []
-    for i, row in enumerate(rows):
-        if not isinstance(row, dict):
-            continue
-        name = str(row.get("name", "") or "").strip()
-        if not name:
-            continue
-        bb = row.get("bbox") if isinstance(row.get("bbox"), dict) else {}
-        y = _safe_int(bb.get("y", row.get("y", 10_000_000)), 10_000_000)
-        x = _safe_int(bb.get("x", row.get("x", 10_000_000)), 10_000_000)
-        created = _safe_int(row.get("created_order", i), i)
-        sortable.append((y, x, created, name))
-    if not sortable:
-        names = ev.get("active_names")
-        if isinstance(names, list):
-            return [str(x).strip() for x in names if str(x).strip()]
-        return []
-    sortable.sort(key=lambda t: (t[0], t[1], t[2], t[3].lower()))
-    out: List[str] = []
-    seen = set()
-    for _, _, _, name in sortable:
-        k = name.lower()
-        if k in seen:
-            continue
-        seen.add(k)
-        out.append(name)
-    return out
-
-
-def _default_silence_delete_actions(ordered_names: List[str], *, span: int) -> List[Dict[str, Any]]:
-    if not ordered_names:
-        return []
-    out: List[Dict[str, Any]] = []
-    den = max(1, len(ordered_names))
-    for i, nm in enumerate(ordered_names):
-        start = 0 if span <= 0 else int(round((float(i) / float(den)) * float(span)))
-        end = max(start, min(span, start))
-        out.append(
-            {
-                "type": "delete_by_name",
-                "target": str(nm),
-                "sync_local": {"start_word_offset": int(start), "end_word_offset": int(end)},
-            }
-        )
-    return out
-
-
-def plan_silence_actions_batch_transformers(
-    *,
-    model,
-    processor,
-    device,
-    events: List[Dict[str, Any]],
-    batch_size: int = 8,
-    temperature: float = 0.1,
-    max_new_tokens: int = 500,
-) -> Dict[str, Any]:
-    """
-    Plans deletion-focused actions for silences marked for cleanup.
-    """
-    rows = [e for e in (events or []) if isinstance(e, dict)]
-    if not rows:
-        return {"items": []}
-
-    prompts: List[str] = []
-    for ev in rows:
-        ordered_names = _ordered_active_names_for_silence(ev)
-        payload = {
-            "silence_event": _compact_silence_event_for_prompt(ev),
-            "allowed_actions": [
-                "delete_by_name",
-            ],
-            "rules": {
-                "goal": "delete all active objects",
-                "order": "top_to_bottom_then_left_to_right",
-                "must_emit_sync_local_per_action": True,
-            },
-            "ordered_names_for_cleanup": ordered_names,
+        name = _clip_str(ev.get("name", ""), 56)
+        image_name = _clip_str(ev.get("image_name", "") or name, 56)
+        item: Dict[str, Any] = {
+            "name": name,
+            "image_name": image_name,
+            "actions": cleaned,
         }
-        prompt = (
-            "You plan silence cleanup actions.\n"
-            "This stage only deletes active objects from the board.\n"
-            "Use delete_by_name only.\n"
-            "Delete every object in ordered_names_for_cleanup from first to last.\n"
-            "If active_objects include bbox, follow top-to-bottom order.\n"
-            "Return JSON only.\n"
-            "Every action must include sync_local {start_word_offset,end_word_offset}.\n\n"
-            "Input:\n"
-            + json.dumps(payload, ensure_ascii=False, indent=2)
-            + "\n\nOutput schema:\n"
-            + json.dumps(
-                {
-                    "actions": [
-                        {"type": "delete_by_name", "target": "name", "sync_local": {"start_word_offset": 0, "end_word_offset": 0}},
-                    ],
-                    "notes": "short note",
-                },
-                ensure_ascii=False,
-                indent=2,
-            )
-        )
-        prompts.append(prompt)
-
-    parsed_objs, raws = _generate_json_objects_from_prompts(
-        model=model,
-        processor=processor,
-        device=device,
-        prompts=prompts,
-        temperature=float(temperature),
-        max_new_tokens=int(max_new_tokens),
-        batch_size=int(batch_size),
-        debug_label="plan_silence",
-    )
-
-    out_items: List[Dict[str, Any]] = []
-    for i, ev in enumerate(rows):
-        obj = parsed_objs[i] if i < len(parsed_objs) else {}
-        acts = obj.get("actions") if isinstance(obj, dict) else None
-        if not isinstance(acts, list):
-            acts = []
-
-        s = int(ev.get("start_word_index", 0) or 0)
-        e = int(ev.get("end_word_index", s) or s)
-        if e < s:
-            e = s
-        span = max(0, e - s)
-        ordered_names = _ordered_active_names_for_silence(ev)
-
-        cleaned: List[Dict[str, Any]] = []
-        seen_targets = set()
-        for a in acts:
-            if not isinstance(a, dict):
-                continue
-            t = str(a.get("type", "") or "").strip().lower()
-            if t != "delete_by_name":
-                continue
-            target = str(a.get("target", "") or "").strip()
-            if not target:
-                continue
-            if ordered_names:
-                allowed = {x.lower() for x in ordered_names}
-                if target.lower() not in allowed:
-                    continue
-            one = dict(a)
-            one["target"] = target
-            one["sync_local"] = _normalize_sync_local(one.get("sync_local"), span=span)
-            cleaned.append(one)
-            seen_targets.add(target.lower())
-
-        missing = [nm for nm in ordered_names if nm.lower() not in seen_targets]
-        if missing:
-            cleaned.extend(_default_silence_delete_actions(missing, span=span))
-        if not cleaned:
-            cleaned = _default_silence_delete_actions(ordered_names, span=span)
-
+        _blank_non_priority_overlaps(item, priority="name", fields=["name", "image_name"])
+        notes = str(obj.get("notes", "") or "").strip()
+        if notes:
+            item["notes"] = notes
         out_items.append(
-            {
-                "actions": cleaned,
-                "notes": str(obj.get("notes", "") or ""),
-                "raw_text": raws[i] if i < len(raws) else "",
-            }
+            item
         )
 
     return {"items": out_items}
-
-
-
 
 
 # ============================

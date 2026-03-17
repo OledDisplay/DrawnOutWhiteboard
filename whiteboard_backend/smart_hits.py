@@ -324,22 +324,80 @@ def _paragraph_nodes(soup: BeautifulSoup) -> List[Tag]:
     return out
 
 
-def _split_into_three_parts(text: str) -> List[str]:
+def _split_words_evenly(text: str, parts: int) -> List[str]:
     txt = (text or "").strip()
     if not txt:
         return []
     words = txt.split()
+    if not words:
+        return []
+    n_parts = max(1, int(parts or 1))
+    n_parts = min(n_parts, len(words))
+    out: List[str] = []
+    for i in range(n_parts):
+        s = int(round(i * len(words) / n_parts))
+        e = int(round((i + 1) * len(words) / n_parts))
+        chunk = " ".join(words[s:e]).strip()
+        if chunk:
+            out.append(chunk)
+    return out or [txt]
+
+
+def _split_into_sentence_like_parts(text: str, *, min_parts: int = 3, max_parts: int = 7) -> List[str]:
+    """
+    Split a paragraph into sentence-like chunks with higher granularity than 3-way.
+    Target chunk count is based on paragraph length and clamped to [min_parts, max_parts].
+    """
+    txt = (text or "").strip()
+    if not txt:
+        return []
+
+    words = txt.split()
     if len(words) < 18:
         return [txt]
-    n = len(words)
-    c1 = max(1, n // 3)
-    c2 = max(c1 + 1, (2 * n) // 3)
-    parts = [
-        " ".join(words[:c1]).strip(),
-        " ".join(words[c1:c2]).strip(),
-        " ".join(words[c2:]).strip(),
-    ]
-    parts = [p for p in parts if p and len(_content_tokens(p)) >= 4]
+
+    lo = max(1, int(min_parts))
+    hi = max(lo, int(max_parts))
+    target = max(lo, min(hi, int(round(len(words) / 22.0))))
+
+    sents = _split_sentences(txt)
+    parts = [s for s in sents if s.strip()]
+
+    # If sentence split under-segments, try splitting long sentences on soft punctuation.
+    while len(parts) < target:
+        split_idx = -1
+        split_chunks: List[str] = []
+        best_len = 0
+        for i, chunk in enumerate(parts):
+            if len(chunk.split()) <= best_len:
+                continue
+            sub = [x.strip() for x in re.split(r"(?<=[,;:])\s+", chunk) if x.strip()]
+            if len(sub) >= 2:
+                split_idx = i
+                split_chunks = sub
+                best_len = len(chunk.split())
+        if split_idx < 0:
+            break
+        parts = parts[:split_idx] + split_chunks + parts[split_idx + 1 :]
+
+    if not parts:
+        parts = [txt]
+
+    # Too many tiny sentence units -> merge into target contiguous chunks.
+    if len(parts) > target:
+        merged: List[str] = []
+        for i in range(target):
+            s = int(round(i * len(parts) / target))
+            e = int(round((i + 1) * len(parts) / target))
+            chunk = " ".join(parts[s:e]).strip()
+            if chunk:
+                merged.append(chunk)
+        parts = merged
+    elif len(parts) < min(target, hi) and len(words) >= target * 6:
+        # Fallback if sentence parsing is sparse: evenly chunk by word count.
+        parts = _split_words_evenly(txt, target)
+
+    parts = [p for p in parts if p and len(_content_tokens(p)) >= 3]
     return parts or [txt]
 
 
@@ -350,12 +408,13 @@ def _best_semantic_context_for_text(
     query_embedding: Any,
     para_embedding: Optional[Any] = None,
     sem_min_score: float = 0.58,
+    paragraph_min_score: float = 0.18,
     solid_margin: float = 0.08,
 ) -> Optional[Tuple[str, Any, float, str]]:
     """
     Returns best semantic context for a text block:
       (best_text, best_embedding, best_sim, granularity)
-    granularity = "paragraph" | "subpart"
+    granularity = "paragraph" | "sentence_chunk"
     """
     if not text or encoder is None or query_embedding is None:
         return None
@@ -365,31 +424,39 @@ def _best_semantic_context_for_text(
     except Exception:
         return None
 
-    best_text = text
-    best_emb = p_emb
-    best_sim = _cosine_sim(query_embedding, p_emb)
-    granularity = "paragraph"
-
     sem_floor = max(0.0, float(sem_min_score))
-    solid_thr = min(0.99, sem_floor + max(0.01, float(solid_margin)))
+    para_floor = max(0.0, min(sem_floor, float(paragraph_min_score)))
 
-    # Only refine a paragraph when it is already a solid semantic hit.
-    if best_sim >= solid_thr:
-        parts = _split_into_three_parts(text)
-        if len(parts) > 1:
-            try:
-                p_embs = encoder.encode(parts)
-                for part, emb in zip(parts, p_embs):
-                    s = _cosine_sim(query_embedding, emb)
-                    if s > best_sim:
-                        best_sim = s
-                        best_text = part
-                        best_emb = emb
-                        granularity = "subpart"
-            except Exception:
-                pass
+    para_sim = _cosine_sim(query_embedding, p_emb)
+    if para_sim < para_floor:
+        return None
 
-    return best_text, best_emb, float(best_sim), granularity
+    parts = _split_into_sentence_like_parts(text, min_parts=3, max_parts=7)
+    if len(parts) <= 1:
+        if para_sim < sem_floor:
+            return None
+        return text, p_emb, float(para_sim), "paragraph"
+
+    best_text = ""
+    best_emb = None
+    best_sim = -1.0
+
+    try:
+        p_embs = encoder.encode(parts)
+    except Exception:
+        p_embs = []
+
+    for part, emb in zip(parts, p_embs):
+        s = _cosine_sim(query_embedding, emb)
+        if s > best_sim:
+            best_sim = s
+            best_text = part
+            best_emb = emb
+
+    if best_emb is None or best_sim < sem_floor:
+        return None
+
+    return best_text, best_emb, float(best_sim), "sentence_chunk"
 
 # ---------- image helpers (attrs + local context) ----------
 
@@ -689,6 +756,7 @@ def smart_find_hits_in_soup(
     encoder: Optional[Any] = None,
     query_embedding: Optional[Any] = None,
     sem_min_score: float = 0.45,
+    paragraph_min_score: float = 0.18,
     return_embedding: bool = True
 ) -> List[Tuple[Tag, float, dict]]:
     """
@@ -701,7 +769,7 @@ def smart_find_hits_in_soup(
     use_semantic = encoder is not None and query_embedding is not None
     scored: List[Tuple[Tag, float, dict]] = []
 
-    # Semantic-first path: paragraph-level embedding + optional 3-way subpart refinement.
+    # Semantic-first path: low-threshold paragraph entry + sentence-like chunk refinement.
     if use_semantic:
         sem_floor = max(0.0, float(sem_min_score))
         para_nodes = _paragraph_nodes(soup) or _candidate_nodes(soup)
@@ -735,6 +803,7 @@ def smart_find_hits_in_soup(
                 query_embedding=query_embedding,
                 para_embedding=p_emb,
                 sem_min_score=sem_floor,
+                paragraph_min_score=paragraph_min_score,
             )
             if not best:
                 continue
@@ -828,12 +897,14 @@ def extract_best_semantic_context_from_soup(
     encoder: Optional[Any],
     query_embedding: Optional[Any],
     sem_min_score: float = 0.58,
+    paragraph_min_score: float = 0.18,
     return_embedding: bool = True,
 ) -> dict:
     """
     Reusable context extractor (DDG + other pipelines):
       - embeds paragraph blocks
-      - if a paragraph is solid, splits it into 3 subparts and picks the best subpart
+      - enters paragraphs with a low semantic gate
+      - scores sentence-like chunks (3..7, based on paragraph size) and picks the best chunk
       - returns context metadata compatible with ImageResearcher._normalize_ctx_meta
     """
     if soup is None or encoder is None or query_embedding is None:
@@ -853,6 +924,7 @@ def extract_best_semantic_context_from_soup(
             encoder=encoder,
             query_embedding=query_embedding,
             sem_min_score=sem_floor,
+            paragraph_min_score=paragraph_min_score,
         )
         if not best:
             continue

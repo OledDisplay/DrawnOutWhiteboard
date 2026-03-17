@@ -37,6 +37,9 @@ ClusterRenders/
 ClusterMaps/
 ClustersLabeled/
 PipelineOutputs/
+StrokeDescriptions/
+LineLabels/
+checkpoints/
 _path_cache/
 
 # OS stuff

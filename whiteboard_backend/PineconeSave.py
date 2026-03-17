@@ -102,17 +102,22 @@ def _minimal_index_plan(prompt_dim: Optional[int], clip_dim: Optional[int], cont
 
     if prompt_dim and context_dim and (prompt_dim == context_dim):
         shared = f"{PINECONE_INDEX_PREFIX}-promptctx-{prompt_dim}"
-        return {
+        out = {
             "prompt": (shared, "prompt"),
             "context": (shared, "context"),
-            "clip": (idx("clip", clip_dim), "clip"),
         }
+        if clip_dim:
+            out["clip"] = (idx("clip", clip_dim), "clip")
+        return out
 
-    return {
-        "prompt": (idx("prompt", prompt_dim), "prompt"),
-        "clip": (idx("clip", clip_dim), "clip"),
-        "context": (idx("context", context_dim), "context"),
-    }
+    out: Dict[str, Tuple[str, str]] = {}
+    if prompt_dim:
+        out["prompt"] = (idx("prompt", prompt_dim), "prompt")
+    if clip_dim:
+        out["clip"] = (idx("clip", clip_dim), "clip")
+    if context_dim:
+        out["context"] = (idx("context", context_dim), "context")
+    return out
 
 
 def _clean_labels(x: Any, *, max_items: int = 60, max_len: int = 64) -> List[str]:

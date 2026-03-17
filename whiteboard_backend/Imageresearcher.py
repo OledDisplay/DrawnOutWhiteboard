@@ -915,36 +915,12 @@ def _source_json_path(source_name: str) -> str:
     return os.path.join(SOURCE_PATH, f"{source_name}.json")
 
 def _is_prompt_blocklisted(source_name: str, prompt_id: str) -> bool:
-    path = _source_json_path(source_name)
-    data = _load_json(path)
-    bl = (data.get("NoImagePromptBlocklist") or {})
-    return bool(prompt_id and str(prompt_id) in bl)
+    # Blocklist disabled: prompts are never skipped.
+    return False
 
 def _blocklist_prompt(source_name: str, prompt_id: str, query: str, reason: str) -> None:
-    if not source_name or not prompt_id:
-        return
-    path = _source_json_path(source_name)
-    lock = _json_lock_for(path)
-    with lock:
-        data = _load_json(path)
-        data.setdefault("NoImagePromptBlocklist", {})
-        bl = data["NoImagePromptBlocklist"]
-
-        entry = bl.get(prompt_id) or {}
-        try:
-            cnt = int(entry.get("count") or 0) + 1
-        except Exception:
-            cnt = 1
-
-        bl[prompt_id] = {
-            "query": str(query or entry.get("query") or ""),
-            "count": cnt,
-            "reason": str(reason or entry.get("reason") or "no_images"),
-            "last_seen": datetime.datetime.utcnow().isoformat() + "Z",
-        }
-
-        _save_json_atomic(path, data)
-        dbg(f"[BL] blocklisted prompt_id={prompt_id} source={source_name} count={cnt} reason={reason}")
+    # Blocklist disabled: do not persist no-image prompt records.
+    return
 
 
 
@@ -2526,35 +2502,113 @@ def pinecone_query_terminal_indexes(
     flt = None
     if registrable:
         flt = {"registrable": {"$eq": registrable}}
+    reg_cf = str(registrable or "").strip().casefold()
 
-    try:
-        res = idx.query(
-            vector=v,
-            top_k=int(top_k),
-            include_metadata=True,
-            include_values=True,
-            namespace=ns,
-            filter=flt,
-        )
-    except Exception as e:
-        dbg(f"[PINECONE][QUERY] filter query failed -> retry without filter: {e}")
+    def _query_matches(namespace: str, md_filter: Optional[dict]):
+        kwargs = {
+            "vector": v,
+            "top_k": int(top_k),
+            "include_metadata": True,
+            "include_values": True,
+            "namespace": namespace,
+        }
+        if md_filter:
+            kwargs["filter"] = md_filter
+        res = idx.query(**kwargs)
         try:
-            res = idx.query(
-                vector=v,
-                top_k=int(top_k),
-                include_metadata=True,
-                include_values=True,
-                namespace=ns,
-            )
-        except Exception as e2:
-            dbg(f"[PINECONE][QUERY] failed: {e2}")
+            return res.get("matches") or res.matches or []
+        except Exception:
             return []
+
+    def _match_md(m):
+        return (m.get("metadata") if isinstance(m, dict) else getattr(m, "metadata", None)) or {}
+
+    def _filter_matches_by_reg(rows: list):
+        if not reg_cf:
+            return rows
+        keep = []
+        for m in rows or []:
+            try:
+                md = _match_md(m)
+                mreg = str(md.get("registrable") or "").strip().casefold()
+                if not mreg:
+                    continue
+                if mreg == reg_cf:
+                    keep.append(m)
+            except Exception:
+                continue
+        return keep
 
     matches = []
     try:
-        matches = res.get("matches") or res.matches or []
-    except Exception:
-        matches = []
+        matches = _query_matches(ns, flt)
+    except Exception as e:
+        dbg(f"[PINECONE][QUERY] filter query failed ns='{ns}' -> retry without filter: {e}")
+        try:
+            matches = _query_matches(ns, None)
+        except Exception as e2:
+            dbg(f"[PINECONE][QUERY] failed ns='{ns}': {e2}")
+            matches = []
+
+    # Some Pinecone filter edge-cases silently return 0; retry without filter and filter client-side.
+    if not matches and flt is not None:
+        try:
+            unfiltered = _query_matches(ns, None)
+            filtered = _filter_matches_by_reg(unfiltered)
+            matches = filtered or unfiltered
+            if matches:
+                dbg(
+                    f"[PINECONE][QUERY][FALLBACK] ns='{ns}' "
+                    f"unfiltered={len(unfiltered)} filtered={len(filtered)}"
+                )
+        except Exception:
+            pass
+
+    # Namespace drift fallback: case-different or coarser subject namespace.
+    if not matches and ns:
+        alt_namespaces: list[str] = []
+        try:
+            stats = idx.describe_index_stats() or {}
+            ns_map = {}
+            if isinstance(stats, dict):
+                ns_map = stats.get("namespaces") or {}
+            else:
+                ns_map = getattr(stats, "namespaces", None) or {}
+            ns_keys = [str(k or "").strip() for k in (ns_map.keys() if isinstance(ns_map, dict) else [])]
+
+            ns_cf = ns.casefold()
+            for cand in ns_keys:
+                if cand and cand != ns and cand.casefold() == ns_cf:
+                    alt_namespaces.append(cand)
+
+            if not alt_namespaces and " - " in ns:
+                root_cf = ns.split(" - ", 1)[0].strip().casefold()
+                for cand in ns_keys:
+                    ccf = cand.casefold()
+                    if not cand or cand == ns:
+                        continue
+                    if ccf == root_cf or ccf.startswith(root_cf + " -") or root_cf.startswith(ccf + " -"):
+                        alt_namespaces.append(cand)
+        except Exception:
+            alt_namespaces = []
+
+        # Dedup preserve order
+        seen_alt = set()
+        alt_namespaces = [x for x in alt_namespaces if not (x in seen_alt or seen_alt.add(x))]
+
+        for alt_ns in alt_namespaces:
+            try:
+                alt_rows = _query_matches(alt_ns, flt)
+                if not alt_rows:
+                    alt_unfiltered = _query_matches(alt_ns, None)
+                    alt_filtered = _filter_matches_by_reg(alt_unfiltered)
+                    alt_rows = alt_filtered or alt_unfiltered
+                if alt_rows:
+                    matches = alt_rows
+                    dbg(f"[PINECONE][QUERY][NS_FALLBACK] ns='{ns}' -> '{alt_ns}' matches={len(matches)}")
+                    break
+            except Exception:
+                continue
 
     out = []
     for m in matches:
@@ -3853,121 +3907,20 @@ def _find_root_entry_index(data: dict, root_url: str) -> int:
     return -1
 
 def _is_prompt_blocklisted_for_root(source_name: str, root_url: str, prompt_id: str) -> bool:
-    """
-    READ PATH: checks <source>.json -> Roots[*].NoImagePromptBlocklist[prompt_id]
-    """
-    if not source_name or not root_url or not prompt_id:
-        return False
-
-    path = _source_json_path(source_name)
-    data = _load_json(path)
-
-    idx = _find_root_entry_index(data, root_url)
-    if idx < 0:
-        return False
-
-    k, roots_list = _get_roots_container(data)
-    entry = roots_list[idx]
-
-    # tolerate old string roots that haven't been converted yet
-    if not isinstance(entry, dict):
-        return False
-
-    bl = (entry.get("NoImagePromptBlocklist") or {})
-    return bool(str(prompt_id) in bl)
+    # Blocklist disabled: prompts are never skipped.
+    return False
 
 def _blocklist_prompt_for_root(source_name: str, root_url: str, prompt_id: str, query: str, reason: str) -> None:
-    """
-    WRITE PATH: stores record under the specific root object in <source>.json
-      Roots: [
-        {"root":"https://...", "NoImagePromptBlocklist": { "<prompt_id>": {...} } }
-      ]
-    If roots were strings, converts that element to dict to attach the blocklist.
-    """
-    if not source_name or not root_url or not prompt_id:
-        return
-
-    path = _source_json_path(source_name)
-    lock = _json_lock_for(path)
-
-    with lock:
-        data = _load_json(path)
-        k, roots_list = _get_roots_container(data)
-
-        idx = _find_root_entry_index(data, root_url)
-        if idx < 0:
-            # root not present -> append a dict entry
-            roots_list.append({"root": clean_url(root_url)})
-            idx = len(roots_list) - 1
-
-        # ensure dict entry (convert from string if necessary)
-        cur_entry = roots_list[idx]
-        root_obj = _ensure_root_dict(cur_entry)
-        if root_obj is None:
-            return
-
-        # if we converted, write it back
-        roots_list[idx] = root_obj
-        root_obj["root"] = clean_url(_root_url_from_entry(root_obj) or root_url)
-
-        root_obj.setdefault("NoImagePromptBlocklist", {})
-        bl = root_obj["NoImagePromptBlocklist"]
-
-        old = bl.get(str(prompt_id)) or {}
-        try:
-            cnt = int(old.get("count") or 0) + 1
-        except Exception:
-            cnt = 1
-
-        bl[str(prompt_id)] = {
-            "query": str(query or old.get("query") or ""),
-            "count": cnt,
-            "reason": str(reason or old.get("reason") or "no_images"),
-            "last_seen": datetime.datetime.utcnow().isoformat() + "Z",
-        }
-
-        _save_json_atomic(path, data)
-        dbg(f"[BL][ROOT] blocklisted prompt_id={prompt_id} root={_short_url(root_url)} source={source_name} count={cnt} reason={reason}")
+    # Blocklist disabled: do not persist no-image prompt records.
+    return
 
 def _is_prompt_blocklisted_for_source(source_name: str, prompt_id: str) -> bool:
-    """
-    READ PATH: checks <source>.json -> NoImagePromptBlocklistGlobal[prompt_id]
-    """
-    if not source_name or not prompt_id:
-        return False
-    path = _source_json_path(source_name)
-    data = _load_json(path)
-    bl = (data.get("NoImagePromptBlocklistGlobal") or {})
-    return bool(str(prompt_id) in bl)
+    # Blocklist disabled: prompts are never skipped.
+    return False
 
 def _blocklist_prompt_for_source(source_name: str, prompt_id: str, query: str, reason: str) -> None:
-    """
-    WRITE PATH: stores record under top-level <source>.json NoImagePromptBlocklistGlobal.
-    """
-    if not source_name or not prompt_id:
-        return
-
-    path = _source_json_path(source_name)
-    lock = _json_lock_for(path)
-    with lock:
-        data = _load_json(path)
-        data.setdefault("NoImagePromptBlocklistGlobal", {})
-        bl = data["NoImagePromptBlocklistGlobal"]
-
-        old = bl.get(str(prompt_id)) or {}
-        try:
-            cnt = int(old.get("count") or 0) + 1
-        except Exception:
-            cnt = 1
-
-        bl[str(prompt_id)] = {
-            "query": str(query or old.get("query") or ""),
-            "count": cnt,
-            "reason": str(reason or old.get("reason") or "stage1_no_roots"),
-            "last_seen": datetime.datetime.utcnow().isoformat() + "Z",
-        }
-        _save_json_atomic(path, data)
-        dbg(f"[BL][SOURCE] blocklisted prompt_id={prompt_id} source={source_name} count={cnt} reason={reason}")
+    # Blocklist disabled: do not persist no-image prompt records.
+    return
 
 
 # =========================
@@ -4119,6 +4072,8 @@ def stage2_drill_search_and_images(
     PRE_IMAGE_MAX_DEPTH = 5
     STRONG_TOPIC_SIM_THRESHOLD = 0.28
     GOOD_DEEPER_SIM_THRESHOLD = 0.24
+    ROUTE_BLOCK_OVERLAP_MIN_TERMINALS = 8
+    ROUTE_BLOCK_OVERLAP_RATIO = 0.80
     NO_IMAGE_CAP_BEFORE_FIRST = 5
     NO_IMAGE_CAP_AFTER_FIRST = 2
     NO_IMAGE_CAP_AT_SOFT_CAP = 1
@@ -4905,6 +4860,26 @@ def stage2_drill_search_and_images(
         chosen_index, chosen_sim = pick_best_terminal_index_for_prompt(
             terminal_indexes, prompt_vec, min_sim=terminal_index_use_threshold
         )
+        if not chosen_index:
+            # If we already loaded candidate buckets for this subject/site, prefer using the best one
+            # instead of paying full crawl cost again. Keep a small safety floor.
+            force_min_sim = 0.08
+            try:
+                force_min_sim = float(os.getenv("TERMINAL_INDEX_FORCE_MIN_SIM", "0.08") or "0.08")
+            except Exception:
+                force_min_sim = 0.08
+
+            fallback_idx, fallback_sim = pick_best_terminal_index_for_prompt(
+                terminal_indexes, prompt_vec, min_sim=-1.0
+            )
+            if fallback_idx and float(fallback_sim) >= float(force_min_sim):
+                chosen_index = fallback_idx
+                chosen_sim = float(fallback_sim)
+                dbg(
+                    f"[IDX][USE][FORCED] sim={chosen_sim:.3f} "
+                    f"entry={_short_url(chosen_index.get('entry_url'))} "
+                    f"min_sim={force_min_sim:.3f}"
+                )
         if chosen_index:
             dbg(
                 f"[IDX][USE] ⭐ sim={chosen_sim:.3f} entry={_short_url(chosen_index.get('entry_url'))} "
@@ -5055,6 +5030,7 @@ def stage2_drill_search_and_images(
                 _s2_evt("root_skip", idx=rdx, reason="clean_root_empty", root=root)
                 continue
             queue = deque([root_clean])
+            queued_pages: set[str] = {root_clean}
             depth_by_url: dict[str, int] = {root_clean: 0}
             active_layer_depth = 0
             layer_has_valid_deeper_path = False
@@ -5107,6 +5083,7 @@ def stage2_drill_search_and_images(
                 while True:
                     while queue:
                         cur = queue.popleft()
+                        queued_pages.discard(cur)
                         if not cur:
                             continue
                         cur_depth = int(depth_by_url.get(cur, active_layer_depth))
@@ -5117,11 +5094,13 @@ def stage2_drill_search_and_images(
                             )
                             _s2_evt("queue_stop", root=root_clean, cur=cur, depth=cur_depth, reason="pre_image_depth_cap")
                             queue.clear()
+                            queued_pages.clear()
                             break
                         if cur_depth > MAX_EXPAND_DEPTH:
                             dbg(f"[S2] depth cap reached ({MAX_EXPAND_DEPTH}) -> stop root traversal")
                             _s2_evt("queue_stop", root=root_clean, cur=cur, depth=cur_depth, reason="max_expand_depth")
                             queue.clear()
+                            queued_pages.clear()
                             break
 
                         if cur_depth != active_layer_depth:
@@ -5168,6 +5147,7 @@ def stage2_drill_search_and_images(
                                     best_deeper_sim=float(layer_best_deeper_sim),
                                 )
                                 queue.clear()
+                                queued_pages.clear()
                                 break
 
                             if not solid_deeper:
@@ -5184,6 +5164,7 @@ def stage2_drill_search_and_images(
                                     best_deeper_sim=float(layer_best_deeper_sim),
                                 )
                                 queue.clear()
+                                queued_pages.clear()
                                 break
 
                             terminal_pool.clear()
@@ -5210,6 +5191,11 @@ def stage2_drill_search_and_images(
                             continue
 
                         term_full, deeper_full = partition_anchors(cur, canchors, lambda u: _allowed_ok(root, u))
+                        term_clean = ordered_dedupe([clean_url(u) for u in (term_full or []) if u])
+                        known_terms_before = set(processed_terminals)
+                        known_terms_before.update(terminal_pool_set)
+                        term_overlap_count = sum(1 for u in term_clean if u in known_terms_before)
+                        term_overlap_ratio = (float(term_overlap_count) / float(len(term_clean))) if term_clean else 0.0
 
                         dbg(f"[S2] cur={_short_url(cur)} term={len(term_full)} deeper={len(deeper_full)} q={len(queue)}")
                         _s2_evt(
@@ -5221,6 +5207,8 @@ def stage2_drill_search_and_images(
                             deeper_count=len(deeper_full),
                             queue_len=len(queue),
                             expand_sec=expand_sec,
+                            term_overlap_count=int(term_overlap_count),
+                            term_overlap_ratio=float(term_overlap_ratio),
                         )
 
                         idx_terms = _index_terminals_for_entry(term_full, deeper_full)
@@ -5235,6 +5223,29 @@ def stage2_drill_search_and_images(
                             deeper_full,
                             top_k=non_terminal_route_top_k_per_page,
                         )
+                        route_blocked_overlap = bool(
+                            per_root_saved[0] > 0
+                            and len(term_clean) >= ROUTE_BLOCK_OVERLAP_MIN_TERMINALS
+                            and term_overlap_ratio >= ROUTE_BLOCK_OVERLAP_RATIO
+                        )
+                        if route_blocked_overlap and deeper_ranked:
+                            dbg(
+                                f"[S2][ROUTE][BLOCK] cur={_short_url(cur)} "
+                                f"term_overlap={term_overlap_count}/{len(term_clean)} "
+                                f"ratio={term_overlap_ratio:.2f} saved={per_root_saved[0]}"
+                            )
+                            _s2_evt(
+                                "route_block_overlap",
+                                root=root_clean,
+                                cur=cur,
+                                depth=cur_depth,
+                                saved=int(per_root_saved[0]),
+                                term_count=len(term_clean),
+                                term_overlap_count=int(term_overlap_count),
+                                term_overlap_ratio=float(term_overlap_ratio),
+                                blocked_routes=len(deeper_ranked),
+                            )
+                            deeper_ranked = []
                         route_sec = float(_hdbg_now() - t_route0)
 
                         for s, bu in deeper_leftovers:
@@ -5271,17 +5282,19 @@ def stage2_drill_search_and_images(
                             deeper_routed=len(deeper_ranked),
                             leftovers=len(deeper_leftovers),
                             backup_cache=len(backup_cache_scores),
+                            route_blocked_overlap=bool(route_blocked_overlap),
                             layer_best_deeper_sim=float(layer_best_deeper_sim),
                             layer_has_valid_deeper_path=bool(layer_has_valid_deeper_path),
                             route_sec=route_sec,
                         )
                         for du in deeper_ranked:
                             cu = clean_url(du)
-                            if cu and cu not in expanded_pages:
+                            if cu and cu not in expanded_pages and cu not in queued_pages:
                                 next_depth = cur_depth + 1
                                 if next_depth <= MAX_EXPAND_DEPTH:
                                     depth_by_url[cu] = next_depth
                                     queue.append(cu)
+                                    queued_pages.add(cu)
 
                     final_layer_images = 0
                     if terminal_pool:
@@ -5316,11 +5329,13 @@ def stage2_drill_search_and_images(
 
                     backup_urls = [u for u, _s in sorted(backup_cache_scores.items(), key=lambda kv: kv[1], reverse=True)]
                     queue = deque()
+                    queued_pages.clear()
                     for bu in backup_urls:
                         cu = clean_url(bu)
-                        if cu and cu not in expanded_pages:
+                        if cu and cu not in expanded_pages and cu not in queued_pages:
                             queue.append(cu)
                             depth_by_url[cu] = 0
+                            queued_pages.add(cu)
                     if not queue:
                         break
 

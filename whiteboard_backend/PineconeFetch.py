@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import os
 import json
+import re
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
@@ -189,6 +190,22 @@ def _get_index(index_name: str):
     return idx
 
 
+def _try_get_index(index_name: str):
+    """
+    Best-effort index opener.
+    Returns None when index is unavailable or name is invalid/stale.
+    """
+    nm = str(index_name or "").strip()
+    if not nm:
+        return None
+    if nm.endswith("-0"):
+        return None
+    try:
+        return _get_index(nm)
+    except Exception:
+        return None
+
+
 # ------------------------------------------------------------
 # PLAN
 # ------------------------------------------------------------
@@ -219,17 +236,22 @@ def _minimal_index_plan(prompt_dim: Optional[int], clip_dim: Optional[int], cont
 
     if prompt_dim and context_dim and (prompt_dim == context_dim):
         shared = f"{PINECONE_INDEX_PREFIX}-promptctx-{prompt_dim}"
-        return {
+        out = {
             "prompt": (shared, "prompt"),
             "context": (shared, "context"),
-            "clip": (idx("clip", clip_dim), "clip"),
         }
+        if clip_dim:
+            out["clip"] = (idx("clip", clip_dim), "clip")
+        return out
 
-    return {
-        "prompt": (idx("prompt", prompt_dim), "prompt"),
-        "clip": (idx("clip", clip_dim), "clip"),
-        "context": (idx("context", context_dim), "context"),
-    }
+    out: Dict[str, Tuple[str, str]] = {}
+    if prompt_dim:
+        out["prompt"] = (idx("prompt", prompt_dim), "prompt")
+    if clip_dim:
+        out["clip"] = (idx("clip", clip_dim), "clip")
+    if context_dim:
+        out["context"] = (idx("context", context_dim), "context")
+    return out
 
 
 def load_plan_or_build(prompt_dim: int, clip_dim: int, context_dim: int) -> Dict[str, Tuple[str, str]]:
@@ -404,6 +426,50 @@ def _clean_labels(x: Any, *, max_items: int = 60, max_len: int = 64) -> List[str
     return out
 
 
+_MATCH_STOPWORDS = {
+    "a", "an", "and", "as", "at", "by", "for", "from", "in", "into", "is", "it",
+    "of", "on", "or", "that", "the", "to", "with", "without",
+}
+
+
+def _norm_match_text(text: str) -> str:
+    s = re.sub(r"[^a-z0-9]+", " ", str(text or "").lower())
+    return re.sub(r"\s+", " ", s).strip()
+
+
+def _token_set_match(text: str) -> set[str]:
+    toks = _norm_match_text(text).split()
+    return {t for t in toks if len(t) >= 2 and t not in _MATCH_STOPWORDS}
+
+
+def _base_context_matches_prompt(prompt_text: str, base_context_text: str) -> bool:
+    """
+    Backward-compatible "strict" matching that tolerates punctuation/style drift.
+    We still require substantial lexical overlap to avoid random cache reuse.
+    """
+    p = _norm_match_text(prompt_text)
+    b = _norm_match_text(base_context_text)
+    if not b:
+        return True
+    if p == b:
+        return True
+    if (len(b) >= 24 and b in p) or (len(p) >= 24 and p in b):
+        return True
+
+    pt = _token_set_match(p)
+    bt = _token_set_match(b)
+    if not pt or not bt:
+        return False
+
+    inter = pt & bt
+    if len(inter) >= 4:
+        return True
+
+    overlap_min = float(len(inter)) / float(max(1, min(len(pt), len(bt))))
+    overlap_max = float(len(inter)) / float(max(1, max(len(pt), len(bt))))
+    return overlap_min >= 0.34 and overlap_max >= 0.18
+
+
 def _meta_pack(md: Dict[str, Any]) -> Dict[str, Any]:
     md = md or {}
     # diagram tag can be stored under either
@@ -480,13 +546,48 @@ def fetch_processed_bundle_for_prompt(
         plan = load_plan_or_build(dims_key[0], dims_key[1], dims_key[2])
         _plan_cache[dims_key] = plan
 
-    idx_prompt = _get_index(plan["prompt"][0])
-    idx_clip = _get_index(plan["clip"][0])
-    idx_ctx = _get_index(plan["context"][0])
+    prompt_matches: List[Match] = []
+    clip_matches: List[Match] = []
+    ctx_matches: List[Match] = []
+    available_modalities: List[str] = []
 
-    prompt_matches = _query_one(idx_prompt, namespace=plan["prompt"][1], vector=q_prompt, top_k=top_k_per_modality)
-    clip_matches   = _query_one(idx_clip,   namespace=plan["clip"][1],   vector=q_clip,   top_k=top_k_per_modality)
-    ctx_matches    = _query_one(idx_ctx,    namespace=plan["context"][1],vector=q_context,top_k=top_k_per_modality)
+    p_cfg = plan.get("prompt")
+    if isinstance(p_cfg, (list, tuple)) and len(p_cfg) == 2:
+        idx_prompt = _try_get_index(str(p_cfg[0]))
+        if idx_prompt is not None:
+            try:
+                prompt_matches = _query_one(idx_prompt, namespace=str(p_cfg[1]), vector=q_prompt, top_k=top_k_per_modality)
+                available_modalities.append("prompt")
+            except Exception:
+                prompt_matches = []
+
+    c_cfg = plan.get("clip")
+    if isinstance(c_cfg, (list, tuple)) and len(c_cfg) == 2:
+        idx_clip = _try_get_index(str(c_cfg[0]))
+        if idx_clip is not None:
+            try:
+                clip_matches = _query_one(idx_clip, namespace=str(c_cfg[1]), vector=q_clip, top_k=top_k_per_modality)
+                available_modalities.append("clip")
+            except Exception:
+                clip_matches = []
+
+    x_cfg = plan.get("context")
+    if isinstance(x_cfg, (list, tuple)) and len(x_cfg) == 2:
+        idx_ctx = _try_get_index(str(x_cfg[0]))
+        if idx_ctx is not None:
+            try:
+                ctx_matches = _query_one(idx_ctx, namespace=str(x_cfg[1]), vector=q_context, top_k=top_k_per_modality)
+                available_modalities.append("context")
+            except Exception:
+                ctx_matches = []
+
+    if not available_modalities:
+        return {
+            "processed_ids": [],
+            "meta_by_id": {},
+            "used_plan": {k: [v[0], v[1]] for k, v in plan.items()},
+            "dims": {"prompt": dims_key[0], "clip": dims_key[1], "context": dims_key[2]},
+        }
 
     s_prompt = {m.processed_id: float(m.score) for m in prompt_matches}
     s_clip   = {m.processed_id: float(m.score) for m in clip_matches}
@@ -504,26 +605,47 @@ def fetch_processed_bundle_for_prompt(
     fused: List[Tuple[float, int, str]] = []
     all_ids = set(n_prompt.keys()) | set(n_clip.keys()) | set(n_ctx.keys())
 
-    w_prompt, w_clip, w_ctx = (0.35, 0.40, 0.25)
-    prompt_norm = prompt.strip().lower()
+    requested_min_modalities = int(min_modalities)
+    if requested_min_modalities <= 0:
+        return {
+            "processed_ids": [],
+            "meta_by_id": {},
+            "used_plan": {k: [v[0], v[1]] for k, v in plan.items()},
+            "dims": {"prompt": dims_key[0], "clip": dims_key[1], "context": dims_key[2]},
+        }
+    # Respect caller strictness. Do not silently relax to available modalities.
+    if requested_min_modalities > len(available_modalities):
+        return {
+            "processed_ids": [],
+            "meta_by_id": {},
+            "used_plan": {k: [v[0], v[1]] for k, v in plan.items()},
+            "dims": {"prompt": dims_key[0], "clip": dims_key[1], "context": dims_key[2]},
+        }
 
+    base_weights = {"prompt": 0.35, "clip": 0.40, "context": 0.25}
+    ws = {k: float(base_weights[k]) for k in available_modalities}
+    wsum = sum(ws.values())
+    if wsum <= 1e-9:
+        ws = {k: 1.0 / float(len(available_modalities)) for k in available_modalities}
+    else:
+        ws = {k: (v / wsum) for k, v in ws.items()}
     for pid in all_ids:
         hits = 0
         if pid in n_prompt: hits += 1
         if pid in n_clip:   hits += 1
         if pid in n_ctx:    hits += 1
-        if hits < int(min_modalities):
+        if hits < requested_min_modalities:
             continue
 
         sp = float(n_prompt.get(pid, 0.0))
         sc = float(n_clip.get(pid, 0.0))
         sx = float(n_ctx.get(pid, 0.0))
-        final = (w_prompt * sp) + (w_clip * sc) + (w_ctx * sx)
+        final = (ws.get("prompt", 0.0) * sp) + (ws.get("clip", 0.0) * sc) + (ws.get("context", 0.0) * sx)
 
         md = meta_by_id_raw.get(pid, {}) or {}
         if require_base_context_match:
-            bc = str(md.get("base_context", "") or "").strip().lower()
-            if bc and bc != prompt_norm:
+            bc = str(md.get("base_context", "") or "").strip()
+            if bc and not _base_context_matches_prompt(prompt, bc):
                 continue
 
         fused.append((float(final), int(hits), pid))

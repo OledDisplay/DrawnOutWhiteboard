@@ -5,6 +5,7 @@ import os
 import threading
 import time
 from dataclasses import dataclass
+from pathlib import Path
 from typing import Any, Optional, List
 
 # -----------------------------
@@ -128,9 +129,133 @@ def _clear_cuda_cache() -> None:
     try:
         import torch
         if torch.cuda.is_available():
+            try:
+                torch.cuda.synchronize()
+            except Exception:
+                pass
             torch.cuda.empty_cache()
+            try:
+                torch.cuda.ipc_collect()
+            except Exception:
+                pass
     except Exception:
         pass
+
+
+def _env_flag(name: str, default: bool = False) -> bool:
+    raw = str(os.getenv(name, "1" if default else "0")).strip().lower()
+    return raw not in ("0", "false", "no", "off", "")
+
+
+def _resolve_efficientsam3_checkpoint_path(checkpoint_path: Optional[str]) -> str:
+    """
+    Resolution order:
+      1) explicit checkpoint_path arg
+      2) env EFFICIENTSAM3_CKPT
+      3) Hugging Face download defaults (env-overridable)
+    """
+    explicit = str(checkpoint_path or os.getenv("EFFICIENTSAM3_CKPT") or "").strip()
+    if explicit:
+        p = Path(explicit)
+        if not p.is_file():
+            raise RuntimeError(f"EfficientSAM3 checkpoint not found: {explicit}")
+        return str(p)
+
+    repo_id = str(os.getenv("EFFICIENTSAM3_HF_REPO_ID", "Simon7108528/EfficientSAM3") or "").strip()
+    subfolder = str(os.getenv("EFFICIENTSAM3_HF_SUBFOLDER", "stage1_all_converted") or "").strip()
+    filename = str(os.getenv("EFFICIENTSAM3_HF_FILENAME", "efficient_sam3_tinyvit_m.pt") or "").strip()
+    local_dir = str(os.getenv("EFFICIENTSAM3_HF_LOCAL_DIR", "checkpoints") or "").strip()
+    local_files_only = _env_flag("EFFICIENTSAM3_HF_LOCAL_FILES_ONLY", False)
+    token = str(os.getenv("HF_TOKEN") or os.getenv("HUGGINGFACEHUB_API_TOKEN") or "").strip() or None
+
+    if not repo_id or not filename:
+        raise RuntimeError(
+            "Missing EfficientSAM3 HuggingFace config. Set EFFICIENTSAM3_HF_REPO_ID and EFFICIENTSAM3_HF_FILENAME."
+        )
+
+    try:
+        from huggingface_hub import hf_hub_download
+    except Exception as e:
+        raise RuntimeError(
+            "huggingface_hub is required to auto-download EfficientSAM3 checkpoint. "
+            "Install it or set EFFICIENTSAM3_CKPT."
+        ) from e
+
+    _log(
+        "Resolving EfficientSAM3 checkpoint via HuggingFace "
+        f"(repo={repo_id}, subfolder={subfolder or '<root>'}, file={filename}, local_dir={local_dir})"
+    )
+    kwargs = {
+        "repo_id": repo_id,
+        "filename": filename,
+        "local_dir": local_dir,
+        "local_files_only": bool(local_files_only),
+    }
+    if subfolder:
+        kwargs["subfolder"] = subfolder
+    if token:
+        kwargs["token"] = token
+
+    try:
+        ckpt = hf_hub_download(**kwargs)
+    except TypeError:
+        # Backward compatibility with older huggingface_hub signatures.
+        kwargs.pop("token", None)
+        ckpt = hf_hub_download(**kwargs)
+
+    p = Path(str(ckpt))
+    if not p.is_file():
+        raise RuntimeError(f"EfficientSAM3 checkpoint download did not produce a file: {ckpt}")
+    return str(p)
+
+
+def _resolve_efficientsam3_bpe_path() -> str:
+    """
+    Resolve tokenizer BPE file required by sam3 text encoder.
+    Some wheel installs do not package this asset, so we download it if needed.
+    """
+    filename = str(os.getenv("EFFICIENTSAM3_BPE_FILENAME", "bpe_simple_vocab_16e6.txt.gz") or "").strip()
+    explicit = str(os.getenv("EFFICIENTSAM3_BPE_PATH", "") or "").strip()
+    if explicit:
+        p = Path(explicit)
+        if not p.is_file():
+            raise RuntimeError(f"EfficientSAM3 BPE file not found: {explicit}")
+        return str(p)
+
+    candidates = [
+        Path("checkpoints") / filename,
+        Path(__file__).resolve().parent / "checkpoints" / filename,
+    ]
+    for p in candidates:
+        if p.is_file():
+            return str(p)
+
+    url = str(
+        os.getenv(
+            "EFFICIENTSAM3_BPE_URL",
+            "https://raw.githubusercontent.com/SimonZeng7108/efficientsam3/main/sam3/assets/bpe_simple_vocab_16e6.txt.gz",
+        )
+        or ""
+    ).strip()
+    out_dir = Path(str(os.getenv("EFFICIENTSAM3_BPE_LOCAL_DIR", "checkpoints") or "checkpoints").strip())
+    out_dir.mkdir(parents=True, exist_ok=True)
+    out_path = out_dir / filename
+
+    _log(f"Resolving EfficientSAM3 BPE file (url={url}, local={out_path})")
+    try:
+        from urllib.request import urlopen
+        with urlopen(url, timeout=60) as resp:
+            payload = resp.read()
+        out_path.write_bytes(payload)
+    except Exception as e:
+        raise RuntimeError(
+            "Failed to resolve EfficientSAM3 BPE file. "
+            "Set EFFICIENTSAM3_BPE_PATH to an existing file."
+        ) from e
+
+    if not out_path.is_file():
+        raise RuntimeError(f"EfficientSAM3 BPE download did not produce a file: {out_path}")
+    return str(out_path)
 
 
 def _preferred_siglip_devices(gpu_index: int) -> List[str]:
@@ -472,20 +597,21 @@ def init_efficientsam3_hot(
 ) -> None:
     """
     Loads EfficientSAM3 (text prompt) once per process.
-    Requires checkpoint path (env EFFICIENTSAM3_CKPT or explicit).
+    Checkpoint resolution:
+      - checkpoint_path arg or env EFFICIENTSAM3_CKPT
+      - otherwise auto-download from HuggingFace (env-overridable defaults)
     """
     global _SAM
 
     configure_threads(cpu_threads)
     _torch_and_cv2_post_config(cpu_threads)
 
-    ckpt = (checkpoint_path or os.getenv("EFFICIENTSAM3_CKPT") or "").strip()
-    if not ckpt:
-        raise RuntimeError("Missing EfficientSAM3 checkpoint. Set EFFICIENTSAM3_CKPT or pass checkpoint_path=...")
+    ckpt = _resolve_efficientsam3_checkpoint_path(checkpoint_path)
+    bpe_path = _resolve_efficientsam3_bpe_path()
 
     with _INIT_LOCK:
         if _SAM is None:
-            _log(f"Loading EfficientSAM3 once: ckpt={ckpt} gpu_index={gpu_index}")
+            _log(f"Loading EfficientSAM3 once: ckpt={ckpt} bpe={bpe_path} gpu_index={gpu_index}")
             import torch
             from sam3.model_builder import build_efficientsam3_image_model
             from sam3.model.sam3_image_processor import Sam3Processor
@@ -495,6 +621,7 @@ def init_efficientsam3_hot(
                 torch.cuda.set_device(int(gpu_index))
 
             model = build_efficientsam3_image_model(
+                bpe_path=bpe_path,
                 checkpoint_path=ckpt,
                 backbone_type=backbone_type,
                 model_name=model_name,
@@ -535,20 +662,27 @@ def unload_qwen() -> None:
         if _QWEN is None:
             return
         _log("Unloading Qwen...")
+        bundle = _QWEN
+        _QWEN = None
         try:
-            import torch
             import gc
 
             try:
-                if hasattr(_QWEN.model, "cpu"):
-                    _QWEN.model.cpu()
+                if hasattr(bundle.model, "cpu"):
+                    bundle.model.cpu()
             except Exception:
                 pass
 
-            _QWEN = None
+            try:
+                bundle.model = None
+            except Exception:
+                pass
+            try:
+                bundle.processor = None
+            except Exception:
+                pass
             gc.collect()
-            if torch.cuda.is_available():
-                torch.cuda.empty_cache()
+            _clear_cuda_cache()
         except Exception:
             _QWEN = None
 
@@ -657,20 +791,27 @@ def unload_efficientsam3() -> None:
         if _SAM is None:
             return
         _log("Unloading EfficientSAM3...")
+        bundle = _SAM
+        _SAM = None
         try:
-            import torch
             import gc
 
             try:
-                if hasattr(_SAM.model, "cpu"):
-                    _SAM.model.cpu()
+                if hasattr(bundle.model, "cpu"):
+                    bundle.model.cpu()
             except Exception:
                 pass
 
-            _SAM = None
+            try:
+                bundle.model = None
+            except Exception:
+                pass
+            try:
+                bundle.processor = None
+            except Exception:
+                pass
             gc.collect()
-            if torch.cuda.is_available():
-                torch.cuda.empty_cache()
+            _clear_cuda_cache()
         except Exception:
             _SAM = None
 

@@ -2,6 +2,8 @@
 --extra-index-url https://download.pytorch.org/whl/cu126
 --extra-index-url https://www.paddlepaddle.org.cn/packages/stable/cu126/
 
+git+https://github.com/SimonZeng7108/efficientsam3.git
+
 accelerate==1.12.0
 
 aiohappyeyeballs==2.6.1
