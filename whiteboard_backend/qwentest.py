@@ -6,6 +6,10 @@ import os
 import re
 import time
 import gc
+import logging
+import threading
+from difflib import SequenceMatcher
+from contextlib import contextmanager
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 
@@ -13,7 +17,22 @@ import numpy as np
 import torch
 from PIL import Image, ImageDraw
 
-from transformers import AutoProcessor, Qwen3VLForConditionalGeneration
+from transformers import (
+    AutoModelForCausalLM,
+    AutoModelForImageTextToText,
+    AutoProcessor,
+    AutoTokenizer,
+    Qwen3VLForConditionalGeneration,
+    Qwen3_5ForConditionalGeneration,
+)
+
+try:
+    from vllm import LLM as VllmLLM, SamplingParams as VllmSamplingParams
+    _HAS_VLLM = True
+except Exception:
+    VllmLLM = None
+    VllmSamplingParams = None
+    _HAS_VLLM = False
 
 
 
@@ -36,6 +55,7 @@ CLUSTER_RENDER_DIR = BASE_DIR / "ClusterRenders"
 CLUSTER_MAP_DIR = BASE_DIR / "ClusterMaps"
 
 OUT_DIR = BASE_DIR / "ClustersLabeled"
+OUT_DEBUG_DIR = OUT_DIR / "debug"
 SCHEMATIC_OUT_DIR = BASE_DIR / "LineLabels"
 CACHE_DIR = BASE_DIR / "_path_cache"
 CACHE_DIR.mkdir(parents=True, exist_ok=True)
@@ -50,9 +70,20 @@ SKIP_EXISTING_LABELS = True
 # MODEL CONFIG 
 # ============================
 MODEL_ID = "Qwen/Qwen3-VL-2B-Instruct"
+C2_TEXT_MODEL_ID = os.environ.get("QWEN_TEXT_MODEL_ID", "Qwen/Qwen3.5-0.8B")
+ACTION_PLANNER_TEXT_MODEL_ID = os.environ.get("QWEN_ACTION_MODEL_ID", C2_TEXT_MODEL_ID)
+DIAGRAM_MULTIMODAL_MODEL_ID = os.environ.get(
+    "QWEN_DIAGRAM_MULTIMODAL_MODEL_ID",
+    os.environ.get("QWEN_MULTIMODAL_MODEL_ID", "Qwen/Qwen3.5-0.8B"),
+)
 
 QWEN_MIN_PIXELS = 256 * 28 * 28
 QWEN_MAX_PIXELS = 512 * 28 * 28
+QWEN_TEXT_BACKEND = str(os.environ.get("QWEN_TEXT_BACKEND", "vllm") or "vllm").strip().lower()
+QWEN_VLLM_TP_SIZE = max(1, int(os.environ.get("QWEN_VLLM_TP_SIZE", "1") or 1))
+QWEN_VLLM_GPU_MEMORY_UTILIZATION = float(os.environ.get("QWEN_VLLM_GPU_MEMORY_UTILIZATION", "0.9") or 0.9)
+QWEN_VLLM_MAX_MODEL_LEN = max(512, int(os.environ.get("QWEN_VLLM_MAX_MODEL_LEN", "4096") or 4096))
+QWEN_VLLM_ENFORCE_EAGER = str(os.environ.get("QWEN_VLLM_ENFORCE_EAGER", "0") or "0").strip().lower() not in {"0", "false", "no", "off", ""}
 
 
 
@@ -79,6 +110,8 @@ PROC_LONGEST_EDGE = 600 # composite max side;
 
 SUGGESTION_LIMIT = 40
 MAX_NEW_TOKENS = 70
+CLUSTER_VISUAL_MAX_NEW_TOKENS = 220
+POSTFACTO_MATCH_MAX_NEW_TOKENS = 700
 DO_SAMPLE = False
 
 RECT_THICKNESS_PX = 3
@@ -91,9 +124,161 @@ def _env_flag(name: str, default: bool) -> bool:
     return raw not in ("0", "false", "no", "off", "")
 
 
-PLAN_PROMPT_CHAR_CAP = max(512, int(os.getenv("QWEN_PLAN_PROMPT_CHAR_CAP", "6000") or 6000))
+def _is_qwen_35_08b_model(model_id: Any) -> bool:
+    text = re.sub(r"\s+", "", str(model_id or "")).strip().lower()
+    return "qwen3.5-0.8b" in text
+
+
+def _should_use_vllm_for_text_model(model_id: Any) -> bool:
+    if QWEN_TEXT_BACKEND in {"transformers", "hf"}:
+        return False
+    if QWEN_TEXT_BACKEND == "vllm":
+        return _is_qwen_35_08b_model(model_id)
+    return False
+
+
+def _ensure_vllm_text_backend(model_id: Any) -> None:
+    if not _HAS_VLLM:
+        raise RuntimeError(
+            f"vllm_not_installed_for_text_model:{model_id}. Install vllm or set QWEN_TEXT_BACKEND=transformers."
+        )
+    if FORCE_CPU or not torch.cuda.is_available():
+        raise RuntimeError(f"vllm_text_backend_requires_cuda_for:{model_id}")
+
+
+def _build_vllm_text_engine(model_id: str):
+    _ensure_vllm_text_backend(model_id)
+    engine = VllmLLM(
+        model=model_id,
+        tokenizer=model_id,
+        trust_remote_code=True,
+        tensor_parallel_size=int(QWEN_VLLM_TP_SIZE),
+        dtype="auto",
+        gpu_memory_utilization=float(QWEN_VLLM_GPU_MEMORY_UTILIZATION),
+        max_model_len=int(QWEN_VLLM_MAX_MODEL_LEN),
+        enforce_eager=bool(QWEN_VLLM_ENFORCE_EAGER),
+    )
+    return engine
+
+
+def _get_vllm_tokenizer(llm: Any):
+    tok = llm.get_tokenizer()
+    if getattr(tok, "pad_token_id", None) is None and getattr(tok, "eos_token_id", None) is not None:
+        tok.pad_token_id = tok.eos_token_id
+    return tok
+
+
+def _apply_chat_template_text(tokenizer: Any, messages: List[Dict[str, Any]], *, thinking_enabled: bool = False) -> str:
+    common_kwargs = {
+        "tokenize": False,
+        "add_generation_prompt": True,
+    }
+    try:
+        return tokenizer.apply_chat_template(messages, enable_thinking=thinking_enabled, **common_kwargs)
+    except TypeError:
+        try:
+            return tokenizer.apply_chat_template(
+                messages,
+                chat_template_kwargs={"enable_thinking": thinking_enabled},
+                **common_kwargs,
+            )
+        except TypeError:
+            return tokenizer.apply_chat_template(messages, **common_kwargs)
+
+
+def _make_vllm_sampling_params(
+    *,
+    temperature: float,
+    max_new_tokens: int,
+    thinking_enabled: bool = False,
+    do_sample: bool = False,
+):
+    kwargs: Dict[str, Any] = {
+        "max_tokens": int(max_new_tokens),
+        "skip_special_tokens": False,
+    }
+    if thinking_enabled:
+        kwargs.update(
+            {
+                "temperature": max(0.6, float(temperature)),
+                "top_p": 0.95,
+                "top_k": 20,
+            }
+        )
+    elif do_sample:
+        kwargs.update(
+            {
+                "temperature": max(0.0, float(temperature)),
+                "top_p": 0.9,
+            }
+        )
+    else:
+        kwargs["temperature"] = 0.0
+    return VllmSamplingParams(**kwargs)
+
+
+def _vllm_generate_texts(
+    *,
+    llm: Any,
+    prompts: List[str],
+    temperature: float,
+    max_new_tokens: int,
+    thinking_enabled: bool = False,
+    do_sample: bool = False,
+) -> List[str]:
+    if not prompts:
+        return []
+    sampling_params = _make_vllm_sampling_params(
+        temperature=float(temperature),
+        max_new_tokens=int(max_new_tokens),
+        thinking_enabled=bool(thinking_enabled),
+        do_sample=bool(do_sample),
+    )
+    outputs = llm.generate(prompts, sampling_params=sampling_params, use_tqdm=False)
+    texts: List[str] = []
+    for row in outputs:
+        value = ""
+        try:
+            if getattr(row, "outputs", None):
+                value = str(row.outputs[0].text or "")
+        except Exception:
+            value = ""
+        texts.append(value)
+    return texts
+
+
+def _split_vllm_generated_text(raw_text: str, *, thinking_enabled: bool) -> Dict[str, Any]:
+    raw_text = str(raw_text or "").replace("<|im_end|>", " ").replace("<|endoftext|>", " ").strip()
+    if not thinking_enabled:
+        return {
+            "raw_text": raw_text,
+            "thinking_text": "",
+            "final_text": raw_text,
+            "saw_close_tag": False,
+        }
+    head, marker, tail = raw_text.partition("</think>")
+    if marker:
+        return {
+            "raw_text": raw_text,
+            "thinking_text": (head + marker).strip(),
+            "final_text": tail.strip(),
+            "saw_close_tag": True,
+        }
+    return {
+        "raw_text": raw_text,
+        "thinking_text": raw_text,
+        "final_text": "",
+        "saw_close_tag": False,
+    }
+
+
+PLAN_PROMPT_CHAR_CAP = max(512, int(os.getenv("QWEN_PLAN_PROMPT_CHAR_CAP", "12000") or 12000))
 PLAN_DO_SAMPLE = _env_flag("QWEN_PLAN_DO_SAMPLE", False)
 PLAN_USE_CACHE = _env_flag("QWEN_PLAN_USE_CACHE", True)
+PLAN_HEAVY_BATCH_TOKEN_BUDGET = max(1024, int(os.getenv("QWEN_PLAN_HEAVY_BATCH_TOKEN_BUDGET", "4096") or 4096))
+PLAN_HEAVY_BATCH_PROMPT_CHAR_BUDGET = max(4096, int(os.getenv("QWEN_PLAN_HEAVY_BATCH_PROMPT_CHAR_BUDGET", "24000") or 24000))
+QWEN_DISABLE_ASYNC_LOAD = _env_flag("QWEN_DISABLE_ASYNC_LOAD", True)
+QWEN_DISABLE_ALLOCATOR_WARMUP = _env_flag("QWEN_DISABLE_ALLOCATOR_WARMUP", True)
 
 # Prints for every completed cluster (even in batching).
 PRINT_EVERY_CLUSTER = True
@@ -318,6 +503,276 @@ def _safe_generate(
         retry_kwargs = dict(gen_kwargs or {})
         retry_kwargs["use_cache"] = False
         return model.generate(**inputs, **retry_kwargs)
+
+
+def _generation_special_token_ids(model, processor) -> Tuple[List[int], int]:
+    eos_ids: List[int] = []
+    pad_id = 0
+
+    tok = getattr(processor, "tokenizer", None)
+    gen_cfg = getattr(model, "generation_config", None)
+
+    eos_raw = None
+    if gen_cfg is not None:
+        eos_raw = getattr(gen_cfg, "eos_token_id", None)
+        pad_id = int(getattr(gen_cfg, "pad_token_id", 0) or 0)
+    if eos_raw is None and tok is not None:
+        eos_raw = getattr(tok, "eos_token_id", None)
+    if not pad_id and tok is not None:
+        pad_id = int(getattr(tok, "pad_token_id", 0) or 0)
+
+    if isinstance(eos_raw, (list, tuple, set)):
+        for one in eos_raw:
+            try:
+                eos_ids.append(int(one))
+            except Exception:
+                pass
+    elif eos_raw is not None:
+        try:
+            eos_ids.append(int(eos_raw))
+        except Exception:
+            pass
+
+    eos_ids = list(dict.fromkeys([int(x) for x in eos_ids if int(x) >= 0]))
+    if not eos_ids and pad_id > 0:
+        eos_ids = [int(pad_id)]
+    if pad_id <= 0 and eos_ids:
+        pad_id = int(eos_ids[0])
+    return eos_ids, int(pad_id)
+
+
+def _sample_next_tokens_from_logits(
+    logits: torch.Tensor,
+    *,
+    do_sample: bool,
+    temperature: float,
+    top_p: float,
+) -> torch.Tensor:
+    if not do_sample:
+        return torch.argmax(logits, dim=-1)
+
+    temp = max(1e-5, float(temperature or 1.0))
+    probs = torch.softmax(logits / temp, dim=-1)
+    top_p = max(1e-5, min(1.0, float(top_p or 1.0)))
+    if top_p < 0.999:
+        sorted_probs, sorted_indices = torch.sort(probs, descending=True, dim=-1)
+        cumulative_probs = torch.cumsum(sorted_probs, dim=-1)
+        sorted_mask = cumulative_probs > top_p
+        sorted_mask[..., 1:] = sorted_mask[..., :-1].clone()
+        sorted_mask[..., 0] = False
+        sorted_probs = sorted_probs.masked_fill(sorted_mask, 0.0)
+        denom = sorted_probs.sum(dim=-1, keepdim=True).clamp_min(1e-12)
+        sorted_probs = sorted_probs / denom
+        sampled_sorted = torch.multinomial(sorted_probs, num_samples=1)
+        return sorted_indices.gather(-1, sampled_sorted).squeeze(-1)
+
+    return torch.multinomial(probs, num_samples=1).squeeze(-1)
+
+
+def _select_past_key_values_batch(past_key_values: Any, keep_indices: torch.Tensor) -> Any:
+    if past_key_values is None:
+        return None
+
+    if hasattr(past_key_values, "batch_select_indices"):
+        past_key_values.batch_select_indices(keep_indices)
+        return past_key_values
+
+    if isinstance(past_key_values, tuple):
+        new_layers = []
+        for layer in past_key_values:
+            if isinstance(layer, tuple):
+                new_layer = []
+                for tensor in layer:
+                    if torch.is_tensor(tensor) and tensor.dim() > 0 and tensor.shape[0] >= int(keep_indices.numel()):
+                        new_layer.append(tensor.index_select(0, keep_indices))
+                    else:
+                        new_layer.append(tensor)
+                new_layers.append(tuple(new_layer))
+            else:
+                new_layers.append(layer)
+        return tuple(new_layers)
+
+    return past_key_values
+
+
+def _slice_generation_model_kwargs_batch(
+    model_kwargs: Dict[str, Any],
+    *,
+    keep_indices: torch.Tensor,
+    batch_size_before: int,
+) -> Dict[str, Any]:
+    out = dict(model_kwargs or {})
+    for key, value in list(out.items()):
+        if key == "cache_position":
+            continue
+        if key == "past_key_values":
+            out[key] = _select_past_key_values_batch(value, keep_indices)
+            continue
+        if torch.is_tensor(value) and value.dim() > 0 and int(value.shape[0]) == int(batch_size_before):
+            out[key] = value.index_select(0, keep_indices)
+    return out
+
+
+def _generate_with_rolling_cache_release(
+    *,
+    model,
+    processor,
+    input_ids: torch.Tensor,
+    attention_mask: torch.Tensor,
+    max_new_tokens: int,
+    temperature: float,
+    top_p: float,
+    do_sample: bool,
+    debug_label: str,
+) -> List[str]:
+    batch_size = int(input_ids.shape[0])
+    if batch_size <= 0:
+        return []
+
+    eos_ids, _pad_id = _generation_special_token_ids(model, processor)
+    eos_id_set = set(int(x) for x in eos_ids)
+    tok = getattr(processor, "tokenizer", None)
+    decode_fn = getattr(processor, "decode", None)
+    if not callable(decode_fn) and tok is not None:
+        decode_fn = getattr(tok, "decode", None)
+    active_input_ids = input_ids
+    active_indices = torch.arange(batch_size, device=input_ids.device, dtype=torch.long)
+    generated_token_rows: List[List[int]] = [[] for _ in range(batch_size)]
+
+    model_kwargs: Dict[str, Any] = {
+        "attention_mask": attention_mask,
+        "use_cache": True,
+        "cache_position": torch.arange(int(input_ids.shape[1]), device=input_ids.device, dtype=torch.long),
+    }
+    next_input_ids = active_input_ids
+
+    for step in range(int(max_new_tokens)):
+        prepared_inputs = model.prepare_inputs_for_generation(
+            next_input_ids,
+            is_first_iteration=(step == 0),
+            **model_kwargs,
+        )
+        outputs = model(**prepared_inputs, return_dict=True)
+        next_token_logits = outputs.logits[:, -1, :]
+        next_tokens = _sample_next_tokens_from_logits(
+            next_token_logits,
+            do_sample=bool(do_sample),
+            temperature=float(temperature),
+            top_p=float(top_p),
+        )
+
+        active_indices_cpu = active_indices.detach().cpu().tolist()
+        next_tokens_cpu = next_tokens.detach().cpu().tolist()
+        finished_positions: List[int] = []
+        for pos, orig_idx in enumerate(active_indices_cpu):
+            tok_id = int(next_tokens_cpu[pos])
+            generated_token_rows[int(orig_idx)].append(tok_id)
+            if tok_id in eos_id_set:
+                finished_positions.append(int(pos))
+
+        model_kwargs = model._update_model_kwargs_for_generation(
+            outputs,
+            model_kwargs,
+            is_encoder_decoder=False,
+            num_new_tokens=1,
+        )
+
+        if len(finished_positions) >= len(active_indices_cpu):
+            break
+
+        if finished_positions:
+            keep_positions = [i for i in range(len(active_indices_cpu)) if i not in set(finished_positions)]
+            keep_indices = torch.tensor(keep_positions, device=active_indices.device, dtype=torch.long)
+            batch_before = int(active_indices.shape[0])
+            active_indices = active_indices.index_select(0, keep_indices)
+            next_tokens = next_tokens.index_select(0, keep_indices)
+            model_kwargs = _slice_generation_model_kwargs_batch(
+                model_kwargs,
+                keep_indices=keep_indices,
+                batch_size_before=batch_before,
+            )
+            try:
+                del outputs
+            except Exception:
+                pass
+            try:
+                del prepared_inputs
+            except Exception:
+                pass
+            try:
+                del next_token_logits
+            except Exception:
+                pass
+            try:
+                if torch.cuda.is_available():
+                    torch.cuda.empty_cache()
+            except Exception:
+                pass
+            print(
+                f"[qwen][DBG] {debug_label} rolling_cache_release step={step} "
+                f"finished={len(finished_positions)} active_left={int(active_indices.shape[0])} vram={_vram_str()}"
+            )
+
+        next_input_ids = next_tokens.unsqueeze(-1)
+        try:
+            del outputs
+        except Exception:
+            pass
+        try:
+            del prepared_inputs
+        except Exception:
+            pass
+        try:
+            del next_token_logits
+        except Exception:
+            pass
+        if int(active_indices.shape[0]) <= 0:
+            break
+
+    decoded_rows: List[str] = []
+    for token_ids in generated_token_rows:
+        if token_ids and callable(decode_fn):
+            decoded_rows.append(str(decode_fn(token_ids, skip_special_tokens=True)))
+        else:
+            decoded_rows.append("")
+    return decoded_rows
+
+
+def _noop_caching_allocator_warmup(*args, **kwargs) -> None:
+    return None
+
+
+@contextmanager
+def _qwen_safe_loader_context():
+    orig_async_load = os.environ.get("HF_DEACTIVATE_ASYNC_LOAD")
+    orig_allocator_warmup = None
+    modeling_utils = None
+
+    try:
+        if QWEN_DISABLE_ASYNC_LOAD:
+            os.environ["HF_DEACTIVATE_ASYNC_LOAD"] = "1"
+
+        if QWEN_DISABLE_ALLOCATOR_WARMUP:
+            try:
+                import transformers.modeling_utils as modeling_utils
+                orig_allocator_warmup = getattr(modeling_utils, "caching_allocator_warmup", None)
+                if orig_allocator_warmup is not None:
+                    modeling_utils.caching_allocator_warmup = _noop_caching_allocator_warmup
+            except Exception as e:
+                print(f"[warn] failed to disable transformers caching allocator warmup: {e}")
+
+        yield
+    finally:
+        if modeling_utils is not None and orig_allocator_warmup is not None:
+            try:
+                modeling_utils.caching_allocator_warmup = orig_allocator_warmup
+            except Exception:
+                pass
+
+        if orig_async_load is None:
+            os.environ.pop("HF_DEACTIVATE_ASYNC_LOAD", None)
+        else:
+            os.environ["HF_DEACTIVATE_ASYNC_LOAD"] = orig_async_load
 
 
 # ============================
@@ -745,39 +1200,50 @@ def extract_json_objects(text: str) -> List[Dict[str, Any]]:
         return []
 
     s = text.strip()
+    if not s:
+        return []
+
     out: List[Dict[str, Any]] = []
+    seen = set()
 
-    i = 0
     n = len(s)
-    while i < n:
-        start = s.find("{", i)
-        if start < 0:
-            break
-
+    for start in range(n):
+        if s[start] != "{":
+            continue
         depth = 0
-        end = -1
-        for j in range(start, n):
-            ch = s[j]
+        in_string = False
+        escape = False
+        for end in range(start, n):
+            ch = s[end]
+            if in_string:
+                if escape:
+                    escape = False
+                    continue
+                if ch == "\\":
+                    escape = True
+                    continue
+                if ch == '"':
+                    in_string = False
+                continue
+            if ch == '"':
+                in_string = True
+                continue
             if ch == "{":
                 depth += 1
             elif ch == "}":
                 depth -= 1
                 if depth == 0:
-                    end = j
+                    chunk = s[start:end + 1]
+                    if chunk in seen:
+                        break
+                    seen.add(chunk)
+                    try:
+                        obj = json.loads(chunk)
+                        if isinstance(obj, dict):
+                            out.append(obj)
+                    except Exception:
+                        pass
                     break
-
-        if end < 0:
-            break
-
-        chunk = s[start:end + 1]
-        try:
-            obj = json.loads(chunk)
-            if isinstance(obj, dict):
-                out.append(obj)
-        except Exception:
-            pass
-
-        i = end + 1
 
     return out
 
@@ -824,20 +1290,98 @@ def build_cluster_visual_prompt(
     )
 
 
+def _json_unescape_loose(value: str) -> str:
+    s = str(value or "")
+    if not s:
+        return ""
+    try:
+        return json.loads('"' + s + '"')
+    except Exception:
+        return (
+            s.replace('\\"', '"')
+            .replace("\\n", "\n")
+            .replace("\\r", "\r")
+            .replace("\\t", "\t")
+            .replace("\\/", "/")
+            .strip()
+        )
+
+
+def _extract_jsonish_string_field(text: str, field_name: str) -> str:
+    if not isinstance(text, str) or not field_name:
+        return ""
+
+    exact = re.search(
+        rf'"{re.escape(field_name)}"\s*:\s*"((?:\\.|[^"\\])*)"',
+        text,
+        flags=re.IGNORECASE | re.DOTALL,
+    )
+    if exact:
+        return _json_unescape_loose(exact.group(1)).strip()
+
+    partial = re.search(
+        rf'"{re.escape(field_name)}"\s*:\s*"([^\n\r]*)',
+        text,
+        flags=re.IGNORECASE,
+    )
+    if partial:
+        return _json_unescape_loose(partial.group(1)).strip().rstrip(",")
+
+    return ""
+
+
+def _extract_jsonish_keywords_field(text: str, field_name: str) -> List[str]:
+    if not isinstance(text, str) or not field_name:
+        return []
+
+    block = re.search(
+        rf'"{re.escape(field_name)}"\s*:\s*(\[[\s\S]*?\])',
+        text,
+        flags=re.IGNORECASE,
+    )
+    if block:
+        try:
+            arr = json.loads(block.group(1))
+        except Exception:
+            arr = None
+        if isinstance(arr, list):
+            out: List[str] = []
+            for item in arr:
+                if not isinstance(item, str):
+                    continue
+                cleaned = _clean_short_label(item)
+                if cleaned:
+                    out.append(cleaned)
+            if out:
+                return out[:12]
+
+    inline = _extract_jsonish_string_field(text, field_name)
+    if not inline:
+        return []
+
+    out = []
+    seen = set()
+    for part in re.split(r"[,;/|]+", inline):
+        cleaned = _clean_short_label(part)
+        if not cleaned:
+            continue
+        key = cleaned.lower()
+        if key in seen:
+            continue
+        seen.add(key)
+        out.append(cleaned)
+    return out[:12]
+
+
 def _parse_cluster_visual(text_out: str) -> Dict[str, Any]:
     obj = extract_json_object(text_out or "")
-    if not isinstance(obj, dict):
-        return {
-            "full_visual_LEFT": "",
-            "LEFT_SURROUNDINGS": "",
-            "geometry_keywords": [],
-        }
-
-    fv = obj.get("full_visual_LEFT")
-    ls = obj.get("LEFT_SURROUNDINGS")
-    gk = obj.get("geometry_keywords")
+    fv = obj.get("full_visual_LEFT") if isinstance(obj, dict) else None
+    ls = obj.get("LEFT_SURROUNDINGS") if isinstance(obj, dict) else None
+    gk = obj.get("geometry_keywords") if isinstance(obj, dict) else None
+    label_guess = obj.get("label") if isinstance(obj, dict) else None
 
     out = {
+        "label_guess": _clean_short_label(label_guess) if isinstance(label_guess, str) else "",
         "full_visual_LEFT": fv if isinstance(fv, str) else "",
         "LEFT_SURROUNDINGS": ls if isinstance(ls, str) else "",
         "geometry_keywords": [],
@@ -851,6 +1395,15 @@ def _parse_cluster_visual(text_out: str) -> Dict[str, Any]:
                 if s:
                     kk.append(s)
         out["geometry_keywords"] = kk[:12]
+
+    if not out["label_guess"]:
+        out["label_guess"] = _clean_short_label(_extract_jsonish_string_field(text_out or "", "label")) or ""
+    if not out["full_visual_LEFT"]:
+        out["full_visual_LEFT"] = _extract_jsonish_string_field(text_out or "", "full_visual_LEFT")
+    if not out["LEFT_SURROUNDINGS"]:
+        out["LEFT_SURROUNDINGS"] = _extract_jsonish_string_field(text_out or "", "LEFT_SURROUNDINGS")
+    if not out["geometry_keywords"]:
+        out["geometry_keywords"] = _extract_jsonish_keywords_field(text_out or "", "geometry_keywords")
 
     return out
 
@@ -871,6 +1424,7 @@ def build_postfacto_label_match_prompt(
         if not isinstance(v, dict):
             continue
         clusters_compact[str(k)] = {
+            "stage1_label_guess": str(v.get("label_guess", "") or "")[:120],
             "geometry_keywords": v.get("geometry_keywords", []) if isinstance(v.get("geometry_keywords"), list) else [],
             "full_visual_LEFT": str(v.get("full_visual_LEFT", "") or "")[:600],
             "LEFT_SURROUNDINGS": str(v.get("LEFT_SURROUNDINGS", "") or "")[:600],
@@ -879,8 +1433,8 @@ def build_postfacto_label_match_prompt(
     return (
         f"BASE CONTEXT: {bc}\n\n"
         "You are given:\n"
-        "1) A list of refined component labels (things that buuld up something - cell, face, ex).\n"
-        "2) A map unlabeled objects, described ONLY by visual characteristics.\n\n"
+        "- A list of refined component labels (things that build up something - cell, face, ex)\n"
+        "- A map objects, described ONLY by visual characteristics\n\n"
         "Your job:\n"
         "- For EACH object, choose the single BEST label from the refined label list.\n"
         "- Match by how that label would LOOK visually (its known characteristics).\n"
@@ -892,37 +1446,206 @@ def build_postfacto_label_match_prompt(
         "]"
         "}\n\n"
         "Rules:\n"
+        "- every label is used only ONCE, ot at least for ONE TYPE of visual description\n"
+        "- use ONLY provided labels - no inventing, every label HAS TO find a partner description"
         "- label must be exactly one of refined_labels or null\n"
         "- confidence is 0..1\n"
-        "- reason is 2-10 words\n"
         "REFINED LABELS:\n"
         f"{json.dumps(labels, ensure_ascii=False)}\n\n"
         "OBJECT VISUAL MAP, INDEXED:\n"
         f"{json.dumps(clusters_compact, ensure_ascii=False)}\n\n"
-        "ADDITIONAL HARD CONSTRAINTS:\n"
-        "- Use each refined label at most once across all matches.\n"
-        "- If multiple objects fit one label, keep only the single best object for that label.\n"
-        "- Prefer covering more different refined labels when confidence is similar.\n"
     )
+
+
+def _match_hint_lines_for_labels(refined_labels: List[str]) -> List[str]:
+    label_set = {str(x or "").strip().lower() for x in (refined_labels or []) if str(x or "").strip()}
+    hints: List[str] = []
+
+    def _has(*names: str) -> bool:
+        return any(str(name).strip().lower() in label_set for name in names)
+
+    if _has("nucleus", "nucleolus", "nuclear envelope", "nuclear pores"):
+        hints.append(
+            "- Distinguish nuclear family carefully: nucleus is the large round/oval compartment, nucleolus is a dense spot inside it, nuclear envelope is the boundary/ring around it, nuclear pores are tiny openings/dots on that boundary."
+        )
+    if _has("rough er", "smooth er", "golgi", "vesicles"):
+        hints.append(
+            "- Distinguish membrane systems carefully: rough ER is an extended sheet/tube network often near nucleus, smooth ER is smoother tubular membrane network, Golgi is stacked curved flattened sacs, vesicles are small round membrane bubbles."
+        )
+    if _has("mitochondria", "mitochondrion", "lysosome", "peroxisome", "vacuole"):
+        hints.append(
+            "- Distinguish round vesicle-like organelles from mitochondria: mitochondria are bean/oval with inner folds/cristae; lysosome/peroxisome/vacuole are more bubble-like or dense round compartments without visible folded inner membranes."
+        )
+    if _has("microtubules", "microfilaments", "cytoskeleton"):
+        hints.append(
+            "- Distinguish cytoskeletal labels carefully: microtubules are longer tube-like filaments, microfilaments are thinner strand-like filaments, cytoskeleton is the broader supporting network rather than one single filament."
+        )
+    if _has("clathrin-coated pit", "snare proteins", "rab gtpase", "na+/k+ atpase"):
+        hints.append(
+            "- Protein/process labels are usually small membrane-localized structures or markers; do not map a large organelle to them unless the object is truly a small membrane feature."
+        )
+    return hints
+
+
+def build_single_cluster_label_match_prompt(
+    *,
+    base_context: str,
+    object_key: str,
+    refined_labels: List[str],
+    visual: Dict[str, Any],
+    force_assignment: bool,
+) -> str:
+    labels = _dedupe_clean_labels(refined_labels)[:120]
+    compact_visual = {
+        "object_key": str(object_key or "").strip(),
+        "stage1_label_guess": str((visual or {}).get("label_guess", "") or "")[:120],
+        "geometry_keywords": (visual or {}).get("geometry_keywords", []) if isinstance((visual or {}).get("geometry_keywords"), list) else [],
+        "full_visual_LEFT": str((visual or {}).get("full_visual_LEFT", "") or "")[:700],
+        "LEFT_SURROUNDINGS": str((visual or {}).get("LEFT_SURROUNDINGS", "") or "")[:700],
+    }
+    match_mode = (
+        "There are enough remaining labels for the remaining objects, so avoid null and choose the closest allowed label unless the fit is genuinely impossible."
+        if force_assignment
+        else "Use null only if none of the allowed labels fit the visual evidence."
+    )
+    hint_lines = _match_hint_lines_for_labels(labels)
+    hints_text = "\n".join(hint_lines)
+    if hints_text:
+        hints_text += "\n"
+
+    return (
+        f"BASE CONTEXT: {(base_context or '').strip() or 'unknown'}\n\n"
+        "You are matching ONE visual object to ONE allowed label.\n"
+        "The stage1 label guess may be wrong. Do NOT echo it blindly.\n"
+        "You must actually compare the object's visual description against the allowed labels and choose the best visual-semantic fit.\n"
+        f"{match_mode}\n"
+        "Use ONLY one of the allowed labels exactly as written.\n"
+        "Prefer the most specific correct label over a vague broad label.\n"
+        "Reason about shape, membrane style, stacked sacs vs tubular network, bubble-like vesicles, inner folds, boundary/ring vs interior spot, and filament-like structure when relevant.\n"
+        f"{hints_text}"
+        "Return JSON only with schema:\n"
+        "{"
+        "\"object_key\": string,"
+        "\"label\": string|null,"
+        "\"confidence\": 0.0,"
+        "\"reason\": string"
+        "}\n\n"
+        "ALLOWED LABELS:\n"
+        f"{json.dumps(labels, ensure_ascii=False)}\n\n"
+        "OBJECT VISUAL:\n"
+        f"{json.dumps(compact_visual, ensure_ascii=False, indent=2)}\n"
+    )
+
+
+def _normalize_label_for_match(s: str) -> str:
+    if not isinstance(s, str):
+        return ""
+    t = s.strip().lower()
+    if not t:
+        return ""
+    t = t.replace("&", " and ")
+    t = re.sub(r"[^a-z0-9+/]+", " ", t)
+    t = re.sub(r"\s+", " ", t).strip()
+    return t
+
+
+def _label_variants_for_match(s: str) -> List[str]:
+    base = _normalize_label_for_match(s)
+    if not base:
+        return []
+
+    variants = {base}
+    irregular = {
+        "mitochondrion": "mitochondria",
+        "mitochondria": "mitochondrion",
+        "vesicle": "vesicles",
+        "vesicles": "vesicle",
+        "microtubule": "microtubules",
+        "microtubules": "microtubule",
+        "microfilament": "microfilaments",
+        "microfilaments": "microfilament",
+        "nuclear pore": "nuclear pores",
+        "nuclear pores": "nuclear pore",
+        "cell nucleus": "nucleus",
+        "cell membrane": "plasma membrane",
+    }
+    if base in irregular:
+        variants.add(irregular[base])
+
+    if base.startswith("cell "):
+        variants.add(base[5:].strip())
+    if base.endswith(" cell"):
+        variants.add(base[:-5].strip())
+
+    words = base.split()
+    if len(words) > 1:
+        variants.add(words[-1])
+
+    if base.endswith("ies") and len(base) > 3:
+        variants.add(base[:-3] + "y")
+    if base.endswith("es") and len(base) > 2:
+        variants.add(base[:-2])
+    if base.endswith("s") and len(base) > 1:
+        variants.add(base[:-1])
+    else:
+        variants.add(base + "s")
+
+    return [x for x in variants if x]
+
+
+def _resolve_refined_label_match(label_guess: Any, refined_labels: List[str]) -> Tuple[Optional[str], float, str]:
+    if not isinstance(label_guess, str) or not label_guess.strip():
+        return None, 0.0, "empty_label_guess"
+
+    cleaned_guess = label_guess.strip()
+    variants = _label_variants_for_match(cleaned_guess)
+    if not variants:
+        return None, 0.0, "empty_label_guess"
+
+    allowed: List[Tuple[str, str]] = []
+    for label in refined_labels or []:
+        if not isinstance(label, str):
+            continue
+        exact = label.strip()
+        if not exact:
+            continue
+        allowed.append((exact, _normalize_label_for_match(exact)))
+    if not allowed:
+        return None, 0.0, "no_refined_labels"
+
+    for variant in variants:
+        for exact, normalized in allowed:
+            if variant == normalized:
+                return exact, 0.99, f"normalized_exact:{cleaned_guess}"
+
+    for variant in variants:
+        for exact, normalized in allowed:
+            if variant and normalized and (variant in normalized or normalized in variant):
+                return exact, 0.9, f"normalized_overlap:{cleaned_guess}"
+
+    best_label = None
+    best_score = 0.0
+    for variant in variants:
+        for exact, normalized in allowed:
+            score = SequenceMatcher(None, variant, normalized).ratio()
+            if score > best_score:
+                best_score = score
+                best_label = exact
+
+    if best_label and best_score >= 0.84:
+        return best_label, float(best_score), f"fuzzy_stage1_label:{cleaned_guess}"
+
+    return None, float(best_score), f"no_refined_match:{cleaned_guess}"
 
 
 def _parse_postfacto_matches(text_out: str, refined_labels: List[str]) -> Dict[str, Dict[str, Any]]:
     obj = extract_json_object(text_out or "")
-    if not isinstance(obj, dict):
-        return {}
-
-    matches = obj.get("matches")
+    matches = obj.get("matches") if isinstance(obj, dict) else None
+    if not isinstance(matches, list):
+        matches = [x for x in extract_json_objects(text_out or "") if isinstance(x, dict) and isinstance(x.get("object_key"), str)]
     if not isinstance(matches, list):
         return {}
 
-    allowed: Dict[str, str] = {}
-    for x in (refined_labels or []):
-        if not isinstance(x, str):
-            continue
-        sx = x.strip()
-        if not sx:
-            continue
-        allowed[sx.lower()] = sx
     out: Dict[str, Dict[str, Any]] = {}
 
     for it in matches:
@@ -938,7 +1661,7 @@ def _parse_postfacto_matches(text_out: str, refined_labels: List[str]) -> Dict[s
             if not isinstance(lab, str):
                 lab = None
             else:
-                lab = allowed.get(lab.strip().lower())
+                lab, _, _ = _resolve_refined_label_match(lab, refined_labels)
 
         conf = it.get("confidence", 0.0)
         try:
@@ -956,6 +1679,82 @@ def _parse_postfacto_matches(text_out: str, refined_labels: List[str]) -> Dict[s
             "reason": reason_s,
         }
 
+    return out
+
+
+def _parse_single_postfacto_match_obj(
+    obj: Dict[str, Any],
+    *,
+    expected_object_key: str,
+    refined_labels: List[str],
+) -> Dict[str, Any]:
+    if not isinstance(obj, dict):
+        return {
+            "label": None,
+            "confidence": 0.0,
+            "reason": "invalid_or_empty_match_object",
+        }
+
+    lab = obj.get("label")
+    if lab is not None:
+        if not isinstance(lab, str):
+            lab = None
+        else:
+            lab, _, _ = _resolve_refined_label_match(lab, refined_labels)
+
+    conf = obj.get("confidence", 0.0)
+    try:
+        conf_f = float(conf)
+    except Exception:
+        conf_f = 0.0
+    conf_f = max(0.0, min(1.0, conf_f))
+    reason_s = str(obj.get("reason", "") or "").strip()
+    if not reason_s:
+        reason_s = "match_completed_without_reason"
+
+    return {
+        "label": lab,
+        "confidence": conf_f,
+        "reason": reason_s,
+        "object_key": str(obj.get("object_key", "") or expected_object_key),
+    }
+
+
+def _stage1_match_fallback_for_allowed_labels(
+    *,
+    visual: Dict[str, Any],
+    allowed_labels: List[str],
+) -> Optional[Dict[str, Any]]:
+    if not isinstance(visual, dict):
+        return None
+    label_guess = str(visual.get("label_guess", "") or "").strip()
+    resolved, score, reason = _resolve_refined_label_match(label_guess, allowed_labels)
+    if not resolved:
+        return None
+    return {
+        "label": resolved,
+        "confidence": max(0.55, min(0.9, float(score))),
+        "reason": f"stage1_exact_fallback:{reason}",
+    }
+
+
+def _fallback_matches_from_stage1_labels(
+    refined_labels: List[str],
+    cluster_visual_map: Dict[str, Dict[str, Any]],
+) -> Dict[str, Dict[str, Any]]:
+    out: Dict[str, Dict[str, Any]] = {}
+    for ck, vis in (cluster_visual_map or {}).items():
+        if not isinstance(vis, dict):
+            continue
+        label_guess = str(vis.get("label_guess", "") or "").strip()
+        resolved, score, reason = _resolve_refined_label_match(label_guess, refined_labels)
+        if not resolved:
+            continue
+        out[str(ck)] = {
+            "label": resolved,
+            "confidence": max(0.65, min(0.99, float(score))),
+            "reason": reason,
+        }
     return out
 
 
@@ -1080,6 +1879,158 @@ def _build_label_cluster_outputs(
     return label_cluster_map, rows
 
 
+def _dedupe_clean_labels(refined_labels: List[str]) -> List[str]:
+    out: List[str] = []
+    seen = set()
+    for x in (refined_labels or []):
+        sx = str(x or "").strip()
+        if not sx:
+            continue
+        key = sx.lower()
+        if key in seen:
+            continue
+        seen.add(key)
+        out.append(sx)
+    return out
+
+
+def _coerce_int_list(values: Any) -> List[int]:
+    out: List[int] = []
+    seen = set()
+    if not isinstance(values, list):
+        return out
+    for v in values:
+        try:
+            i = int(v)
+        except Exception:
+            continue
+        if i in seen:
+            continue
+        seen.add(i)
+        out.append(i)
+    return out
+
+
+def _coerce_float_01(value: Any) -> float:
+    try:
+        out = float(value)
+    except Exception:
+        out = 0.0
+    return max(0.0, min(1.0, out))
+
+
+def _build_clean_cluster_labels_output(
+    *,
+    image_index: int,
+    diagram_name: str,
+    refined_labels: List[str],
+    label_cluster_map: Dict[str, Any],
+    clusters: Dict[str, Dict[str, Any]],
+) -> Dict[str, Any]:
+    rows: List[Dict[str, Any]] = []
+    for label in _dedupe_clean_labels(refined_labels):
+        rec = label_cluster_map.get(label) if isinstance(label_cluster_map, dict) else None
+        rec = rec if isinstance(rec, dict) else {}
+        cluster_key = str(rec.get("cluster_key", "") or "").strip()
+        cluster_rec = clusters.get(cluster_key) if cluster_key and isinstance(clusters, dict) else None
+        cluster_rec = cluster_rec if isinstance(cluster_rec, dict) else {}
+        entry = cluster_rec.get("entry") if isinstance(cluster_rec.get("entry"), dict) else {}
+        stroke_indexes = _coerce_int_list(entry.get("stroke_indexes"))
+        target_key = str(rec.get("mask_name", "") or entry.get("crop_file_mask", "") or cluster_key or "").strip()
+        row = {
+            "matched_label": label,
+            "match_confidence": _coerce_float_01(rec.get("confidence", 0.0)),
+            "stroke_indexes": stroke_indexes,
+            "target_type": "cluster",
+            "target_key": target_key or None,
+            "cluster_index": rec.get("cluster_index"),
+        }
+        rows.append(row)
+
+    return {
+        "schema": "diagram_label_matches_clean_v1",
+        "image_index": int(image_index),
+        "diagram_type": 1,
+        "diagram_name": str(diagram_name or "").strip(),
+        "base_context": str(diagram_name or "").strip(),
+        "labels": rows,
+        "matched_labels_count": int(sum(1 for row in rows if row.get("stroke_indexes"))),
+    }
+
+
+def _build_clean_schematic_labels_output(
+    *,
+    image_index: int,
+    diagram_name: str,
+    refined_labels: List[str],
+    label_line_map: Dict[str, Any],
+    line_keyed: Dict[str, Dict[str, Any]],
+) -> Dict[str, Any]:
+    rows: List[Dict[str, Any]] = []
+    for label in _dedupe_clean_labels(refined_labels):
+        rec = label_line_map.get(label) if isinstance(label_line_map, dict) else None
+        rec = rec if isinstance(rec, dict) else {}
+        raw_line_keys = rec.get("line_keys") if isinstance(rec.get("line_keys"), list) else []
+        line_keys: List[str] = []
+        line_indexes: List[int] = []
+        stroke_indexes: List[int] = []
+        seen_line_keys = set()
+        seen_line_indexes = set()
+        seen_strokes = set()
+        for raw_key in raw_line_keys:
+            key = str(raw_key or "").strip()
+            if not key or key in seen_line_keys:
+                continue
+            seen_line_keys.add(key)
+            line_keys.append(key)
+            line_row = line_keyed.get(key) if isinstance(line_keyed, dict) else None
+            if not isinstance(line_row, dict):
+                continue
+            try:
+                line_index = int(line_row.get("line_index"))
+            except Exception:
+                line_index = None
+            if line_index is not None and line_index not in seen_line_indexes:
+                seen_line_indexes.add(line_index)
+                line_indexes.append(line_index)
+            try:
+                stroke_index = int(line_row.get("source_stroke_index", line_index if line_index is not None else -1))
+            except Exception:
+                stroke_index = None
+            if stroke_index is not None and stroke_index >= 0 and stroke_index not in seen_strokes:
+                seen_strokes.add(stroke_index)
+                stroke_indexes.append(stroke_index)
+
+        target_key = str(rec.get("target_key", "") or "").strip() or None
+        target_type = str(rec.get("target_type", "") or "").strip().lower()
+        if not line_keys and not target_key:
+            target_type = None
+        elif target_type not in ("line", "group"):
+            target_type = "group" if len(line_keys) > 1 else "line"
+
+        rows.append(
+            {
+                "matched_label": label,
+                "match_confidence": _coerce_float_01(rec.get("confidence", 0.0)),
+                "stroke_indexes": stroke_indexes,
+                "target_type": target_type,
+                "target_key": target_key,
+                "line_keys": line_keys,
+                "line_indexes": line_indexes,
+            }
+        )
+
+    return {
+        "schema": "diagram_label_matches_clean_v1",
+        "image_index": int(image_index),
+        "diagram_type": 2,
+        "diagram_name": str(diagram_name or "").strip(),
+        "base_context": str(diagram_name or "").strip(),
+        "labels": rows,
+        "matched_labels_count": int(sum(1 for row in rows if row.get("stroke_indexes"))),
+    }
+
+
 def postfacto_match_labels_with_qwen(
     model,
     processor,
@@ -1088,52 +2039,143 @@ def postfacto_match_labels_with_qwen(
     base_context: str,
     refined_labels: List[str],
     cluster_visual_map: Dict[str, Dict[str, Any]],
+    debug_sink: Optional[Dict[str, Any]] = None,
 ) -> Dict[str, Dict[str, Any]]:
     if not refined_labels or not cluster_visual_map:
+        if isinstance(debug_sink, dict):
+            debug_sink["mode"] = "skipped_empty_inputs"
+        return {}
+    cleaned_labels = _dedupe_clean_labels(refined_labels)
+    cluster_keys = [
+        str(k)
+        for k, v in (cluster_visual_map or {}).items()
+        if str(k or "").strip() and isinstance(v, dict)
+    ]
+    if not cleaned_labels or not cluster_keys:
+        if isinstance(debug_sink, dict):
+            debug_sink["mode"] = "skipped_empty_cleaned_inputs"
         return {}
 
-    SYSTEM_MSG = (
-        "You are a strict visual to semantic matcher.\n"
-        "You output only JSON.\n"
-    )
-
-    prompt_text = build_postfacto_label_match_prompt(base_context, refined_labels, cluster_visual_map)
-
-    conv = [
-        {"role": "system", "content": [{"type": "text", "text": SYSTEM_MSG}]},
-        {"role": "user", "content": [{"type": "text", "text": prompt_text}]},
-    ]
-    prompt_str = processor.apply_chat_template(conv, tokenize=False, add_generation_prompt=True)
-
-    gen_kwargs = dict(
-        max_new_tokens=500,
-        do_sample=False,
-        num_beams=1,
-        use_cache=True,
-    )
+    final_matches: Dict[str, Dict[str, Any]] = {}
+    remaining_labels = list(cleaned_labels)
+    pending_keys = list(cluster_keys)
+    rounds_debug: List[Dict[str, Any]] = []
+    model_raw_parts: List[str] = []
 
     try:
-        inputs = _processor_batch(
-            processor,
-            text=[prompt_str],
-        )
-        inputs = _move_inputs_to_device(inputs, device)
+        max_rounds = min(6, max(2, len(cleaned_labels)))
+        for round_i in range(max_rounds):
+            if not pending_keys or not remaining_labels:
+                break
 
-        with torch.inference_mode():
-            out_ids = _safe_generate(model, inputs=inputs, gen_kwargs=gen_kwargs)
+            force_assignment = len(remaining_labels) >= len(pending_keys)
+            prompts: List[str] = []
+            for ck in pending_keys:
+                prompts.append(
+                    build_single_cluster_label_match_prompt(
+                        base_context=base_context,
+                        object_key=ck,
+                        refined_labels=remaining_labels,
+                        visual=cluster_visual_map.get(ck) if isinstance(cluster_visual_map.get(ck), dict) else {},
+                        force_assignment=force_assignment,
+                    )
+                )
 
-        if "input_ids" in inputs and torch.is_tensor(inputs["input_ids"]):
-            prompt_len = int(inputs["input_ids"].shape[1])
-            gen_only_ids = out_ids[:, prompt_len:]
-        else:
-            gen_only_ids = out_ids
+            parsed_objs, raw_texts = _generate_json_objects_from_prompts(
+                model=model,
+                processor=processor,
+                device=device,
+                prompts=prompts,
+                temperature=0.0,
+                max_new_tokens=min(220, int(POSTFACTO_MATCH_MAX_NEW_TOKENS)),
+                batch_size=max(1, min(6, len(prompts))),
+                debug_label=f"postfacto_match_round_{round_i+1}",
+            )
 
-        text_out = processor.batch_decode(gen_only_ids, skip_special_tokens=True)[0]
-        return _parse_postfacto_matches(text_out, refined_labels)
+            round_matches: Dict[str, Dict[str, Any]] = {}
+            round_raw: List[Dict[str, Any]] = []
+            for idx, ck in enumerate(pending_keys):
+                obj = parsed_objs[idx] if idx < len(parsed_objs) and isinstance(parsed_objs[idx], dict) else {}
+                parsed = _parse_single_postfacto_match_obj(
+                    obj,
+                    expected_object_key=ck,
+                    refined_labels=remaining_labels,
+                )
+                if not parsed.get("label"):
+                    fallback_row = _stage1_match_fallback_for_allowed_labels(
+                        visual=cluster_visual_map.get(ck) if isinstance(cluster_visual_map.get(ck), dict) else {},
+                        allowed_labels=remaining_labels,
+                    )
+                    if isinstance(fallback_row, dict):
+                        parsed.update(fallback_row)
+                round_matches[str(ck)] = {
+                    "label": parsed.get("label"),
+                    "confidence": float(parsed.get("confidence", 0.0) or 0.0),
+                    "reason": str(parsed.get("reason", "") or ""),
+                }
+                round_raw.append(
+                    {
+                        "object_key": str(ck),
+                        "raw_text": raw_texts[idx] if idx < len(raw_texts) else "",
+                        "parsed": round_matches[str(ck)],
+                    }
+                )
+
+            deduped_round = _dedupe_matches_by_label(round_matches, pending_keys)
+            accepted_labels: List[str] = []
+            accepted_keys: List[str] = []
+            for ck in pending_keys:
+                row = deduped_round.get(ck) if isinstance(deduped_round, dict) else None
+                if not isinstance(row, dict):
+                    continue
+                lab = row.get("label")
+                if isinstance(lab, str) and lab.strip():
+                    final_matches[str(ck)] = row
+                    accepted_keys.append(str(ck))
+                    accepted_labels.append(str(lab))
+
+            if raw_texts:
+                model_raw_parts.append(f"[round {round_i+1}]\n" + "\n".join(str(x or "") for x in raw_texts))
+            rounds_debug.append(
+                {
+                    "round_index": int(round_i + 1),
+                    "force_assignment": bool(force_assignment),
+                    "pending_in": list(pending_keys),
+                    "remaining_labels_in": list(remaining_labels),
+                    "accepted_keys": list(accepted_keys),
+                    "accepted_labels": list(accepted_labels),
+                    "raw_rows": round_raw,
+                }
+            )
+
+            if not accepted_keys:
+                break
+
+            pending_keys = [ck for ck in pending_keys if ck not in set(accepted_keys)]
+            remaining_labels = [lab for lab in remaining_labels if lab not in set(accepted_labels)]
+
+        fallback = _fallback_matches_from_stage1_labels(remaining_labels, {k: cluster_visual_map.get(k, {}) for k in pending_keys})
+        for ck in pending_keys:
+            row = fallback.get(str(ck))
+            if isinstance(row, dict) and isinstance(row.get("label"), str) and row.get("label"):
+                final_matches[str(ck)] = row
+
+        if isinstance(debug_sink, dict):
+            debug_sink["mode"] = "iterative_per_object_qwen"
+            debug_sink["rounds"] = rounds_debug
+            debug_sink["parsed_matches"] = len(final_matches)
+            debug_sink["pending_unmatched"] = [ck for ck in cluster_keys if ck not in final_matches]
+            debug_sink["model_raw"] = "\n\n".join(model_raw_parts)[:20000]
+        return final_matches
 
     except Exception as e:
         print(f"[warn] postfacto_match_labels_with_qwen failed: {e}")
-        return {}
+        fallback = _fallback_matches_from_stage1_labels(refined_labels, cluster_visual_map)
+        if isinstance(debug_sink, dict):
+            debug_sink["mode"] = "exception_stage1_label_fallback"
+            debug_sink["error"] = f"{type(e).__name__}: {e}"
+            debug_sink["fallback_matches"] = len(fallback)
+        return fallback
 
 
 
@@ -1147,6 +2189,15 @@ def _vram_str() -> str:
     alloc = torch.cuda.memory_allocated() / (1024 ** 2)
     reserv = torch.cuda.memory_reserved() / (1024 ** 2)
     return f"alloc={alloc:.0f}MiB reserved={reserv:.0f}MiB"
+
+
+def _clear_model_runtime_cache_refs(model: Any) -> None:
+    for attr in ("_cache", "_past_key_values", "past_key_values"):
+        try:
+            if hasattr(model, attr):
+                setattr(model, attr, None)
+        except Exception:
+            pass
 
 
 # ============================
@@ -1210,20 +2261,21 @@ def load_model_and_processor():
         load_kwargs["attn_implementation"] = attn_impl
 
     if have_cuda:
-        if used_quant:
-            load_kwargs["quantization_config"] = quant_config
-            load_kwargs["device_map"] = "auto" if INT8_CPU_OFFLOAD else {"": GPU_INDEX}
-            model = Qwen3VLForConditionalGeneration.from_pretrained(
-                MODEL_ID,
-                **load_kwargs,
-            ).eval()
-        else:
-            load_kwargs["torch_dtype"] = DTYPE
-            load_kwargs["device_map"] = {"": GPU_INDEX}
-            model = Qwen3VLForConditionalGeneration.from_pretrained(
-                MODEL_ID,
-                **load_kwargs,
-            ).eval()
+        with _qwen_safe_loader_context():
+            if used_quant:
+                load_kwargs["quantization_config"] = quant_config
+                load_kwargs["device_map"] = "auto" if INT8_CPU_OFFLOAD else {"": GPU_INDEX}
+                model = Qwen3VLForConditionalGeneration.from_pretrained(
+                    MODEL_ID,
+                    **load_kwargs,
+                ).eval()
+            else:
+                load_kwargs["torch_dtype"] = DTYPE
+                load_kwargs["device_map"] = {"": GPU_INDEX}
+                model = Qwen3VLForConditionalGeneration.from_pretrained(
+                    MODEL_ID,
+                    **load_kwargs,
+                ).eval()
     else:
         model = Qwen3VLForConditionalGeneration.from_pretrained(
             MODEL_ID,
@@ -1514,6 +2566,53 @@ def move_qwen_to_cuda_if_available(
     return model, torch.device("cpu")
 
 
+def create_c2_local_worker(
+    model_id: str = C2_TEXT_MODEL_ID,
+    *,
+    max_new_tokens: int = 256,
+):
+    from C2.QwenWorker import QwenWorker
+
+    tokenizer = AutoTokenizer.from_pretrained(model_id, trust_remote_code=True)
+    model = AutoModelForCausalLM.from_pretrained(
+        model_id,
+        torch_dtype="auto",
+        device_map="auto",
+        trust_remote_code=True,
+    )
+    model.eval()
+    if tokenizer.pad_token_id is None and tokenizer.eos_token_id is not None:
+        tokenizer.pad_token_id = tokenizer.eos_token_id
+    return QwenWorker(
+        model_name=model_id,
+        max_new_tokens=max_new_tokens,
+        model=model,
+        tokenizer=tokenizer,
+    )
+
+
+def destroy_c2_local_worker(worker: Any) -> None:
+    if worker is None:
+        return
+    try:
+        setattr(worker, "model", None)
+    except Exception:
+        pass
+    try:
+        setattr(worker, "tokenizer", None)
+    except Exception:
+        pass
+    try:
+        gc.collect()
+    except Exception:
+        pass
+    try:
+        if torch.cuda.is_available():
+            torch.cuda.empty_cache()
+            torch.cuda.ipc_collect()
+    except Exception:
+        pass
+
 
 # ============================
 # In-memory entrypoint (called by Orchestrator)
@@ -1527,14 +2626,13 @@ def label_clusters_transformers(
     save_outputs: bool = False,
     skip_existing_labels: Optional[bool] = None,
 ) -> Dict[int, Dict[str, Any]]:
-
-    out_dir = (Path(__file__).resolve().parent / "ClustersLabeled")
-    out_dir.mkdir(parents=True, exist_ok=True)
+    OUT_DIR.mkdir(parents=True, exist_ok=True)
+    OUT_DEBUG_DIR.mkdir(parents=True, exist_ok=True)
 
     panel_edge = max(64, int(PROC_LONGEST_EDGE) // 2)
 
     gen_kwargs = dict(
-        max_new_tokens=int(MAX_NEW_TOKENS),
+        max_new_tokens=int(CLUSTER_VISUAL_MAX_NEW_TOKENS),
         do_sample=bool(DO_SAMPLE),
         num_beams=1,
         use_cache=True,
@@ -1544,15 +2642,17 @@ def label_clusters_transformers(
     do_skip_existing = SKIP_EXISTING_LABELS if skip_existing_labels is None else bool(skip_existing_labels)
 
     for idx in sorted(clusters_state.keys()):
-
-        folder = out_dir / f"processed_{idx}"
+        folder = OUT_DIR / f"processed_{idx}"
         folder.mkdir(parents=True, exist_ok=True)
         labels_path = folder / "labels.json"
+        debug_folder = OUT_DEBUG_DIR / f"processed_{idx}"
+        debug_folder.mkdir(parents=True, exist_ok=True)
+        debug_labels_path = debug_folder / "labels.json"
 
-        if save_outputs and do_skip_existing and labels_path.exists():
+        if save_outputs and do_skip_existing and debug_labels_path.exists():
             try:
-                results_by_idx[idx] = json.loads(labels_path.read_text(encoding="utf-8"))
-                print(f"[skip] idx={idx}: existing labels.json loaded")
+                results_by_idx[idx] = json.loads(debug_labels_path.read_text(encoding="utf-8"))
+                print(f"[skip] idx={idx}: existing debug labels.json loaded")
                 continue
             except Exception:
                 pass
@@ -1589,6 +2689,7 @@ def label_clusters_transformers(
             "clusters": {},
             "cluster_order": [],
             "postfacto_matches": {},
+            "postfacto_debug": {},
             "label_cluster_map": {},
             "cluster_label_rows": [],
         }
@@ -1598,6 +2699,21 @@ def label_clusters_transformers(
         if not isinstance(entries, list) or not entries:
             print(f"[skip] idx={idx}: pack has no clusters list")
             continue
+
+        keep_mask_names_raw = (
+            pack.get("sam_keep_mask_names")
+            or pack.get("kept_mask_names")
+            or pack.get("allowed_mask_names")
+            or []
+        )
+        keep_mask_names = {
+            str(x or "").strip()
+            for x in keep_mask_names_raw
+            if str(x or "").strip()
+        }
+        results["clusters_input_total"] = int(len(entries))
+        if keep_mask_names:
+            results["sam_keep_mask_names"] = sorted(keep_mask_names)
 
         mask_map = _extract_mask_map(pack)
         renders_dir = CLUSTER_RENDER_DIR / f"processed_{idx}"
@@ -1628,6 +2744,8 @@ def label_clusters_transformers(
                 continue
 
             mask_name = mask_name.strip()
+            if keep_mask_names and mask_name not in keep_mask_names:
+                continue
             mask_rgb = mask_map.get(mask_name)
             if mask_rgb is None:
                 mask_rgb = _load_mask_from_disk(mask_name)
@@ -1649,6 +2767,8 @@ def label_clusters_transformers(
                 "mask_rgb": mask_rgb,
                 "colour_hint": colour_hint,
             })
+
+        results["clusters_after_sam_filter"] = int(len(tasks))
 
         bs = max(1, int(BATCH_SIZE))
         for start in range(0, len(tasks), bs):
@@ -1774,6 +2894,7 @@ def label_clusters_transformers(
             if isinstance(vis, dict):
                 cluster_visual_map[ck] = vis
 
+        postfacto_debug: Dict[str, Any] = {}
         matches = postfacto_match_labels_with_qwen(
             model=model,
             processor=processor,
@@ -1781,10 +2902,12 @@ def label_clusters_transformers(
             base_context=base_context,
             refined_labels=refined_labels,
             cluster_visual_map=cluster_visual_map,
+            debug_sink=postfacto_debug,
         )
         matches = _dedupe_matches_by_label(matches, results.get("cluster_order", []))
 
         results["postfacto_matches"] = matches
+        results["postfacto_debug"] = postfacto_debug
 
         for ck, m in matches.items():
             if ck in results["clusters"] and isinstance(m, dict):
@@ -1801,7 +2924,15 @@ def label_clusters_transformers(
         results["cluster_label_rows"] = cluster_label_rows
 
         if save_outputs:
-            labels_path.write_text(json.dumps(results, ensure_ascii=False, indent=2), encoding="utf-8")
+            clean_out = _build_clean_cluster_labels_output(
+                image_index=idx,
+                diagram_name=base_context,
+                refined_labels=refined_labels,
+                label_cluster_map=label_cluster_map,
+                clusters=results.get("clusters", {}),
+            )
+            labels_path.write_text(json.dumps(clean_out, ensure_ascii=False, indent=2), encoding="utf-8")
+            debug_labels_path.write_text(json.dumps(results, ensure_ascii=False, indent=2), encoding="utf-8")
 
         print(f"[ok] idx={idx}: clusters={len(tasks)} dt={time.time()-t0:.2f}s")
 
@@ -2148,6 +3279,8 @@ def label_schematic_lines_transformers(
     save_outputs: bool = False,
     skip_existing_labels: Optional[bool] = None,
 ) -> Dict[int, Dict[str, Any]]:
+    OUT_DIR.mkdir(parents=True, exist_ok=True)
+    OUT_DEBUG_DIR.mkdir(parents=True, exist_ok=True)
     SCHEMATIC_OUT_DIR.mkdir(parents=True, exist_ok=True)
     do_skip_existing = SKIP_EXISTING_LABELS if skip_existing_labels is None else bool(skip_existing_labels)
 
@@ -2158,14 +3291,20 @@ def label_schematic_lines_transformers(
 
     for idx in sorted((schematic_state or {}).keys()):
         total_inputs += 1
-        folder = SCHEMATIC_OUT_DIR / f"processed_{idx}"
+        folder = OUT_DIR / f"processed_{idx}"
         folder.mkdir(parents=True, exist_ok=True)
         labels_path = folder / "labels.json"
+        debug_folder = OUT_DEBUG_DIR / f"processed_{idx}"
+        debug_folder.mkdir(parents=True, exist_ok=True)
+        debug_labels_path = debug_folder / "labels.json"
+        legacy_folder = SCHEMATIC_OUT_DIR / f"processed_{idx}"
+        legacy_folder.mkdir(parents=True, exist_ok=True)
+        legacy_labels_path = legacy_folder / "labels.json"
 
-        if save_outputs and do_skip_existing and labels_path.exists():
+        if save_outputs and do_skip_existing and debug_labels_path.exists():
             try:
-                results_by_idx[idx] = json.loads(labels_path.read_text(encoding="utf-8"))
-                print(f"[skip] schematic idx={idx}: existing labels.json loaded")
+                results_by_idx[idx] = json.loads(debug_labels_path.read_text(encoding="utf-8"))
+                print(f"[skip] schematic idx={idx}: existing debug labels.json loaded")
                 continue
             except Exception:
                 pass
@@ -2209,6 +3348,8 @@ def label_schematic_lines_transformers(
                 "labels": labels,
                 "key_payload": key_payload,
                 "labels_path": labels_path,
+                "debug_labels_path": debug_labels_path,
+                "legacy_labels_path": legacy_labels_path,
                 "base_context": base_context,
             }
         )
@@ -2256,7 +3397,16 @@ def label_schematic_lines_transformers(
             }
             results_by_idx[idx] = out
             if save_outputs:
-                Path(job["labels_path"]).write_text(json.dumps(out, ensure_ascii=False, indent=2), encoding="utf-8")
+                clean_out = _build_clean_schematic_labels_output(
+                    image_index=idx,
+                    diagram_name=str(job.get("base_context", "") or ""),
+                    refined_labels=labels,
+                    label_line_map=label_line_map,
+                    line_keyed=key_payload.get("line_keyed", {}),
+                )
+                Path(job["labels_path"]).write_text(json.dumps(clean_out, ensure_ascii=False, indent=2), encoding="utf-8")
+                Path(job["debug_labels_path"]).write_text(json.dumps(out, ensure_ascii=False, indent=2), encoding="utf-8")
+                Path(job["legacy_labels_path"]).write_text(json.dumps(out, ensure_ascii=False, indent=2), encoding="utf-8")
             print(f"[ok] schematic idx={idx}: labels={len(labels)} lines={len(key_payload.get('line_key_order', []))}")
     else:
         print("[qwen][DBG] schematic no generation jobs were created.")
@@ -2266,19 +3416,20 @@ def label_schematic_lines_transformers(
 
 def build_stage1_visual_probe_prompt() -> str:
     # Strict schema; no semantic inference; small + consistent keys for stage2.
-    return ( 
-        "Make a full VISUAL characteristic of the image with WITH NO regard to semantic meaning\n"
-          "You have to describe all the shapes and objects spread out through it from an analytical standpoint" 
-          "Talk figures, clusters, membranes, blobs, ex." 
-          "Describe how the object(s) are spread out and what area they cover in the image"
-          "Do NOT infer meaning or identity.\n"
-          "Output JSON ONLY with:\n" "{" "\"objects\":[\"shape\", ...],"
-          "\"structure\":\"1-4 words\"," "\"dominant\"" "}\n"
-          "Rules:\n" 
-           "- objects: 3-8 items, each 1-4 words\n"
-           "- structure: how the objects are located (center, spread out, ..) (1-4 words)\n" 
-           "- description : a litteral full visual description of everything" "- no extra keys, no prose\n" 
-        )
+    return (
+        "Make a strict VISUAL description of the image with no regard to semantic meaning.\n"
+        "Describe only visible shapes, blobs, membranes, clusters, compact detail, and layout.\n"
+        "Describe how the visible parts are distributed across the image.\n"
+        "Do NOT infer meaning or identity.\n"
+        "Output JSON ONLY with:\n"
+        "{\"objects\":[\"shape\"],\"structure\":\"1-4 words\",\"dominant\":\"1-4 words\",\"simplicity\":1}\n"
+        "Rules:\n"
+        "- objects: 3-8 items, each 1-4 words\n"
+        "- structure: short layout phrase like center, spread out, left-heavy, ring-like\n"
+        "- dominant: the most visually dominant visible thing, 1-4 words\n"
+        "- simplicity: integer 1 to 5, where 1 is very simple and 5 is very dense\n"
+        "- no extra keys, no prose\n"
+    )
 
 
 def _as_meta_score(v: Any) -> Optional[float]:
@@ -2509,6 +3660,215 @@ def probe_processed_images_stage1(
     return out
 
 
+def _probe_objects_summary(objects: Any, limit: int = 4) -> str:
+    vals = [str(x).strip() for x in (objects or []) if str(x).strip()]
+    if not vals:
+        return ""
+    return ", ".join(vals[: max(1, int(limit))])
+
+
+def _probe_to_line_description(probe: Dict[str, Any], *, fallback_name: str = "") -> str:
+    if not isinstance(probe, dict):
+        probe = {}
+
+    dominant = _clean_short_label(str(probe.get("dominant", "") or "")) or ""
+    structure = _clean_short_label(str(probe.get("structure", "") or "")) or ""
+    objects = _probe_objects_summary(probe.get("objects"), limit=4)
+
+    parts: List[str] = []
+    if dominant:
+        parts.append(f"dominant {dominant}")
+    if objects:
+        parts.append(f"objects {objects}")
+    if structure:
+        parts.append(f"layout {structure}")
+
+    desc = "; ".join(parts).strip(" ;")
+    if desc:
+        return desc
+    if fallback_name:
+        return f"cluster {fallback_name}"
+    return "visual cluster"
+
+
+def build_zero_shot_schematic_descriptor_from_clusters(
+    *,
+    processed_id: str,
+    base_context: str,
+    refined_labels: List[str],
+    clusters: List[Dict[str, Any]],
+    renders_mask_rgb: Dict[str, Any],
+    model,
+    processor,
+    device: torch.device,
+    batch_size: int = 8,
+    longest_side: int = 384,
+) -> Dict[str, Any]:
+    """
+    Fallback when StrokeDescriptions are missing:
+      - probe each cluster render with the stage1 visual prompt
+      - synthesize described_lines/groups in the same shape as LineDescriptors output
+      - feed that into the normal schematic matcher
+    """
+    candidates: List[Dict[str, Any]] = []
+    group_members: Dict[int, List[int]] = {}
+
+    for src_order, entry in enumerate(clusters or []):
+        if not isinstance(entry, dict):
+            continue
+        mask_name = str(entry.get("crop_file_mask", "") or "").strip()
+        if not mask_name:
+            continue
+        mask_rgb = renders_mask_rgb.get(mask_name)
+        mask_arr = _as_rgb_uint8(mask_rgb)
+        if mask_arr is None:
+            continue
+
+        bbox_xyxy = entry.get("bbox_xyxy")
+        if not (isinstance(bbox_xyxy, list) and len(bbox_xyxy) == 4):
+            continue
+        try:
+            x1, y1, x2, y2 = [int(v) for v in bbox_xyxy]
+        except Exception:
+            continue
+
+        centroid_x = round((float(x1) + float(x2)) / 2.0, 2)
+        centroid_y = round((float(y1) + float(y2)) / 2.0, 2)
+
+        group_index = entry.get("group_index")
+        if group_index is None and entry.get("group_index_in_color") is not None:
+            try:
+                # ClusterMaps commonly uses group_index_in_color; combine it with
+                # color_id so zero-shot schematic grouping stays stable/unique.
+                color_id_i = int(entry.get("color_id", 0) or 0)
+                group_in_color_i = int(entry.get("group_index_in_color"))
+                group_index = int(color_id_i * 1000 + group_in_color_i)
+            except Exception:
+                group_index = entry.get("group_index_in_color")
+        try:
+            group_index = int(group_index) if group_index is not None else None
+        except Exception:
+            group_index = None
+
+        line_index = int(len(candidates) + 1)
+        if group_index is not None:
+            group_members.setdefault(group_index, []).append(line_index)
+
+        candidates.append(
+            {
+                "line_index": line_index,
+                "mask_name": mask_name,
+                "bbox_xyxy": [x1, y1, x2, y2],
+                "centroid": [centroid_x, centroid_y],
+                "group_index": group_index,
+                "image_pil": Image.fromarray(mask_arr, mode="RGB"),
+                "probe_id": f"{processed_id}::{line_index:04d}::{mask_name}",
+            }
+        )
+
+    candidates.sort(
+        key=lambda row: (
+            float((row.get("centroid") or [0.0, 0.0])[0]),
+            float((row.get("centroid") or [0.0, 0.0])[1]),
+            int(row.get("line_index", 10**9)),
+        )
+    )
+
+    if not candidates:
+        return {
+            "schema": "zero_shot_schematic_descriptor_v1",
+            "processed_id": processed_id,
+            "base_context": base_context,
+            "refined_labels": list(refined_labels or []),
+            "source": "cluster_renders",
+            "described_lines": [],
+            "groups": [],
+        }
+
+    stage1_items: List[Dict[str, Any]] = []
+    for row in candidates:
+        stage1_items.append(
+            {
+                "processed_id": row["probe_id"],
+                "image_pil": row["image_pil"],
+                "base_context": base_context,
+            }
+        )
+
+    stage1_map = probe_processed_images_stage1(
+        model=model,
+        processor=processor,
+        device=device,
+        items=stage1_items,
+        batch_size=max(1, int(batch_size)),
+        longest_side=max(128, int(longest_side)),
+    )
+
+    described_lines: List[Dict[str, Any]] = []
+    for rank, row in enumerate(candidates):
+        probe = stage1_map.get(row["probe_id"], {}) if isinstance(stage1_map, dict) else {}
+        bbox = row["bbox_xyxy"]
+        line_index = int(row["line_index"])
+        described_lines.append(
+            {
+                "described_line_index": line_index,
+                "line_index": line_index,
+                "source_stroke_index": line_index,
+                "group_index": row.get("group_index"),
+                "centroid": list(row["centroid"]),
+                "bbox": {
+                    "min_x": float(bbox[0]),
+                    "min_y": float(bbox[1]),
+                    "max_x": float(bbox[2]),
+                    "max_y": float(bbox[3]),
+                },
+                "geometry": {
+                    "centroid": list(row["centroid"]),
+                    "bbox": {
+                        "min_x": float(bbox[0]),
+                        "min_y": float(bbox[1]),
+                        "max_x": float(bbox[2]),
+                        "max_y": float(bbox[3]),
+                    },
+                },
+                "description": _probe_to_line_description(probe, fallback_name=row.get("mask_name", "")),
+                "mask_name": row.get("mask_name"),
+                "left_to_right_rank": int(rank),
+                "visual_probe": probe,
+            }
+        )
+
+    groups: List[Dict[str, Any]] = []
+    for group_index in sorted(group_members.keys()):
+        member_ids = [int(x) for x in group_members.get(group_index, []) if int(x) > 0]
+        if not member_ids:
+            continue
+        member_rows = [r for r in described_lines if int(r.get("line_index", -1)) in member_ids]
+        if not member_rows:
+            continue
+        cx = sum(float(r["centroid"][0]) for r in member_rows) / float(len(member_rows))
+        cy = sum(float(r["centroid"][1]) for r in member_rows) / float(len(member_rows))
+        groups.append(
+            {
+                "group_index": int(group_index),
+                "member_line_indices": member_ids,
+                "centroid": [round(cx, 2), round(cy, 2)],
+                "description": f"cluster group of {len(member_ids)} regions",
+                "shape_inference": {"group_summary": f"group of {len(member_ids)} regions"},
+            }
+        )
+
+    return {
+        "schema": "zero_shot_schematic_descriptor_v1",
+        "processed_id": processed_id,
+        "base_context": base_context,
+        "refined_labels": list(refined_labels or []),
+        "source": "cluster_renders",
+        "described_lines": described_lines,
+        "groups": groups,
+    }
+
+
 def build_stage2_pick_prompt(
     base_context: str,
     stage1_map: Dict[str, Dict[str, Any]],
@@ -2576,6 +3936,17 @@ def build_stage2_pick_prompt(
         "- reason and main_object must be 1-8 words (short)\n"
         "- simplicity integer 1..5\n" "- no extra keys\n" 
         )
+
+
+def build_diagram_siglip_rule_text(base_context: str) -> str:
+    bc = (base_context or "").strip() or "unknown"
+    return (
+        f"Desired diagram image content: {bc}. "
+        "Prefer a simple single-object visual with one full object centered in frame. "
+        "Prefer clearly separated compact internal detail and identifiable parts of the main object. "
+        "Prefer visuals that look like one diagram of the requested object instead of many spread-out unrelated things. "
+        "Avoid flowcharts, boxes linked with arrows, dense text, and visuals dominated by labels instead of the object."
+    )
 
 
 def _parse_stage2_candidates(text_out: str) -> List[Dict[str, Any]]:
@@ -2819,6 +4190,950 @@ def _extract_first_json_object(text: str) -> Optional[Dict[str, Any]]:
     return None
 
 
+def _extract_all_json_objects(text: str) -> List[Dict[str, Any]]:
+    out: List[Dict[str, Any]] = []
+    if not isinstance(text, str):
+        return out
+    source = str(text or "")
+    for start in range(len(source)):
+        if source[start] != "{":
+            continue
+        depth = 0
+        for end in range(start, len(source)):
+            ch = source[end]
+            if ch == "{":
+                depth += 1
+            elif ch == "}":
+                depth -= 1
+                if depth == 0:
+                    chunk = source[start:end + 1]
+                    try:
+                        obj = json.loads(chunk)
+                    except Exception:
+                        obj = None
+                    if isinstance(obj, dict):
+                        out.append(obj)
+                    break
+    return out
+
+
+def _extract_last_json_object(text: str) -> Optional[Dict[str, Any]]:
+    rows = _extract_all_json_objects(text)
+    return rows[-1] if rows else None
+
+
+def _strip_qwen_thinking_text(text: str) -> str:
+    raw = str(text or "")
+    if "</think>" in raw:
+        raw = raw.split("</think>", 1)[1]
+    elif "<think>" in raw:
+        return ""
+    raw = re.sub(r"<\|[^>]+\|>", " ", raw)
+    raw = raw.replace("<think>", " ").replace("</think>", " ")
+    return raw.strip()
+
+
+def _decode_token_ids_text(processor_or_tokenizer: Any, token_ids: Any, *, skip_special_tokens: bool = True) -> str:
+    if token_ids is None:
+        return ""
+    try:
+        if hasattr(processor_or_tokenizer, "batch_decode"):
+            rows = processor_or_tokenizer.batch_decode(token_ids, skip_special_tokens=skip_special_tokens)
+            if isinstance(rows, list) and rows:
+                return str(rows[0] or "")
+        tok = getattr(processor_or_tokenizer, "tokenizer", None)
+        if tok is not None and hasattr(tok, "batch_decode"):
+            rows = tok.batch_decode(token_ids, skip_special_tokens=skip_special_tokens)
+            if isinstance(rows, list) and rows:
+                return str(rows[0] or "")
+        if hasattr(processor_or_tokenizer, "decode"):
+            item = token_ids[0] if isinstance(token_ids, (list, tuple)) and token_ids else token_ids
+            return str(processor_or_tokenizer.decode(item, skip_special_tokens=skip_special_tokens) or "")
+        if tok is not None and hasattr(tok, "decode"):
+            item = token_ids[0] if isinstance(token_ids, (list, tuple)) and token_ids else token_ids
+            return str(tok.decode(item, skip_special_tokens=skip_special_tokens) or "")
+    except Exception:
+        pass
+    return ""
+
+
+def _infer_text_model_device(model: Any, fallback: Any = None) -> torch.device:
+    if isinstance(fallback, torch.device):
+        return fallback
+    try:
+        if isinstance(fallback, str) and fallback:
+            return torch.device(fallback)
+    except Exception:
+        pass
+    try:
+        return next(model.parameters()).device
+    except Exception:
+        return torch.device("cuda" if torch.cuda.is_available() else "cpu")
+
+
+def create_action_planner_text_bundle(
+    model_id: str = ACTION_PLANNER_TEXT_MODEL_ID,
+) -> Dict[str, Any]:
+    tokenizer = AutoTokenizer.from_pretrained(model_id, trust_remote_code=True)
+    model = AutoModelForCausalLM.from_pretrained(
+        model_id,
+        torch_dtype="auto",
+        device_map="auto",
+        trust_remote_code=True,
+    )
+    model.eval()
+    if tokenizer.pad_token_id is None and tokenizer.eos_token_id is not None:
+        tokenizer.pad_token_id = tokenizer.eos_token_id
+    return {
+        "model_id": model_id,
+        "model": model,
+        "tokenizer": tokenizer,
+        "device": _infer_text_model_device(model),
+    }
+
+
+def destroy_action_planner_text_bundle(bundle: Any) -> None:
+    if not isinstance(bundle, dict):
+        return
+    try:
+        bundle["model"] = None
+    except Exception:
+        pass
+    try:
+        bundle["tokenizer"] = None
+    except Exception:
+        pass
+    try:
+        gc.collect()
+    except Exception:
+        pass
+    try:
+        if torch.cuda.is_available():
+            torch.cuda.empty_cache()
+    except Exception:
+        pass
+
+
+def _load_qwen_multimodal_model(
+    model_id: str,
+    *,
+    device: torch.device,
+    load_kwargs: Dict[str, Any],
+):
+    tried: List[str] = []
+    for loader_name, loader in (
+        ("Qwen3_5ForConditionalGeneration", Qwen3_5ForConditionalGeneration),
+        ("AutoModelForImageTextToText", AutoModelForImageTextToText),
+        ("Qwen3VLForConditionalGeneration", Qwen3VLForConditionalGeneration),
+    ):
+        try:
+            return loader.from_pretrained(model_id, **load_kwargs).eval()
+        except Exception:
+            tried.append(loader_name)
+            continue
+    raise RuntimeError(f"no_multimodal_loader_succeeded:{','.join(tried)}")
+
+
+def create_diagram_multimodal_bundle(
+    model_id: str = DIAGRAM_MULTIMODAL_MODEL_ID,
+) -> Dict[str, Any]:
+    have_cuda = torch.cuda.is_available() and not FORCE_CPU
+    device = torch.device(f"cuda:{GPU_INDEX}" if have_cuda else "cpu")
+
+    try:
+        processor = AutoProcessor.from_pretrained(
+            model_id,
+            min_pixels=QWEN_MIN_PIXELS,
+            max_pixels=QWEN_MAX_PIXELS,
+            trust_remote_code=True,
+        )
+    except Exception:
+        processor = AutoProcessor.from_pretrained(model_id, trust_remote_code=True)
+
+    tok = getattr(processor, "tokenizer", None)
+    if tok is not None:
+        tok.padding_side = "left"
+        tok.truncation_side = "left"
+        if tok.pad_token_id is None and tok.eos_token_id is not None:
+            tok.pad_token_id = tok.eos_token_id
+
+    load_kwargs: Dict[str, Any] = {
+        "low_cpu_mem_usage": True,
+        "trust_remote_code": True,
+    }
+    attn_impl = _qwen_attn_impl()
+    if attn_impl is not None:
+        load_kwargs["attn_implementation"] = attn_impl
+
+    if have_cuda:
+        load_kwargs["torch_dtype"] = DTYPE
+        load_kwargs["device_map"] = {"": GPU_INDEX}
+        with _qwen_safe_loader_context():
+            model = _load_qwen_multimodal_model(model_id, device=device, load_kwargs=load_kwargs)
+        model = _maybe_enable_qwen_fast_inference(
+            model,
+            device,
+            allow_compile=True,
+        )
+    else:
+        load_kwargs["torch_dtype"] = torch.float32
+        model = _load_qwen_multimodal_model(model_id, device=device, load_kwargs=load_kwargs).to(device)
+
+    if tok is not None and hasattr(model, "generation_config"):
+        model.generation_config.pad_token_id = tok.pad_token_id
+        model.generation_config.eos_token_id = tok.eos_token_id
+    try:
+        model.config.use_cache = True
+    except Exception:
+        pass
+
+    return {
+        "model_id": model_id,
+        "model": model,
+        "processor": processor,
+        "tokenizer": tok if tok is not None else processor,
+        "device": device,
+    }
+
+
+def destroy_diagram_multimodal_bundle(bundle: Any) -> None:
+    if not isinstance(bundle, dict):
+        return
+    try:
+        bundle["model"] = None
+    except Exception:
+        pass
+    try:
+        bundle["processor"] = None
+    except Exception:
+        pass
+    try:
+        bundle["tokenizer"] = None
+    except Exception:
+        pass
+    try:
+        gc.collect()
+    except Exception:
+        pass
+    try:
+        if torch.cuda.is_available():
+            torch.cuda.empty_cache()
+    except Exception:
+        pass
+
+
+def create_diagram_text_bundle(
+    model_id: str = DIAGRAM_MULTIMODAL_MODEL_ID,
+) -> Dict[str, Any]:
+    return create_diagram_multimodal_bundle(model_id=model_id)
+
+
+def destroy_diagram_text_bundle(bundle: Any) -> None:
+    destroy_diagram_multimodal_bundle(bundle)
+
+
+def _coerce_unique_ints(values: Any) -> List[int]:
+    out: List[int] = []
+    seen = set()
+    if not isinstance(values, list):
+        return out
+    for item in values:
+        try:
+            value = int(item)
+        except Exception:
+            continue
+        if value in seen:
+            continue
+        seen.add(value)
+        out.append(value)
+    return out
+
+
+def _coerce_unique_strs(values: Any, *, cap: int = 32) -> List[str]:
+    out: List[str] = []
+    seen = set()
+    if not isinstance(values, list):
+        return out
+    for item in values:
+        value = str(item or "").strip()
+        if not value:
+            continue
+        key = value.lower()
+        if key in seen:
+            continue
+        seen.add(key)
+        out.append(value)
+        if cap > 0 and len(out) >= cap:
+            break
+    return out
+
+
+def _clip_text_block(value: Any, max_chars: int) -> str:
+    text = " ".join(str(value or "").split()).strip()
+    if max_chars > 0 and len(text) > max_chars:
+        return text[:max_chars].rstrip() + "..."
+    return text
+
+
+def _run_text_model_json_jobs(
+    *,
+    bundle: Dict[str, Any],
+    jobs: List[Dict[str, Any]],
+    prompt_builder,
+    parser,
+    debug_label: str,
+    temperature: float,
+    max_new_tokens: int,
+    thinking_enabled: bool = False,
+    max_rounds: int = 4,
+    batch_size: int = 8,
+) -> Dict[str, Any]:
+    if not isinstance(bundle, dict):
+        return {}
+    active_jobs = [job for job in (jobs or []) if isinstance(job, dict) and str(job.get("job_key", "") or "").strip()]
+    if not active_jobs:
+        return {}
+
+    prompts: List[str] = [str(prompt_builder(job) or "") for job in active_jobs]
+    print(
+        f"[qwen][DBG] {str(debug_label or 'diagram_text_jobs')} jobs_start "
+        f"count={len(active_jobs)} thinking={int(bool(thinking_enabled))} "
+        f"max_rounds={int(max_rounds)} batch_size={max(1, int(batch_size or 1))} "
+        f"prompt_chars_total={sum(len(p) for p in prompts)} "
+        f"prompt_chars_max={max((len(p) for p in prompts), default=0)} "
+        f"vram={_vram_str()}"
+    )
+    parsed_objs, raws = _generate_json_objects_from_prompts_text_model(
+        model=bundle.get("model"),
+        tokenizer=bundle.get("tokenizer"),
+        device=bundle.get("device"),
+        prompts=prompts,
+        temperature=float(temperature),
+        max_new_tokens=int(max_new_tokens),
+        debug_label=str(debug_label or "diagram_text_jobs"),
+        thinking_enabled=bool(thinking_enabled),
+        max_rounds=int(max_rounds),
+        batch_size=max(1, int(batch_size or 1)),
+    )
+    print(
+        f"[qwen][DBG] {str(debug_label or 'diagram_text_jobs')} jobs_done "
+        f"count={len(active_jobs)} parsed={len(parsed_objs)} raws={len(raws)} vram={_vram_str()}"
+    )
+
+    out: Dict[str, Any] = {}
+    for idx, job in enumerate(active_jobs):
+        job_key = str(job.get("job_key", "") or "").strip()
+        parsed = parsed_objs[idx] if idx < len(parsed_objs) and isinstance(parsed_objs[idx], dict) else {}
+        raw_text = raws[idx] if idx < len(raws) else ""
+        try:
+            out[job_key] = parser(job=job, parsed_obj=parsed, raw_text=raw_text)
+        except Exception as e:
+            out[job_key] = {
+                "error": f"{type(e).__name__}: {e}",
+                "raw_text": raw_text,
+            }
+    return out
+
+
+def _open_rgb_image_for_qwen(path: Any) -> Optional[Image.Image]:
+    clean = str(path or "").strip()
+    if not clean:
+        return None
+    try:
+        with Image.open(clean) as im:
+            return im.convert("RGB")
+    except Exception:
+        return None
+
+
+def _run_multimodal_json_jobs(
+    *,
+    bundle: Dict[str, Any],
+    jobs: List[Dict[str, Any]],
+    user_prompt_builder,
+    parser,
+    image_builder,
+    debug_label: str,
+    temperature: float,
+    max_new_tokens: int,
+    system_prompt: str,
+    batch_size: int = 8,
+) -> Dict[str, Any]:
+    if not isinstance(bundle, dict):
+        return {}
+    processor = bundle.get("processor")
+    if processor is None or not hasattr(processor, "apply_chat_template"):
+        return {}
+
+    active_jobs: List[Dict[str, Any]] = []
+    chat_texts: List[str] = []
+    images: List[Image.Image] = []
+    for job in jobs or []:
+        if not isinstance(job, dict):
+            continue
+        job_key = str(job.get("job_key", "") or "").strip()
+        if not job_key:
+            continue
+        image = image_builder(job)
+        if not isinstance(image, Image.Image):
+            continue
+        prompt_text = str(user_prompt_builder(job) or "").strip()
+        if not prompt_text:
+            continue
+        conv = [
+            {"role": "system", "content": [{"type": "text", "text": str(system_prompt or "").strip()}]},
+            {"role": "user", "content": [{"type": "image"}, {"type": "text", "text": prompt_text}]},
+        ]
+        chat_text = processor.apply_chat_template(conv, tokenize=False, add_generation_prompt=True)
+        active_jobs.append(job)
+        chat_texts.append(str(chat_text or ""))
+        images.append(image)
+
+    if not active_jobs:
+        return {}
+
+    parsed_objs, raws = _generate_json_objects_from_prompts(
+        model=bundle.get("model"),
+        processor=processor,
+        device=bundle.get("device"),
+        prompts=chat_texts,
+        images=images,
+        prompts_are_chat_text=True,
+        temperature=float(temperature),
+        max_new_tokens=int(max_new_tokens),
+        batch_size=max(1, int(batch_size or 1)),
+        debug_label=str(debug_label or "diagram_vl_jobs"),
+    )
+
+    out: Dict[str, Any] = {}
+    for idx, job in enumerate(active_jobs):
+        job_key = str(job.get("job_key", "") or "").strip()
+        parsed = parsed_objs[idx] if idx < len(parsed_objs) and isinstance(parsed_objs[idx], dict) else {}
+        raw_text = raws[idx] if idx < len(raws) else ""
+        try:
+            out[job_key] = parser(job=job, parsed_obj=parsed, raw_text=raw_text)
+        except Exception as e:
+            out[job_key] = {
+                "error": f"{type(e).__name__}: {e}",
+                "raw_text": raw_text,
+            }
+    return out
+
+
+def build_diagram_snapshot_refinement_prompt(
+    *,
+    base_context: str,
+    refined_labels: List[str],
+    diagram_payload: Dict[str, Any],
+) -> str:
+    return (
+        "You are compressing raw per-stroke diagram descriptions into a stroke-faithful mental map.\n"
+        "Your job is NOT to solve the diagram yet.\n"
+        "Your job is to bundle nearby or mechanically related strokes into a small set of SNAPSHOTS.\n"
+        "A snapshot is a local cutout of the diagram with a location phrase, a bundle reason, and preserved stroke-level notes.\n"
+        "You must preserve stroke ids carefully.\n"
+        "You may create snapshots from one stroke, one group, several neighboring groups, or mixed local bundles.\n"
+        "Standout strokes may become their own snapshot if they are unusually large, central, or detailed.\n"
+        "Mention neighboring snapshots when useful.\n"
+        "Use flowing language, but keep the JSON compact.\n"
+        "Do not invent stroke ids.\n"
+        "Do not omit stroke-level notes entirely.\n"
+        "Prefer 4 to 12 snapshots unless the drawing is truly tiny or huge.\n"
+        "Each snapshot should feel like a local reading of one region of the diagram.\n\n"
+        f"BASE_CONTEXT:\n{str(base_context or '').strip() or 'unknown'}\n\n"
+        "CANONICAL_LABEL_HINTS:\n"
+        f"{json.dumps([str(x).strip() for x in (refined_labels or []) if str(x).strip()][:80], ensure_ascii=False)}\n\n"
+        "RAW_DIAGRAM_PAYLOAD:\n"
+        f"{json.dumps(diagram_payload, ensure_ascii=False, indent=2)}\n\n"
+        "Return JSON only with this schema:\n"
+        "{"
+        "\"snapshots\":["
+        "{"
+        "\"snapshot_id\":\"S1\","
+        "\"location\":\"bottom-left / center-right / upper-middle style phrase\","
+        "\"stroke_ids\":[1,2,3],"
+        "\"group_indexes\":[4,5],"
+        "\"neighbor_snapshot_ids\":[\"S2\"],"
+        "\"summary\":\"compact flowing description of the local cutout\","
+        "\"bundle_reason\":\"why these strokes belong together\","
+        "\"stroke_notes\":[{\"stroke_id\":1,\"note\":\"short note that preserves a stroke-specific detail\"}]"
+        "}"
+        "]"
+        "}\n"
+    )
+
+
+def _parse_diagram_snapshot_refinement(
+    *,
+    job: Dict[str, Any],
+    parsed_obj: Dict[str, Any],
+    raw_text: str,
+) -> Dict[str, Any]:
+    raw_rows = parsed_obj.get("snapshots") if isinstance(parsed_obj.get("snapshots"), list) else []
+    snapshots: List[Dict[str, Any]] = []
+    used_snapshot_ids = set()
+
+    for index, row in enumerate(raw_rows, start=1):
+        if not isinstance(row, dict):
+            continue
+        snapshot_id = str(row.get("snapshot_id", "") or f"S{index}").strip() or f"S{index}"
+        if snapshot_id in used_snapshot_ids:
+            snapshot_id = f"S{index}"
+        used_snapshot_ids.add(snapshot_id)
+
+        stroke_ids = _coerce_unique_ints(row.get("stroke_ids"))
+        if not stroke_ids:
+            continue
+
+        stroke_notes: List[Dict[str, Any]] = []
+        for note_row in row.get("stroke_notes") if isinstance(row.get("stroke_notes"), list) else []:
+            if not isinstance(note_row, dict):
+                continue
+            try:
+                stroke_id = int(note_row.get("stroke_id"))
+            except Exception:
+                continue
+            if stroke_id not in stroke_ids:
+                continue
+            stroke_note = _clip_text_block(note_row.get("note", ""), 180)
+            if not stroke_note:
+                continue
+            stroke_notes.append({"stroke_id": stroke_id, "note": stroke_note})
+
+        snapshots.append(
+            {
+                "snapshot_id": snapshot_id,
+                "location": _clip_text_block(row.get("location", ""), 80),
+                "stroke_ids": stroke_ids,
+                "group_indexes": _coerce_unique_ints(row.get("group_indexes")),
+                "neighbor_snapshot_ids": _coerce_unique_strs(row.get("neighbor_snapshot_ids"), cap=8),
+                "summary": _clip_text_block(row.get("summary", ""), 420),
+                "bundle_reason": _clip_text_block(row.get("bundle_reason", ""), 220),
+                "stroke_notes": stroke_notes[:16],
+            }
+        )
+
+    return {
+        "snapshots": snapshots,
+        "raw_text": raw_text,
+    }
+
+
+def refine_diagram_snapshots_text_model(
+    *,
+    bundle: Dict[str, Any],
+    jobs: List[Dict[str, Any]],
+    temperature: float = 0.15,
+    max_new_tokens: int = 900,
+) -> Dict[str, Any]:
+    return _run_text_model_json_jobs(
+        bundle=bundle,
+        jobs=jobs,
+        prompt_builder=lambda job: build_diagram_snapshot_refinement_prompt(
+            base_context=str(job.get("base_context", "") or ""),
+            refined_labels=list(job.get("refined_labels", []) or []),
+            diagram_payload=job.get("diagram_payload") if isinstance(job.get("diagram_payload"), dict) else {},
+        ),
+        parser=_parse_diagram_snapshot_refinement,
+        debug_label="diagram_snapshot_refine",
+        temperature=float(temperature),
+        max_new_tokens=int(max_new_tokens),
+        thinking_enabled=False,
+        max_rounds=3,
+    )
+
+
+def build_cluster_visual_summary_prompt(
+    *,
+    base_context: str,
+    refined_labels: List[str],
+    cluster_payload: Dict[str, Any],
+) -> str:
+    return (
+        "You are making a compact visual reading of one diagram cluster from pixels.\n"
+        "You are looking at a two-panel image.\n"
+        "LEFT shows the isolated cluster render.\n"
+        "RIGHT shows the full diagram with the same region boxed for context.\n"
+        "Stay grounded in what is visibly present.\n"
+        "Describe structure, shape, density, topology, orientation, branching, cavities, pipes, membranes, loops, or other visible geometry when relevant.\n"
+        "You may interpret broad mechanical or biological-looking forms if the image strongly supports it, but do not force a canonical label.\n"
+        "Mention local surroundings or neighboring context when visible.\n\n"
+        f"BASE_CONTEXT:\n{str(base_context or '').strip() or 'unknown'}\n\n"
+        "CANONICAL_LABEL_HINTS:\n"
+        f"{json.dumps([str(x).strip() for x in (refined_labels or []) if str(x).strip()][:80], ensure_ascii=False)}\n\n"
+        "CLUSTER_METADATA:\n"
+        f"{json.dumps(cluster_payload, ensure_ascii=False, indent=2)}\n\n"
+        "Return JSON only with this schema:\n"
+        "{"
+        "\"visual_summary\":\"compact but detailed visual description\","
+        "\"bundle_reason\":\"why these strokes form one cluster\","
+        "\"location\":\"short location phrase\","
+        "\"neighbor_context\":\"short note about nearby context in the larger diagram\","
+        "\"dominant_cues\":[\"cue\"],"
+        "\"visual_parts\":[\"part-like visible region or subform\"]"
+        "}\n"
+    )
+
+
+def _parse_cluster_visual_summary(
+    *,
+    job: Dict[str, Any],
+    parsed_obj: Dict[str, Any],
+    raw_text: str,
+) -> Dict[str, Any]:
+    return {
+        "visual_summary": _clip_text_block(parsed_obj.get("visual_summary", ""), 420),
+        "bundle_reason": _clip_text_block(parsed_obj.get("bundle_reason", ""), 220),
+        "location": _clip_text_block(parsed_obj.get("location", ""), 80),
+        "neighbor_context": _clip_text_block(parsed_obj.get("neighbor_context", ""), 180),
+        "dominant_cues": _coerce_unique_strs(parsed_obj.get("dominant_cues"), cap=10),
+        "visual_parts": _coerce_unique_strs(parsed_obj.get("visual_parts"), cap=10),
+        "raw_text": raw_text,
+    }
+
+
+def _build_cluster_visual_job_image(job: Dict[str, Any]) -> Optional[Image.Image]:
+    cluster_path = str(job.get("cluster_render_path", "") or "").strip()
+    full_path = str(job.get("full_image_path", "") or "").strip()
+    bbox_xyxy = job.get("bbox_xyxy")
+    if not cluster_path or not full_path or not (isinstance(bbox_xyxy, list) and len(bbox_xyxy) == 4):
+        return None
+
+    cluster_img = _open_rgb_image_for_qwen(cluster_path)
+    full_img = _open_rgb_image_for_qwen(full_path)
+    if cluster_img is None or full_img is None:
+        return None
+
+    panel_edge = max(64, int(PROC_LONGEST_EDGE) // 2)
+    left_sq, _, _, _, _, _ = _fit_into_square(cluster_img, panel_edge)
+    right_panel_base, full_scale, full_rw, full_rh, full_pad_x, full_pad_y = _fit_into_square(full_img, panel_edge)
+
+    try:
+        bbox_panel = _clamp_bbox_xyxy(_scale_bbox_xyxy([int(x) for x in bbox_xyxy], full_scale), full_rw, full_rh)
+    except Exception:
+        return None
+    bbox_panel = [
+        int(bbox_panel[0]) + int(full_pad_x),
+        int(bbox_panel[1]) + int(full_pad_y),
+        int(bbox_panel[2]) + int(full_pad_x),
+        int(bbox_panel[3]) + int(full_pad_y),
+    ]
+    right_sq = right_panel_base.copy()
+    _draw_red_rect_pil(right_sq, bbox_panel, thickness=RECT_THICKNESS_PX)
+    return _make_composite(left_sq, right_sq)
+
+
+def describe_diagram_clusters_multimodal_model(
+    *,
+    bundle: Dict[str, Any],
+    jobs: List[Dict[str, Any]],
+    temperature: float = 0.7,
+    max_new_tokens: int = 420,
+    batch_size: int = BATCH_SIZE,
+) -> Dict[str, Any]:
+    return _run_multimodal_json_jobs(
+        bundle=bundle,
+        jobs=jobs,
+        user_prompt_builder=lambda job: build_cluster_visual_summary_prompt(
+            base_context=str(job.get("base_context", "") or ""),
+            refined_labels=list(job.get("refined_labels", []) or []),
+            cluster_payload=job.get("cluster_payload") if isinstance(job.get("cluster_payload"), dict) else {},
+        ),
+        parser=_parse_cluster_visual_summary,
+        image_builder=_build_cluster_visual_job_image,
+        debug_label="diagram_cluster_visual_text",
+        temperature=float(temperature),
+        max_new_tokens=int(max_new_tokens),
+        system_prompt=(
+            "You are a strict visual transcription engine. "
+            "Stay grounded in visible pixels, summarize the pictured cluster, and return JSON only."
+        ),
+        batch_size=int(batch_size),
+    )
+
+
+def build_canonical_part_visual_prompt(
+    *,
+    base_context: str,
+    component_payload: Dict[str, Any],
+) -> str:
+    return (
+        "You are reading one canonical part reference image.\n"
+        "Describe what the visible part looks like in image-grounded terms.\n"
+        "You may use broad interpretation when the image strongly supports it, such as pipe, chamber, branch, wheel-like ring, layered membrane, blade, arm, connector, or housing.\n"
+        "Focus on shape, topology, openings, branching, symmetry, density, silhouette, and visually diagnostic cues.\n"
+        "Use the metadata only as weak support and never override the pixels.\n\n"
+        f"BASE_CONTEXT:\n{str(base_context or '').strip() or 'unknown'}\n\n"
+        "CANONICAL_PART_PAYLOAD:\n"
+        f"{json.dumps(component_payload, ensure_ascii=False, indent=2)}\n\n"
+        "Return JSON only with this schema:\n"
+        "{"
+        "\"canonical_visual_parts\":\"compact target visual description\","
+        "\"notable_cues\":[\"cue\"],"
+        "\"candidate_note\":\"optional short note about the chosen canonical candidate\""
+        "}\n"
+    )
+
+
+def _parse_canonical_part_visual(
+    *,
+    job: Dict[str, Any],
+    parsed_obj: Dict[str, Any],
+    raw_text: str,
+) -> Dict[str, Any]:
+    return {
+        "canonical_visual_parts": _clip_text_block(parsed_obj.get("canonical_visual_parts", ""), 360),
+        "notable_cues": _coerce_unique_strs(parsed_obj.get("notable_cues"), cap=10),
+        "candidate_note": _clip_text_block(parsed_obj.get("candidate_note", ""), 180),
+        "raw_text": raw_text,
+    }
+
+
+def _build_canonical_part_job_image(job: Dict[str, Any]) -> Optional[Image.Image]:
+    image_path = str(job.get("candidate_image_path", "") or "").strip()
+    if not image_path:
+        return None
+    image = _open_rgb_image_for_qwen(image_path)
+    if image is None:
+        return None
+    return _resize_longest_side(image, int(PROC_LONGEST_EDGE))
+
+
+def describe_canonical_parts_multimodal_model(
+    *,
+    bundle: Dict[str, Any],
+    jobs: List[Dict[str, Any]],
+    temperature: float = 0.65,
+    max_new_tokens: int = 280,
+    batch_size: int = BATCH_SIZE,
+) -> Dict[str, Any]:
+    return _run_multimodal_json_jobs(
+        bundle=bundle,
+        jobs=jobs,
+        user_prompt_builder=lambda job: build_canonical_part_visual_prompt(
+            base_context=str(job.get("base_context", "") or ""),
+            component_payload=job.get("component_payload") if isinstance(job.get("component_payload"), dict) else {},
+        ),
+        parser=_parse_canonical_part_visual,
+        image_builder=_build_canonical_part_job_image,
+        debug_label="diagram_canonical_part_visual_text",
+        temperature=float(temperature),
+        max_new_tokens=int(max_new_tokens),
+        system_prompt=(
+            "You are a strict visual reference summarizer. "
+            "Describe the visible canonical part in grounded image terms and return JSON only."
+        ),
+        batch_size=int(batch_size),
+    )
+
+
+def describe_diagram_clusters_text_model(
+    *,
+    bundle: Dict[str, Any],
+    jobs: List[Dict[str, Any]],
+    temperature: float = 0.7,
+    max_new_tokens: int = 420,
+) -> Dict[str, Any]:
+    return describe_diagram_clusters_multimodal_model(
+        bundle=bundle,
+        jobs=jobs,
+        temperature=float(temperature),
+        max_new_tokens=int(max_new_tokens),
+    )
+
+
+def describe_canonical_parts_text_model(
+    *,
+    bundle: Dict[str, Any],
+    jobs: List[Dict[str, Any]],
+    temperature: float = 0.65,
+    max_new_tokens: int = 280,
+) -> Dict[str, Any]:
+    return describe_canonical_parts_multimodal_model(
+        bundle=bundle,
+        jobs=jobs,
+        temperature=float(temperature),
+        max_new_tokens=int(max_new_tokens),
+    )
+
+
+def build_diagram_final_match_prompt(
+    *,
+    base_context: str,
+    refined_labels: List[str],
+    snapshots: List[Dict[str, Any]],
+    clusters: List[Dict[str, Any]],
+    canonical_parts: List[Dict[str, Any]],
+    stroke_lookup: Dict[str, Dict[str, Any]],
+) -> str:
+    return (
+        "You are matching canonical diagram parts to exact stroke ids.\n"
+        "Work stroke-first.\n"
+        "You must produce exactly one match row for every canonical label.\n"
+        "A match may come from:\n"
+        "- one ready cluster,\n"
+        "- one full snapshot,\n"
+        "- a custom subset of strokes pulled from one or more snapshots,\n"
+        "- one single stroke.\n"
+        "Choose whichever is best.\n"
+        "Use the cluster package when it is already a good bundle.\n"
+        "Break clusters apart or recombine strokes when the cluster is too coarse or wrong.\n"
+        "Use the snapshot mental map and the per-stroke notes to reason locally.\n"
+        "Every label should get one best stroke group.\n"
+        "Do not waste space on prose outside the JSON.\n"
+        "Be explicit about which ids justify the match.\n"
+        "Avoid reusing the same stroke ids for many labels unless the overlap is genuinely unavoidable.\n\n"
+        f"BASE_CONTEXT:\n{str(base_context or '').strip() or 'unknown'}\n\n"
+        "LABEL_ORDER:\n"
+        f"{json.dumps([str(x).strip() for x in (refined_labels or []) if str(x).strip()][:120], ensure_ascii=False)}\n\n"
+        "CANONICAL_PARTS:\n"
+        "For each label, CANONICAL_VISUAL_PARTS is the direct description of the chosen canonical reference image.\n"
+        "GENERAL_VISUAL_DESCRIPTION is the upstream refined textual description for that part.\n"
+        f"{json.dumps(canonical_parts, ensure_ascii=False, indent=2)}\n\n"
+        "SNAPSHOTS:\n"
+        f"{json.dumps(snapshots, ensure_ascii=False, indent=2)}\n\n"
+        "CLUSTERS:\n"
+        "Each cluster carries its stroke ids and a direct image-grounded visual description from the cluster render.\n"
+        f"{json.dumps(clusters, ensure_ascii=False, indent=2)}\n\n"
+        "STROKE_LOOKUP:\n"
+        f"{json.dumps(stroke_lookup, ensure_ascii=False, indent=2)}\n\n"
+        "Return JSON only with this schema:\n"
+        "{"
+        "\"matches\":["
+        "{"
+        "\"label\":\"exact canonical label\","
+        "\"source_type\":\"cluster|snapshot|strokes|single_stroke|unmatched\","
+        "\"source_key\":\"cluster_id or snapshot_id or custom key\","
+        "\"stroke_ids\":[1,2,3],"
+        "\"snapshot_ids\":[\"S1\"],"
+        "\"cluster_ids\":[\"C1\"],"
+        "\"confidence\":0.0,"
+        "\"reason\":\"short stroke-level explanation\""
+        "}"
+        "]"
+        "}\n"
+    )
+
+
+def _parse_diagram_final_matches(
+    *,
+    job: Dict[str, Any],
+    parsed_obj: Dict[str, Any],
+    raw_text: str,
+) -> Dict[str, Any]:
+    refined_labels = [str(x).strip() for x in (job.get("refined_labels") or []) if str(x).strip()]
+    label_set = {label.lower(): label for label in refined_labels}
+    raw_matches = parsed_obj.get("matches") if isinstance(parsed_obj.get("matches"), list) else []
+    by_label: Dict[str, Dict[str, Any]] = {}
+
+    for row in raw_matches:
+        if not isinstance(row, dict):
+            continue
+        label_raw = str(row.get("label", "") or "").strip()
+        label = label_set.get(label_raw.lower())
+        if not label:
+            continue
+        source_type = str(row.get("source_type", "") or "").strip().lower()
+        if source_type not in {"cluster", "snapshot", "strokes", "single_stroke", "unmatched"}:
+            source_type = "strokes"
+        stroke_ids = _coerce_unique_ints(row.get("stroke_ids"))
+        if source_type == "single_stroke" and len(stroke_ids) > 1:
+            stroke_ids = stroke_ids[:1]
+        confidence = _coerce_float_01(row.get("confidence", 0.0))
+        reason = _clip_text_block(row.get("reason", ""), 240)
+        candidate = {
+            "label": label,
+            "source_type": source_type if stroke_ids else "unmatched",
+            "source_key": _clip_text_block(row.get("source_key", ""), 80),
+            "stroke_ids": stroke_ids,
+            "snapshot_ids": _coerce_unique_strs(row.get("snapshot_ids"), cap=12),
+            "cluster_ids": _coerce_unique_strs(row.get("cluster_ids"), cap=12),
+            "confidence": confidence if stroke_ids else 0.0,
+            "reason": reason if reason else ("unmatched" if not stroke_ids else ""),
+        }
+        prev = by_label.get(label.lower())
+        if prev is None or float(candidate["confidence"]) > float(prev.get("confidence", 0.0)):
+            by_label[label.lower()] = candidate
+
+    matches: List[Dict[str, Any]] = []
+    for label in refined_labels:
+        row = by_label.get(label.lower())
+        if not isinstance(row, dict):
+            row = {
+                "label": label,
+                "source_type": "unmatched",
+                "source_key": "",
+                "stroke_ids": [],
+                "snapshot_ids": [],
+                "cluster_ids": [],
+                "confidence": 0.0,
+                "reason": "unmatched",
+            }
+        matches.append(row)
+
+    return {
+        "matches": matches,
+        "raw_text": raw_text,
+    }
+
+
+def match_diagram_parts_text_model(
+    *,
+    bundle: Dict[str, Any],
+    jobs: List[Dict[str, Any]],
+    temperature: float = 0.2,
+    max_new_tokens: int = 1200,
+    thinking_enabled: bool = True,
+) -> Dict[str, Any]:
+    return _run_text_model_json_jobs(
+        bundle=bundle,
+        jobs=jobs,
+        prompt_builder=lambda job: build_diagram_final_match_prompt(
+            base_context=str(job.get("base_context", "") or ""),
+            refined_labels=list(job.get("refined_labels", []) or []),
+            snapshots=list(job.get("snapshots", []) or []),
+            clusters=list(job.get("clusters", []) or []),
+            canonical_parts=list(job.get("canonical_parts", []) or []),
+            stroke_lookup=job.get("stroke_lookup") if isinstance(job.get("stroke_lookup"), dict) else {},
+        ),
+        parser=_parse_diagram_final_matches,
+        debug_label="diagram_final_match_text",
+        temperature=float(temperature),
+        max_new_tokens=int(max_new_tokens),
+        thinking_enabled=bool(thinking_enabled),
+        max_rounds=4,
+    )
+
+
+def _extract_action_list_from_model_obj(obj: Any) -> List[Dict[str, Any]]:
+    """
+    Accept a few common action-list key variants so planner prompt wording does not
+    accidentally force us into the fallback path.
+    """
+    if not isinstance(obj, dict):
+        return []
+
+    candidate_keys = (
+        "actions",
+        "planned_actions",
+        "visual_actions",
+        "example actions",
+        "example_actions",
+        "steps",
+    )
+    for key in candidate_keys:
+        acts = obj.get(key)
+        if isinstance(acts, list):
+            return acts
+
+    for value in obj.values():
+        if not isinstance(value, list) or not value:
+            continue
+        if all(isinstance(item, dict) and str(item.get("type", "") or "").strip() for item in value):
+            return value
+    return []
+
+
 def _clamp_i(v: int, lo: int, hi: int) -> int:
     return max(int(lo), min(int(v), int(hi)))
 
@@ -2949,12 +5264,25 @@ def _find_non_overlapping_box(
     return cand
 
 
-def _render_chat_text(processor, prompt: str) -> str:
+def _render_chat_text(processor, prompt: str, *, thinking_enabled: bool = False) -> str:
     try:
-        tok = getattr(processor, "tokenizer", None)
+        tok = processor if hasattr(processor, "apply_chat_template") else getattr(processor, "tokenizer", None)
         if tok is not None and hasattr(tok, "apply_chat_template"):
             messages = [{"role": "user", "content": prompt}]
-            return tok.apply_chat_template(messages, tokenize=False, add_generation_prompt=True)
+            try:
+                return tok.apply_chat_template(
+                    messages,
+                    tokenize=False,
+                    add_generation_prompt=True,
+                    enable_thinking=thinking_enabled,
+                )
+            except TypeError:
+                return tok.apply_chat_template(
+                    messages,
+                    tokenize=False,
+                    add_generation_prompt=True,
+                    chat_template_kwargs={"enable_thinking": thinking_enabled},
+                )
     except Exception:
         pass
     return prompt
@@ -2981,6 +5309,99 @@ def _clip_str_list(values: Any, *, max_items: int, max_chars: int) -> List[str]:
     return out
 
 
+def _compact_diagram_cluster_labels(value: Any, *, max_items: int, max_chars: int) -> Optional[Dict[str, Any]]:
+    if not isinstance(value, dict):
+        return None
+    diagram_name = _clip_str(value.get("diagram_name", ""), 56)
+    refined_labels = _clip_str_list(value.get("refined_labels"), max_items=max_items, max_chars=max_chars)
+    if not diagram_name and not refined_labels:
+        return None
+    out: Dict[str, Any] = {}
+    if diagram_name:
+        out["diagram_name"] = diagram_name
+    if refined_labels:
+        out["refined_labels"] = refined_labels
+    return out
+
+
+def _visual_action_prompt_payload(ev: Dict[str, Any]) -> Dict[str, Any]:
+    return {
+        "event": _compact_visual_event_for_prompt(ev),
+        "allowed_actions": {
+           "Base actions schema": [
+                "draw_image: {type,target,x,y,sync_local}",
+                "write_text: {type,target,text,x,y,scale,sync_local}",
+                "move_inside_bbox: {type,target,new_x,new_y,sync_local}",
+                "link_to_image: {type,target,image_name,sync_local}",
+                "delete_self: {type,sync_local}",
+                "delete_by_name: {type,target,sync_local}",
+            ],
+            "diagram_extra": [
+                "draw_cluster",
+                "highlight_cluster",
+                "zoom_cluster",
+                "(all above use current-diagram cluster target/ref as \"diagram_name : cluster_name\")",
+                "write_label: {type,cluster_name,text,sync_local}",
+                "connect_cluster_to_cluster: {type,from_cluster,to_cluster,sync_local} where from_cluster/to_cluster are exactly \"diagram_name : cluster\"",
+            ],
+        },
+    }
+
+
+def build_visual_action_prompt(ev: Dict[str, Any]) -> str:
+    payload = _visual_action_prompt_payload(ev)
+    return (
+        "You plan actions around drawing an image on a whiteboard under speech\n"
+        "Use ONLY the allowed actions and exactly their field names\n"
+        "Action MUST include sync_local {start_word_offset,end_word_offset} to link it to parts of the speech\n"
+        "Actions must happen only inside print_bbox - respect image dimensions when picking print coords\n"
+        f"The whiteboard is {WHITEBOARD_BOARD_WIDTH_PX} x {WHITEBOARD_BOARD_HEIGHT_PX} px, centered at 0,0.\n"
+        f"Board text is large: default writing is about {WHITEBOARD_TEXT_DEFAULT_HEIGHT_PX}px tall, and write_text scale 1.0 is about {WHITEBOARD_TEXT_REFERENCE_HEIGHT_PX}px tall with about {WHITEBOARD_TEXT_LETTER_GAP_PX}px letter spacing.\n"
+        "Sometimes images come with diagram = 1 or 2 - for them you have a list of interactable objects that comprise them\n"
+        "Diagrams often come with large ranges with many inner objects mentioned - highlight and interact with them at every possible point.\n"
+        "With diagrams you can either start with draw_image (self) OR draw them cluster by cluster (drawing them as they're mentioned) - one at a time\n"
+        "You can use extra write_text actions to add detail in unused space\n"
+        "Create the most rich and complex sync -> match what is said with as many different actions as possible\n"
+        "For diagram == 1 or 2 you may also use diagram_extra\n"
+        "If event.current_diagram_cluster_labels exists, those refined_labels belong ONLY to the current image being planned.\n"
+        "If static_plan_context[i].context_other_diagram_cluster_labels exists, those refined_labels belong ONLY to context diagram.\n"
+        "For diagram-only cluster actions, always identify the target cluster as \"diagram_name : cluster\".\n"
+        "Use connect_cluster_to_cluster to link clusters of two diagrams in comparisons, both endpoints = \"diagram_name : cluster\".\n"
+        "Use links with other images in the plan on shared ranges\n"
+        "Use delete_self only if image is very temporary - unrelated to other images / speech\n"
+        "When you need targeted cleanup, use delete_by_id with image_id from event/static_plan_context processed_id values.\n"
+        "There is NO hard upper action cap per image.\n"
+        "If the speech supports it, output a long actions array with many micro-synced actions.\n"
+        "Generally with long speech and diagrams with many objects, go through most of the object list - either draw 1 by one or highlight"
+        "Drawing a diagram takes around 5 seconds so only start actions on it after around 10 words"
+        "Return JSON only.\n"
+        "\n"
+        "Input:\n"
+        + json.dumps(payload, ensure_ascii=False, indent=2)
+        + "\n\nOutput schema:\n"
+        + json.dumps(
+            {
+                "actions": [
+                    {"type": "draw_image", "target": "img_name", "x": 100, "y": 180, "sync_local": {"start_word_offset": 0, "end_word_offset": 2}},
+                    {"type": "move_inside_bbox", "target": "img_name", "new_x": 180, "new_y": 220, "sync_local": {"start_word_offset": 4, "end_word_offset": 6}},
+                    {"type": "highlight_cluster", "cluster_name": "Cell diagram : nucleus", "sync_local": {"start_word_offset": 7, "end_word_offset": 9}},
+                    {"type": "write_label", "cluster_name": "Cell diagram : nucleus", "text": "Nucleus", "sync_local": {"start_word_offset": 8, "end_word_offset": 10}},
+                    {"type": "connect_cluster_to_cluster", "from_cluster": "Cell diagram : nucleus", "to_cluster": "Mitosis diagram : prophase", "duration_sec": 2.5, "sync_local": {"start_word_offset": 9, "end_word_offset": 11}},
+                ]
+            },
+            ensure_ascii=False,
+            indent=2,
+        )
+    )
+
+
+def estimate_visual_action_prompt_chars(ev: Dict[str, Any]) -> int:
+    try:
+        return int(len(build_visual_action_prompt(ev)))
+    except Exception:
+        return 0
+
+
 def _same_ci(a: Any, b: Any) -> bool:
     sa = str(a or "").strip()
     sb = str(b or "").strip()
@@ -3001,6 +5422,217 @@ def _blank_non_priority_overlaps(payload: Dict[str, Any], *, priority: str, fiel
     return payload
 
 
+def _planner_words(text: Any) -> List[str]:
+    return [
+        str(tok).strip().casefold()
+        for tok in re.findall(r"[A-Za-z0-9]+(?:[+/\.-][A-Za-z0-9]+)*", str(text or ""))
+        if str(tok).strip()
+    ]
+
+
+def _label_phrase_variants(label: Any) -> List[List[str]]:
+    raw = str(label or "").strip()
+    if not raw:
+        return []
+
+    candidates = [
+        raw,
+        raw.split("(", 1)[0].strip(),
+        raw.replace("/", " "),
+        raw.split(":", 1)[0].strip(),
+    ]
+    out: List[List[str]] = []
+    seen = set()
+    for cand in candidates:
+        toks = tuple(_planner_words(cand))
+        if not toks or toks in seen:
+            continue
+        seen.add(toks)
+        out.append(list(toks))
+    return out
+
+
+def _find_phrase_offsets_in_words(words: List[str], phrase_words: List[str]) -> Optional[Tuple[int, int]]:
+    if not words or not phrase_words:
+        return None
+    plen = len(phrase_words)
+    if plen > len(words):
+        return None
+    for start in range(0, len(words) - plen + 1):
+        if words[start : start + plen] == phrase_words:
+            return start, start + plen - 1
+    return None
+
+
+def _map_word_idx_to_sync_offset(word_idx: int, *, total_words: int, span: int) -> int:
+    if span <= 0:
+        return 0
+    if total_words <= 1:
+        return _clamp_i(word_idx, 0, span)
+    frac = float(max(0, min(word_idx, total_words - 1))) / float(max(1, total_words - 1))
+    return _clamp_i(int(round(frac * span)), 0, span)
+
+
+def _diagram_labels_for_event(ev: Dict[str, Any]) -> List[str]:
+    raw_sources: List[Any] = []
+    current = ev.get("current_diagram_cluster_labels")
+    if isinstance(current, dict):
+        raw_sources.extend(current.get("refined_labels") or [])
+    raw_sources.extend(ev.get("objects_that_comprise_image") or [])
+
+    out: List[str] = []
+    seen = set()
+    for item in raw_sources:
+        label = _clean_short_label(str(item or "").strip())
+        if not label:
+            continue
+        key = label.casefold()
+        if key in seen:
+            continue
+        seen.add(key)
+        out.append(label)
+    return out
+
+
+def _default_diagram_actions_for_event(
+    ev: Dict[str, Any],
+    *,
+    span: int,
+    draw_target: str,
+) -> List[Dict[str, Any]]:
+    labels = _diagram_labels_for_event(ev)
+    if not labels:
+        labels = [
+            _clean_short_label(str(x or "").strip())
+            for x in (ev.get("objects_that_comprise_image") or [])
+        ]
+        labels = [x for x in labels if x]
+    if not labels:
+        return []
+
+    speech_words = _planner_words(ev.get("speech_text_in_range", ""))
+    matched_rows: List[Tuple[str, int, int]] = []
+    used = set()
+    for label in labels:
+        for variant in _label_phrase_variants(label):
+            found = _find_phrase_offsets_in_words(speech_words, variant)
+            if found is None:
+                continue
+            start_w, end_w = found
+            matched_rows.append((label, start_w, end_w))
+            used.add(label.casefold())
+            break
+
+    matched_rows.sort(key=lambda row: (row[1], row[2], row[0].casefold()))
+    target_cluster_count = min(
+        len(labels),
+        max(3, min(12, max(4, (span // 28) + 1))),
+    )
+    selected_labels: List[Tuple[str, Optional[int], Optional[int]]] = [
+        (label, start_w, end_w)
+        for label, start_w, end_w in matched_rows[:target_cluster_count]
+    ]
+
+    if len(selected_labels) < target_cluster_count:
+        remaining = [label for label in labels if label.casefold() not in used]
+        need = max(0, target_cluster_count - len(selected_labels))
+        for idx, label in enumerate(remaining[:need]):
+            selected_labels.append((label, None, None))
+
+    if not selected_labels:
+        return []
+
+    actions: List[Dict[str, Any]] = [
+        {
+            "type": "draw_image",
+            "target": draw_target,
+            "x": int((ev.get("print_bbox") or {}).get("x", 0) or 0),
+            "y": int((ev.get("print_bbox") or {}).get("y", 0) or 0),
+            "sync_local": {"start_word_offset": 0, "end_word_offset": min(span, 2)},
+        }
+    ]
+
+    total_words = max(1, len(speech_words))
+    label_window = max(2, min(14, max(2, span // max(1, len(selected_labels) * 2))))
+    unmatched_count = sum(1 for _, sw, ew in selected_labels if sw is None or ew is None)
+    unmatched_seen = 0
+    for idx, (label, start_w, end_w) in enumerate(selected_labels):
+        if start_w is None or end_w is None:
+            unmatched_seen += 1
+            base_start = _clamp_i(
+                int(round((float(unmatched_seen) / float(max(1, unmatched_count + 1))) * span)),
+                0,
+                span,
+            )
+        else:
+            base_start = _map_word_idx_to_sync_offset(start_w, total_words=total_words, span=span)
+        base_end = min(span, max(base_start, base_start + label_window))
+        actions.append(
+            {
+                "type": "highlight_cluster",
+                "cluster_name": label,
+                "sync_local": {
+                    "start_word_offset": int(base_start),
+                    "end_word_offset": int(base_end),
+                },
+            }
+        )
+        label_start = min(span, max(base_start, min(span, base_start + 1)))
+        label_end = min(span, max(label_start, label_start + max(1, label_window // 2)))
+        actions.append(
+            {
+                "type": "write_label",
+                "cluster_name": label,
+                "text": label,
+                "sync_local": {
+                    "start_word_offset": int(label_start),
+                    "end_word_offset": int(label_end),
+                },
+            }
+        )
+        if idx < 3 and span >= 8:
+            zoom_start = min(span, label_end)
+            zoom_end = min(span, max(zoom_start, zoom_start + max(1, label_window // 2)))
+            actions.append(
+                {
+                    "type": "zoom_cluster",
+                    "cluster_name": label,
+                    "sync_local": {
+                        "start_word_offset": int(zoom_start),
+                        "end_word_offset": int(zoom_end),
+                    },
+                }
+            )
+
+    return actions
+
+
+WHITEBOARD_BOARD_WIDTH_PX = 2000
+WHITEBOARD_BOARD_HEIGHT_PX = 2000
+WHITEBOARD_TEXT_DEFAULT_HEIGHT_PX = 180
+WHITEBOARD_TEXT_REFERENCE_HEIGHT_PX = 200
+WHITEBOARD_TEXT_CHAR_WIDTH_PX = 140
+WHITEBOARD_TEXT_LETTER_GAP_PX = 20
+
+
+def _estimate_text_bbox_for_whiteboard(
+    row: Dict[str, Any],
+    *,
+    board_w: int,
+    board_h: int,
+) -> Tuple[int, int]:
+    bbox_px = row.get("bbox_px") if isinstance(row.get("bbox_px"), dict) else {}
+    text_payload = str(row.get("write_text", "") or row.get("content", "") or row.get("name", "") or "").strip()
+    text_chars = max(1, len(text_payload)) if text_payload else max(1, int(row.get("text_chars", 1) or 1))
+    default_w = min(int(board_w), max(WHITEBOARD_TEXT_CHAR_WIDTH_PX * 2, text_chars * WHITEBOARD_TEXT_CHAR_WIDTH_PX))
+    default_h = min(int(board_h), WHITEBOARD_TEXT_DEFAULT_HEIGHT_PX)
+    bw = int(bbox_px.get("w", default_w) or default_w)
+    bh = int(bbox_px.get("h", default_h) or default_h)
+    bw = max(WHITEBOARD_TEXT_CHAR_WIDTH_PX, min(int(board_w), bw))
+    bh = max(WHITEBOARD_TEXT_DEFAULT_HEIGHT_PX, min(int(board_h), bh))
+    return int(bw), int(bh)
+
+
 def _compact_space_chunk_for_prompt(chunk: Dict[str, Any], *, board_width: int, board_height: int) -> Dict[str, Any]:
     steps_src = chunk.get("steps") if isinstance(chunk, dict) else None
     entries_src = chunk.get("entries") if isinstance(chunk, dict) else None
@@ -3012,7 +5644,6 @@ def _compact_space_chunk_for_prompt(chunk: Dict[str, Any], *, board_width: int, 
         steps_out.append(
             {
                 "key": _clip_str(s.get("key", ""), 24),
-                "timeline_text": _clip_str(s.get("timeline_text", ""), 96),
                 "start_word_index": int(s.get("start_word_index", 0) or 0),
                 "end_word_index": int(s.get("end_word_index", 0) or 0),
             }
@@ -3031,35 +5662,42 @@ def _compact_space_chunk_for_prompt(chunk: Dict[str, Any], *, board_width: int, 
             "step_key": _clip_str(e.get("step_key", ""), 24),
             "range_start": int(e.get("range_start", 0) or 0),
             "range_end": int(e.get("range_end", 0) or 0),
+            "range_words": max(
+                1,
+                int(e.get("range_end", 0) or 0) - int(e.get("range_start", 0) or 0) + 1,
+            ),
         }
-        bbox_px = e.get("bbox_px") if isinstance(e.get("bbox_px"), dict) else None
-        if isinstance(bbox_px, dict):
-            row["bbox_px"] = bbox_px
-        speech_span = _clip_str(e.get("speech_text_in_range", ""), 64)
-        if speech_span:
-            row["speech_text_in_range"] = speech_span
-
         if et == "image":
-            row["content"] = _clip_str(e.get("content", ""), 96)
-            row["query"] = _clip_str(e.get("query", ""), 96)
-            _blank_non_priority_overlaps(row, priority="name", fields=["name", "content", "query"])
-
+            bbox_px = e.get("bbox_px") if isinstance(e.get("bbox_px"), dict) else None
+            if isinstance(bbox_px, dict):
+                row["bbox_px"] = {
+                    "w": int(bbox_px.get("w", 400) or 400),
+                    "h": int(bbox_px.get("h", 300) or 300),
+                }
             if int(e.get("diagram", 0) or 0) > 0:
                 row["diagram"] = 1
-                objs = _clip_str_list(
-                    e.get("objects_that_comprise_image"),
-                    max_items=12,
-                    max_chars=40,
-                )
-                if objs:
-                    row["objects_that_comprise_image"] = objs
         elif et == "text":
-            wt = _clip_str(e.get("write_text", "") or e.get("content", ""), 96)
+            wt = str(e.get("write_text", "") or e.get("content", "") or "")
+            wt = wt.strip()
+            tw, th = _estimate_text_bbox_for_whiteboard(
+                e,
+                board_w=int(board_width),
+                board_h=int(board_height),
+            )
+            row["bbox_px"] = {"w": int(tw), "h": int(th)}
             if wt:
-                row["write_text"] = wt
+                row["text_chars"] = int(len(wt))
         elif et == "silence":
+            dur = e.get("duration_sec")
+            try:
+                if dur is not None:
+                    row["duration_sec"] = round(float(dur), 2)
+            except Exception:
+                pass
             if bool(e.get("delete_all", False)):
                 row["delete_all"] = True
+            if bool(e.get("chunk_boundary_silence", False)):
+                row["chunk_boundary_silence"] = True
         entries_out.append(row)
 
     return {
@@ -3071,7 +5709,10 @@ def _compact_space_chunk_for_prompt(chunk: Dict[str, Any], *, board_width: int, 
 
 
 def _compact_visual_event_for_prompt(ev: Dict[str, Any]) -> Dict[str, Any]:
-    ctx_out: List[Dict[str, Any]] = []
+    ev_diagram_mode = int(ev.get("diagram", 0) or 0)
+    cur_start = int(ev.get("range_start", 0) or 0)
+    cur_end = int(ev.get("range_end", cur_start) or cur_start)
+    ctx_candidates: List[Tuple[Tuple[int, int, int, int], Dict[str, Any]]] = []
     for c in (ev.get("static_plan_context") or []):
         if not isinstance(c, dict):
             continue
@@ -3083,13 +5724,36 @@ def _compact_visual_event_for_prompt(ev: Dict[str, Any]) -> Dict[str, Any]:
         cpid = _clip_str(c.get("processed_id", ""), 40)
         if cpid:
             crow["processed_id"] = cpid
-        if isinstance(c.get("print_bbox"), dict):
-            crow["print_bbox"] = c.get("print_bbox")
-        if ctype == "image" and int(c.get("diagram", 0) or 0) > 0:
-            crow["diagram"] = 1
-        ctx_out.append(crow)
-        if len(ctx_out) >= 6:
-            break
+        c_start = int(c.get("range_start", 0) or 0)
+        c_end = int(c.get("range_end", c_start) or c_start)
+        crow["range_start"] = c_start
+        crow["range_end"] = c_end
+        diagram_mode = int(c.get("diagram", 0) or 0)
+        if ctype == "image" and diagram_mode > 0:
+            crow["diagram"] = diagram_mode
+            if ev_diagram_mode > 0:
+                other_diagram_labels = _compact_diagram_cluster_labels(
+                    c.get("context_other_diagram_cluster_labels"),
+                    max_items=8,
+                    max_chars=40,
+                )
+                if other_diagram_labels:
+                    crow["context_other_diagram_cluster_labels"] = other_diagram_labels
+
+        overlap_words = max(0, min(cur_end, c_end) - max(cur_start, c_start) + 1)
+        active_at_start = 1 if (c_start <= cur_start <= c_end) else 0
+        same_step = 1 if _same_ci(c.get("step_key", ""), ev.get("step_key", "")) else 0
+        start_delta = abs(c_start - cur_start)
+        ctx_candidates.append(
+            (
+                (-active_at_start, -same_step, -overlap_words, start_delta),
+                crow,
+            )
+        )
+
+    ctx_candidates.sort(key=lambda row: row[0])
+    max_context_rows = 6 if ev_diagram_mode > 0 else 4
+    ctx_out = [row for _, row in ctx_candidates[:max_context_rows]]
 
     ev_type = _clip_str(ev.get("type", ""), 16)
     name = _clip_str(ev.get("name", ""), 56)
@@ -3108,7 +5772,7 @@ def _compact_visual_event_for_prompt(ev: Dict[str, Any]) -> Dict[str, Any]:
     _blank_non_priority_overlaps(out, priority="name", fields=["name", "image_name"])
     if isinstance(ev.get("print_bbox"), dict):
         out["print_bbox"] = ev.get("print_bbox")
-    speech_span = _clip_str(ev.get("speech_text_in_range", ""), 120)
+    speech_span = _clip_str(ev.get("speech_text_in_range", ""), 900)
     if speech_span:
         out["speech_text_in_range"] = speech_span
 
@@ -3126,15 +5790,24 @@ def _compact_visual_event_for_prompt(ev: Dict[str, Any]) -> Dict[str, Any]:
     out["query"] = query
     _blank_non_priority_overlaps(out, priority="name", fields=["name", "content", "query"])
 
-    if int(ev.get("diagram", 0) or 0) > 0:
-        out["diagram"] = 1
-        objs = _clip_str_list(
-            ev.get("objects_that_comprise_image"),
-            max_items=20,
-            max_chars=48,
+    diagram_mode = int(ev.get("diagram", 0) or 0)
+    if diagram_mode > 0:
+        out["diagram"] = diagram_mode
+        current_diagram_labels = _compact_diagram_cluster_labels(
+            ev.get("current_diagram_cluster_labels"),
+            max_items=16,
+            max_chars=40,
         )
-        if objs:
-            out["objects_that_comprise_image"] = objs
+        if current_diagram_labels:
+            out["current_diagram_cluster_labels"] = current_diagram_labels
+        else:
+            objs = _clip_str_list(
+                ev.get("objects_that_comprise_image"),
+                max_items=12,
+                max_chars=40,
+            )
+            if objs:
+                out["objects_that_comprise_image"] = objs
     return out
 
 
@@ -3144,6 +5817,8 @@ def _generate_json_objects_from_prompts(
     processor,
     device,
     prompts: List[str],
+    images: Optional[List[Any]] = None,
+    prompts_are_chat_text: bool = False,
     temperature: float,
     max_new_tokens: int,
     batch_size: int = 8,
@@ -3159,10 +5834,15 @@ def _generate_json_objects_from_prompts(
             one = one[:PLAN_PROMPT_CHAR_CAP].rstrip() + "\n\n[TRUNCATED_FOR_VRAM]"
         capped_prompts.append(one)
 
-    chat_texts = [_render_chat_text(processor, p) for p in capped_prompts]
+    chat_texts = list(capped_prompts) if prompts_are_chat_text else [_render_chat_text(processor, p) for p in capped_prompts]
+    chat_images: Optional[List[Any]] = None
+    if images is not None:
+        chat_images = list(images[: len(chat_texts)])
+        if len(chat_images) < len(chat_texts):
+            chat_texts = chat_texts[: len(chat_images)]
     bs = max(1, int(batch_size or 1))
     all_raws: List[str] = []
-    empty_cache_each_batch = str(os.getenv("QWEN_PLAN_EMPTY_CACHE_EACH_BATCH", "1")).strip().lower() not in ("0", "false", "no")
+    empty_cache_each_batch = str(os.getenv("QWEN_PLAN_EMPTY_CACHE_EACH_BATCH", "0")).strip().lower() not in ("0", "false", "no")
 
     def _cleanup_cuda_cache() -> None:
         try:
@@ -3183,16 +5863,98 @@ def _generate_json_objects_from_prompts(
         except Exception:
             pass
 
-    def _run_generate(texts_batch: List[str]) -> List[str]:
+    def _cuda_mem_numbers() -> Optional[Dict[str, float]]:
+        try:
+            if not torch.cuda.is_available():
+                return None
+            free_b, total_b = torch.cuda.mem_get_info()
+            return {
+                "alloc_mb": float(torch.cuda.memory_allocated() / (1024 ** 2)),
+                "reserved_mb": float(torch.cuda.memory_reserved() / (1024 ** 2)),
+                "free_mb": float(free_b / (1024 ** 2)),
+                "total_mb": float(total_b / (1024 ** 2)),
+            }
+        except Exception:
+            return None
+
+    def _cuda_cache_trim_needed(mem: Optional[Dict[str, float]]) -> bool:
+        if not mem:
+            return False
+        alloc_mb = float(mem.get("alloc_mb", 0.0) or 0.0)
+        reserved_mb = float(mem.get("reserved_mb", 0.0) or 0.0)
+        free_mb = float(mem.get("free_mb", 0.0) or 0.0)
+        total_mb = float(mem.get("total_mb", 0.0) or 0.0)
+        cache_slack_mb = max(512.0, total_mb * 0.08) if total_mb > 0.0 else 512.0
+        low_free_mb = max(768.0, total_mb * 0.10) if total_mb > 0.0 else 768.0
+        return (reserved_mb - alloc_mb) > cache_slack_mb or free_mb < low_free_mb
+
+    def _is_cuda_oom_error(err: BaseException) -> bool:
+        msg = f"{type(err).__name__}: {err}".lower()
+        return "out of memory" in msg and "cuda" in msg
+
+    def _run_generate(texts_batch: List[str], *, use_cache_now: bool) -> List[str]:
         inputs = None
         out_ids = None
         gen_only_ids = None
+        decoded = None
         try:
-            with torch.no_grad():
+            with torch.inference_mode():
+                t_encode0 = time.perf_counter()
                 inputs = _processor_batch(processor, text=texts_batch)
-                inputs = _move_inputs_to_device(inputs, device)
+                encode_ms = round((time.perf_counter() - t_encode0) * 1000.0, 2)
 
-                use_cache_now = bool(PLAN_USE_CACHE)
+                input_token_max = None
+                input_token_total = None
+                try:
+                    input_ids = inputs.get("input_ids") if isinstance(inputs, dict) else None
+                    attention_mask = inputs.get("attention_mask") if isinstance(inputs, dict) else None
+                    if torch.is_tensor(input_ids):
+                        input_token_max = int(input_ids.shape[1])
+                    if torch.is_tensor(attention_mask):
+                        input_token_total = int(attention_mask.sum().item())
+                    elif torch.is_tensor(input_ids):
+                        input_token_total = int(input_ids.numel())
+                except Exception:
+                    input_token_max = None
+                    input_token_total = None
+                print(
+                    f"[qwen][DBG] {debug_label} tokenize_done size={len(texts_batch)} "
+                    f"encode_ms={encode_ms} input_tokens_max={input_token_max} input_tokens_total={input_token_total} "
+                    f"vram={_vram_str()}"
+                )
+
+                t_move0 = time.perf_counter()
+                inputs = _move_inputs_to_device(inputs, device)
+                move_ms = round((time.perf_counter() - t_move0) * 1000.0, 2)
+                print(
+                    f"[qwen][DBG] {debug_label} move_done size={len(texts_batch)} "
+                    f"move_ms={move_ms} device={device} vram={_vram_str()}"
+                )
+
+                if bool(use_cache_now) and len(texts_batch) > 1:
+                    t_gen0 = time.perf_counter()
+                    input_ids = inputs.get("input_ids") if isinstance(inputs, dict) else None
+                    attention_mask = inputs.get("attention_mask") if isinstance(inputs, dict) else None
+                    if not torch.is_tensor(input_ids) or not torch.is_tensor(attention_mask):
+                        raise RuntimeError("rolling_cache_release_requires_input_ids_and_attention_mask")
+                    decoded = _generate_with_rolling_cache_release(
+                        model=model,
+                        processor=processor,
+                        input_ids=input_ids,
+                        attention_mask=attention_mask,
+                        max_new_tokens=int(max_new_tokens),
+                        temperature=float(temperature),
+                        top_p=0.9,
+                        do_sample=bool(PLAN_DO_SAMPLE),
+                        debug_label=debug_label,
+                    )
+                    gen_ms = round((time.perf_counter() - t_gen0) * 1000.0, 2)
+                    out_token_max = max((len(str(x or "")) for x in decoded), default=0)
+                    print(
+                        f"[qwen][DBG] {debug_label} rolling_generate_done size={len(texts_batch)} "
+                        f"gen_ms={gen_ms} use_cache={int(use_cache_now)} out_chars_max={out_token_max} vram={_vram_str()}"
+                    )
+                    return list(decoded)
 
                 gen_kwargs = {
                     "max_new_tokens": int(max_new_tokens),
@@ -3202,7 +5964,13 @@ def _generate_json_objects_from_prompts(
                     "num_beams": 1,
                     "use_cache": bool(use_cache_now),
                 }
+                t_gen0 = time.perf_counter()
                 out_ids = _safe_generate(model, inputs=inputs, gen_kwargs=gen_kwargs)
+                gen_ms = round((time.perf_counter() - t_gen0) * 1000.0, 2)
+                print(
+                    f"[qwen][DBG] {debug_label} generate_done size={len(texts_batch)} "
+                    f"gen_ms={gen_ms} use_cache={int(use_cache_now)} vram={_vram_str()}"
+                )
 
                 if "input_ids" in inputs and torch.is_tensor(inputs["input_ids"]):
                     prompt_len = int(inputs["input_ids"].shape[1])
@@ -3210,9 +5978,26 @@ def _generate_json_objects_from_prompts(
                 else:
                     gen_only_ids = out_ids
 
+                t_decode0 = time.perf_counter()
                 decoded = processor.batch_decode(gen_only_ids, skip_special_tokens=True)
-                return decoded
+                decode_ms = round((time.perf_counter() - t_decode0) * 1000.0, 2)
+                out_token_max = None
+                try:
+                    if torch.is_tensor(gen_only_ids):
+                        out_token_max = int(gen_only_ids.shape[1])
+                except Exception:
+                    out_token_max = None
+                print(
+                    f"[qwen][DBG] {debug_label} decode_done size={len(texts_batch)} "
+                    f"decode_ms={decode_ms} out_tokens_max={out_token_max} vram={_vram_str()}"
+                )
+                return list(decoded)
         finally:
+            _clear_model_runtime_cache_refs(model)
+            try:
+                del decoded
+            except Exception:
+                pass
             try:
                 del gen_only_ids
             except Exception:
@@ -3227,36 +6012,147 @@ def _generate_json_objects_from_prompts(
                 pass
 
     start = 0
+    adaptive_bs = int(bs)
     while start < len(chat_texts):
-        batch = chat_texts[start:start + bs]
-        if not batch:
-            continue
+        requested_len = max(1, min(int(adaptive_bs), len(chat_texts) - start))
+        attempt_len = int(requested_len)
+        while attempt_len >= 1:
+            batch = chat_texts[start:start + attempt_len]
+            batch_images = chat_images[start:start + attempt_len] if chat_images is not None else None
+            if not batch:
+                break
 
-        t0 = time.perf_counter()
-        batch_chars = sum(len(x) for x in batch)
-        max_chars = max((len(x) for x in batch), default=0)
-        print(
-            f"[qwen][DBG] {debug_label} batch_start start={start} size={len(batch)} "
-            f"chars_total={batch_chars} chars_max={max_chars} vram={_vram_str()}"
-        )
-        try:
-            batch_raws = _run_generate(batch)
-        except Exception as e:
-            print(f"[qwen][DBG] {debug_label} batch_fail start={start} size={len(batch)} err={type(e).__name__}: {e}")
-            _cleanup_cuda_cache()
-            batch_raws = [""] * len(batch)
-        finally:
+            batch_len = len(batch)
+            t0 = time.perf_counter()
+            batch_chars = sum(len(x) for x in batch)
+            max_chars = max((len(x) for x in batch), default=0)
+            use_cache_now = bool(PLAN_USE_CACHE)
+            mem_before = _cuda_mem_numbers()
             print(
-                f"[qwen][DBG] {debug_label} batch_end start={start} size={len(batch)} "
-                f"elapsed_ms={round((time.perf_counter() - t0) * 1000.0, 2)} vram={_vram_str()}"
+                f"[qwen][DBG] {debug_label} batch_start start={start} size={batch_len} "
+                f"requested_bs={bs} adaptive_bs={adaptive_bs} "
+                f"chars_total={batch_chars} chars_max={max_chars} use_cache={int(use_cache_now)} "
+                f"vram={_vram_str()}"
             )
-            if empty_cache_each_batch:
-                _cleanup_cuda_cache()
 
-        if len(batch_raws) < len(batch):
-            batch_raws = list(batch_raws) + [""] * (len(batch) - len(batch_raws))
-        all_raws.extend(batch_raws[:len(batch)])
-        start += len(batch)
+            batch_raws: List[str]
+            batch_failed = False
+            try:
+                if batch_images is not None:
+                    def _run_generate_with_images(texts_batch: List[str], images_batch: List[Any], *, use_cache_now: bool) -> List[str]:
+                        inputs = None
+                        out_ids = None
+                        gen_only_ids = None
+                        decoded = None
+                        try:
+                            with torch.inference_mode():
+                                t_encode0 = time.perf_counter()
+                                inputs = _processor_batch(processor, text=texts_batch, images=images_batch)
+                                encode_ms = round((time.perf_counter() - t_encode0) * 1000.0, 2)
+                                print(
+                                    f"[qwen][DBG] {debug_label} tokenize_done size={len(texts_batch)} "
+                                    f"encode_ms={encode_ms} multimodal=1 vram={_vram_str()}"
+                                )
+                                t_move0 = time.perf_counter()
+                                inputs = _move_inputs_to_device(inputs, device)
+                                move_ms = round((time.perf_counter() - t_move0) * 1000.0, 2)
+                                print(
+                                    f"[qwen][DBG] {debug_label} move_done size={len(texts_batch)} "
+                                    f"move_ms={move_ms} device={device} multimodal=1 vram={_vram_str()}"
+                                )
+
+                                gen_kwargs = {
+                                    "max_new_tokens": int(max_new_tokens),
+                                    "do_sample": bool(PLAN_DO_SAMPLE),
+                                    "temperature": float(temperature),
+                                    "top_p": 0.9,
+                                    "num_beams": 1,
+                                    "use_cache": bool(use_cache_now),
+                                }
+                                if not bool(PLAN_DO_SAMPLE):
+                                    gen_kwargs.pop("temperature", None)
+                                    gen_kwargs.pop("top_p", None)
+                                t_gen0 = time.perf_counter()
+                                out_ids = _safe_generate(model, inputs=inputs, gen_kwargs=gen_kwargs)
+                                gen_ms = round((time.perf_counter() - t_gen0) * 1000.0, 2)
+                                print(
+                                    f"[qwen][DBG] {debug_label} generate_done size={len(texts_batch)} "
+                                    f"gen_ms={gen_ms} use_cache={int(use_cache_now)} multimodal=1 vram={_vram_str()}"
+                                )
+                                if "input_ids" in inputs and torch.is_tensor(inputs["input_ids"]):
+                                    prompt_len = int(inputs["input_ids"].shape[1])
+                                    gen_only_ids = out_ids[:, prompt_len:]
+                                else:
+                                    gen_only_ids = out_ids
+                                t_decode0 = time.perf_counter()
+                                decoded = processor.batch_decode(gen_only_ids, skip_special_tokens=True)
+                                decode_ms = round((time.perf_counter() - t_decode0) * 1000.0, 2)
+                                print(
+                                    f"[qwen][DBG] {debug_label} decode_done size={len(texts_batch)} "
+                                    f"decode_ms={decode_ms} multimodal=1 vram={_vram_str()}"
+                                )
+                                return list(decoded)
+                        finally:
+                            _clear_model_runtime_cache_refs(model)
+                            try:
+                                del decoded
+                            except Exception:
+                                pass
+                            try:
+                                del gen_only_ids
+                            except Exception:
+                                pass
+                            try:
+                                del out_ids
+                            except Exception:
+                                pass
+                            try:
+                                del inputs
+                            except Exception:
+                                pass
+
+                    batch_raws = _run_generate_with_images(batch, batch_images, use_cache_now=use_cache_now)
+                else:
+                    batch_raws = _run_generate(batch, use_cache_now=use_cache_now)
+            except Exception as e:
+                if _is_cuda_oom_error(e) and batch_len > 1:
+                    next_attempt = max(1, batch_len // 2)
+                    adaptive_bs = min(adaptive_bs, next_attempt)
+                    print(
+                        f"[qwen][DBG] {debug_label} batch_oom_retry start={start} size={batch_len} "
+                        f"next_size={next_attempt} err={type(e).__name__}: {e}"
+                    )
+                    _cleanup_cuda_cache()
+                    attempt_len = int(next_attempt)
+                    continue
+                print(f"[qwen][DBG] {debug_label} batch_fail start={start} size={batch_len} err={type(e).__name__}: {e}")
+                _cleanup_cuda_cache()
+                batch_raws = [""] * batch_len
+                batch_failed = True
+            finally:
+                mem_pre_cleanup = _cuda_mem_numbers()
+                vram_pre_cleanup = _vram_str()
+                should_trim = bool(empty_cache_each_batch or _cuda_cache_trim_needed(mem_pre_cleanup))
+                if should_trim:
+                    _cleanup_cuda_cache()
+                mem_post_cleanup = _cuda_mem_numbers()
+                vram_post_cleanup = _vram_str()
+                trim_reason = "manual" if empty_cache_each_batch else ("over_budget" if should_trim else "none")
+                print(
+                    f"[qwen][DBG] {debug_label} batch_end start={start} size={batch_len} "
+                    f"elapsed_ms={round((time.perf_counter() - t0) * 1000.0, 2)} "
+                    f"trim_reason={trim_reason} "
+                    f"vram_pre_cleanup={vram_pre_cleanup} vram_post_cleanup={vram_post_cleanup} "
+                    f"mem_before={mem_before} mem_after={mem_post_cleanup}"
+                )
+
+            if len(batch_raws) < batch_len:
+                batch_raws = list(batch_raws) + [""] * (batch_len - len(batch_raws))
+            all_raws.extend(batch_raws[:batch_len])
+            start += batch_len
+            if not batch_failed:
+                adaptive_bs = max(1, min(adaptive_bs, batch_len))
+            break
 
     objs: List[Dict[str, Any]] = []
     for raw in all_raws:
@@ -3266,6 +6162,181 @@ def _generate_json_objects_from_prompts(
         parsed["raw_text"] = raw
         objs.append(parsed)
     return objs, all_raws
+
+
+def _generate_json_objects_from_prompts_text_model(
+    *,
+    model,
+    tokenizer,
+    device,
+    prompts: List[str],
+    temperature: float,
+    max_new_tokens: int,
+    debug_label: str = "qwen_text_json",
+    thinking_enabled: bool = False,
+    max_rounds: int = 4,
+    batch_size: int = 8,
+) -> Tuple[List[Dict[str, Any]], List[str]]:
+    if not prompts:
+        return [], []
+
+    capped_prompts: List[str] = []
+    for p in prompts:
+        one = str(p or "")
+        if PLAN_PROMPT_CHAR_CAP > 0 and len(one) > PLAN_PROMPT_CHAR_CAP:
+            one = one[:PLAN_PROMPT_CHAR_CAP].rstrip() + "\n\n[TRUNCATED_FOR_VRAM]"
+        capped_prompts.append(one)
+
+    raws: List[str] = []
+    parse_texts: List[str] = []
+    round_limit = max(1, int(max_rounds or 1))
+    active_device = _infer_text_model_device(model, device)
+    if not bool(thinking_enabled):
+        effective_bs = max(1, min(int(batch_size or 1), len(capped_prompts)))
+        print(
+            f"[qwen][DBG] {debug_label} transformers_batch_mode prompts={len(capped_prompts)} "
+            f"batch_size={effective_bs} thinking=0 vram={_vram_str()}"
+        )
+        _, raws = _generate_json_objects_from_prompts(
+            model=model,
+            processor=tokenizer,
+            device=active_device,
+            prompts=capped_prompts,
+            temperature=float(temperature),
+            max_new_tokens=int(max_new_tokens),
+            batch_size=int(effective_bs),
+            debug_label=str(debug_label or "qwen_text_json"),
+        )
+        objs: List[Dict[str, Any]] = []
+        for raw_text in raws:
+            parse_text = str(raw_text or "").strip()
+            parsed = _extract_last_json_object(parse_text) or _extract_first_json_object(parse_text)
+            if not isinstance(parsed, dict):
+                parsed = {}
+            parsed["raw_text"] = raw_text
+            parsed["parse_text"] = parse_text
+            objs.append(parsed)
+        return objs, raws
+
+    for prompt_idx, prompt in enumerate(capped_prompts):
+        chat_text = _render_chat_text(tokenizer, prompt, thinking_enabled=thinking_enabled)
+        raw_text = ""
+        parse_text = ""
+        inputs = None
+        generated = None
+        current_ids = None
+        current_attention = None
+        try:
+            with torch.inference_mode():
+                print(
+                    f"[qwen][DBG] {debug_label} prompt_start index={prompt_idx + 1}/{len(capped_prompts)} "
+                    f"thinking={int(bool(thinking_enabled))} chars={len(chat_text)} vram={_vram_str()}"
+                )
+                inputs = _processor_batch(tokenizer, text=[chat_text])
+                inputs = _move_inputs_to_device(inputs, active_device)
+                current_ids = inputs.get("input_ids")
+                current_attention = inputs.get("attention_mask")
+                if not torch.is_tensor(current_ids):
+                    raise RuntimeError("text_planner_missing_input_ids")
+                if not torch.is_tensor(current_attention):
+                    current_attention = torch.ones_like(current_ids, device=current_ids.device)
+
+                prompt_len = int(current_ids.shape[1])
+                for round_idx in range(round_limit):
+                    print(
+                        f"[qwen][DBG] {debug_label} prompt_round_start index={prompt_idx + 1}/{len(capped_prompts)} "
+                        f"round={round_idx + 1}/{round_limit} prompt_len={prompt_len} vram={_vram_str()}"
+                    )
+                    gen_kwargs = {
+                        "input_ids": current_ids,
+                        "attention_mask": current_attention,
+                        "max_new_tokens": int(max_new_tokens),
+                        "pad_token_id": getattr(tokenizer, "pad_token_id", None),
+                        "eos_token_id": getattr(tokenizer, "eos_token_id", None),
+                        "use_cache": True,
+                    }
+                    if thinking_enabled:
+                        gen_kwargs.update(
+                            {
+                                "do_sample": True,
+                                "temperature": max(0.6, float(temperature)),
+                                "top_p": 0.95,
+                                "top_k": 20,
+                            }
+                        )
+                    else:
+                        gen_kwargs["do_sample"] = bool(PLAN_DO_SAMPLE)
+                        if bool(PLAN_DO_SAMPLE):
+                            gen_kwargs["temperature"] = float(temperature)
+                            gen_kwargs["top_p"] = 0.9
+
+                    generated = model.generate(**gen_kwargs)
+                    if not torch.is_tensor(generated) or generated.shape[-1] <= current_ids.shape[-1]:
+                        print(
+                            f"[qwen][DBG] {debug_label} prompt_round_empty index={prompt_idx + 1}/{len(capped_prompts)} "
+                            f"round={round_idx + 1}/{round_limit} vram={_vram_str()}"
+                        )
+                        break
+
+                    gen_only_ids = generated[:, prompt_len:]
+                    raw_text = _decode_token_ids_text(tokenizer, gen_only_ids, skip_special_tokens=False)
+                    parse_text = _strip_qwen_thinking_text(raw_text) if thinking_enabled else str(raw_text or "").strip()
+                    parsed = _extract_last_json_object(parse_text) or _extract_first_json_object(parse_text)
+                    print(
+                        f"[qwen][DBG] {debug_label} prompt_round_done index={prompt_idx + 1}/{len(capped_prompts)} "
+                        f"round={round_idx + 1}/{round_limit} raw_chars={len(str(raw_text or ''))} "
+                        f"parse_chars={len(parse_text)} parsed={int(isinstance(parsed, dict))} "
+                        f"has_think_close={int('</think>' in str(raw_text or ''))} vram={_vram_str()}"
+                    )
+
+                    if thinking_enabled and "</think>" not in str(raw_text or ""):
+                        current_ids = generated
+                        current_attention = torch.ones_like(current_ids, device=current_ids.device)
+                        continue
+
+                    if isinstance(parsed, dict):
+                        break
+
+                    current_ids = generated
+                    current_attention = torch.ones_like(current_ids, device=current_ids.device)
+
+                print(
+                    f"[qwen][DBG] {debug_label} prompt_done chars={len(chat_text)} "
+                    f"thinking={int(bool(thinking_enabled))} parse_chars={len(parse_text)} vram={_vram_str()}"
+                )
+        except Exception as e:
+            print(f"[qwen][DBG] {debug_label} prompt_fail err={type(e).__name__}: {e}")
+        finally:
+            _clear_model_runtime_cache_refs(model)
+            try:
+                del generated
+            except Exception:
+                pass
+            try:
+                del current_attention
+            except Exception:
+                pass
+            try:
+                del current_ids
+            except Exception:
+                pass
+            try:
+                del inputs
+            except Exception:
+                pass
+
+        raws.append(raw_text)
+        parse_texts.append(parse_text)
+
+    objs: List[Dict[str, Any]] = []
+    for raw, parse_text in zip(raws, parse_texts):
+        parsed = _extract_last_json_object(parse_text) or _extract_first_json_object(parse_text)
+        if not isinstance(parsed, dict):
+            parsed = {}
+        parsed["raw_text"] = raw
+        parsed["parse_text"] = parse_text
+        objs.append(parsed)
+    return objs, raws
 
 def plan_whiteboard_actions_transformers(
     *,
@@ -3309,7 +6380,7 @@ def plan_whiteboard_actions_transformers(
         "Images will come sometimes come with a DIAGRAM tag.\n"
         "For these use the special diagram actions with each of their objects, pushing for text.\n\n"
 
-        "You are provided with a white state with all present objects.\n"
+        "You are provided with a whiteboard state with all present objects.\n"
         "Draw in empty spaces not already taken up by an object and manage object layout based on their relations.\n"
         "If there's no space either shift the board to make space (center shifts, you can draw at further coords)"
         "or delete an irrelevant object.\n"
@@ -3325,7 +6396,7 @@ def plan_whiteboard_actions_transformers(
         "- If CURRENT EVENT includes text_tag=1, this is NOT an image draw request.\n"
         "- For text_tag=1 you should primarily output a 'write' action to place the provided write_text.\n"
         "- Avoid complex layout/multi-step work for text_tag=1; only erase/shift if needed to make space.\n"
-        "- Assume one letter width = 15 px (times scale). If you must clear space, erase first, then write.\n"
+        f"- Board text is large: think roughly {WHITEBOARD_TEXT_CHAR_WIDTH_PX}px of width per character and about {WHITEBOARD_TEXT_REFERENCE_HEIGHT_PX}px of height at write scale 1.0, with about {WHITEBOARD_TEXT_LETTER_GAP_PX}px between letters. If you must clear space, erase first, then write.\n"
         "- Do NOT output diagram-only actions for text_tag=1.\n\n"
         # ------------------------------------
 
@@ -3333,8 +6404,8 @@ def plan_whiteboard_actions_transformers(
         "Do not invent new action types.\n"
         "All actions MUST be from the allowed action sets.\n"
         "Do not invent new action types.\n"
-        "Whiteboard default scale is 4000 x 2000 px"
-        "Coordinates are in whiteboard coords - center 0, 0.\n"
+        f"Whiteboard size is {WHITEBOARD_BOARD_WIDTH_PX} x {WHITEBOARD_BOARD_HEIGHT_PX} px.\n"
+        f"Coordinates are in whiteboard coords with center 0,0, so the visible board is roughly x/y from -{WHITEBOARD_BOARD_WIDTH_PX // 2} to {WHITEBOARD_BOARD_WIDTH_PX // 2}.\n"
     )
 
     allowed = {
@@ -3490,8 +6561,15 @@ def _repair_space_plan_chunk(
         t = str(out.get("type", "") or "").lower()
         if t in ("image", "text"):
             bbox_px = out.get("bbox_px") or {}
-            bw = int(bbox_px.get("w", 400) or 400)
-            bh = int(bbox_px.get("h", 300) or 300)
+            if t == "text":
+                bw, bh = _estimate_text_bbox_for_whiteboard(
+                    out,
+                    board_w=int(board_w),
+                    board_h=int(board_h),
+                )
+            else:
+                bw = int(bbox_px.get("w", 400) or 400)
+                bh = int(bbox_px.get("h", 300) or 300)
             # "very big bbox" policy: image/text occupancy can approach quadrant scale.
             if t == "text":
                 target_w = max(bw + 80, board_w // 8)
@@ -3521,7 +6599,11 @@ def _repair_space_plan_chunk(
                 )
         elif t == "silence":
             default_delete = bool(out.get("chunk_boundary_silence", False))
-            out["delete_all"] = bool((p.get("delete_all") if isinstance(p, dict) else default_delete) if isinstance(p, dict) else default_delete)
+            planner_delete = p.get("delete_all") if isinstance(p, dict) and "delete_all" in p else None
+            # Chapter-boundary cleanup silences are deterministic wipe points and
+            # should not be disabled by the model. Later diagram keepalive logic
+            # can still preserve marked exceptions by filtering delete targets.
+            out["delete_all"] = bool(default_delete or planner_delete) if planner_delete is not None else default_delete
         merged.append(out)
 
     # deterministic no-overlap repair for print boxes
@@ -3544,9 +6626,11 @@ def _repair_space_plan_chunk(
         fixed = _find_non_overlapping_box(desired, placed=placed, board_w=board_w, board_h=board_h, step=40)
         row["print_bbox"] = fixed
         if str(row.get("type", "") or "").strip().lower() == "text":
-            bbox_px = row.get("bbox_px") if isinstance(row.get("bbox_px"), dict) else {}
-            tw = int(bbox_px.get("w", 200) or 200)
-            th = int(bbox_px.get("h", 50) or 50)
+            tw, th = _estimate_text_bbox_for_whiteboard(
+                row,
+                board_w=int(board_w),
+                board_h=int(board_h),
+            )
             row["text_coord"] = _normalize_text_coord(
                 row.get("text_coord") if isinstance(row.get("text_coord"), dict) else None,
                 print_bbox=fixed,
@@ -3576,8 +6660,8 @@ def plan_space_timeline_batch_transformers(
     processor,
     device,
     chunk_maps: List[Dict[str, Any]],
-    board_width: int = 4000,
-    board_height: int = 4000,
+    board_width: int = WHITEBOARD_BOARD_WIDTH_PX,
+    board_height: int = WHITEBOARD_BOARD_HEIGHT_PX,
     batch_size: int = 8,
     temperature: float = 0.15,
     max_new_tokens: int = 900,
@@ -3602,7 +6686,7 @@ def plan_space_timeline_batch_transformers(
         prompt = (
             "You are managing where images will be printed on a whiteboard\n"
             "Goal: assign each image/text a non-overlapping print_bbox and choose which silence rows should be cleanup points\n"
-            "Entires are chronogically synced with range_start/range_end and speech_text_in_range\n"
+            "Entries are chronologically synced with range_start/range_end, range_words, and step_key\n"
             "For each image/text entry you MUST output print_bbox\n"
             "For each silence you MUST output delete_all true/false\n"
             "Set delete_all=true only for pauses where board cleanup is useful and appropriate before the next cluster of visuals\n"
@@ -3611,12 +6695,15 @@ def plan_space_timeline_batch_transformers(
             "Try and fill up the board as much a possible before deletion (cram optimized close bboxes)\n"
             "For images with long ranges you might have to use manual delete actions around them to make space, while they are still active\n"
             "With that, and as a general rule, only delete an image after it's active range is ended\n"
+            "Diagram images are generally more substantial - so know to give them a solid free space in a good space"
+            "Board dimentions are -1000 to 1000 on x and -700 and 700 - 0,0 is the center, go from left to right"
+            "Dont place text on the same y level -> space them apart by at least 50."
             "Output JSON only.\n\n"
             "ADDED RULES FOR TEXT ENTRIES (append-only):\n"
             "- For each entry where type='text', also output text_coord with exact write coordinates.\n"
             "- text_coord must be: {\"x\": <int>, \"y\": <int>}.\n"
             "- Keep text_coord inside its print_bbox.\n"
-            "- Text width estimate is 10 px per character; text height is 50 px.\n"
+            f"- Text on this board is large: assume about {WHITEBOARD_TEXT_CHAR_WIDTH_PX}px of width per character and about {WHITEBOARD_TEXT_DEFAULT_HEIGHT_PX}px of height at the usual whiteboard text size.\n"
             "- Keep providing print_bbox for text entries as usual.\n\n"
             "Input chunk:\n"
             + json.dumps(payload, ensure_ascii=False, indent=2)
@@ -3624,8 +6711,8 @@ def plan_space_timeline_batch_transformers(
             + json.dumps(
                 {
                     "entries": [
-                        {"entry_index": 0, "type": "image", "print_bbox": {"x": 0, "y": 0, "w": 800, "h": 800}},
-                        {"entry_index": 1, "type": "text", "print_bbox": {"x": 900, "y": 100, "w": 500, "h": 300}, "text_coord": {"x": 920, "y": 140}},
+                        {"entry_index": 0, "type": "image", "print_bbox": {"x": 0, "y": 0, "w": -800, "h": 800}},
+                        {"entry_index": 1, "type": "text", "print_bbox": {"x": 900, "y": 100, "w": 500, "h": -300}, "text_coord": {"x": 920, "y": 140}},
                         {"entry_index": 2, "type": "silence", "delete_all": False},
                     ],
                     "notes": "short optional note",
@@ -3662,6 +6749,93 @@ def plan_space_timeline_batch_transformers(
     return {"chunks": out_chunks}
 
 
+def plan_space_timeline_batch_text_model(
+    *,
+    bundle: Dict[str, Any],
+    chunk_maps: List[Dict[str, Any]],
+    board_width: int = WHITEBOARD_BOARD_WIDTH_PX,
+    board_height: int = WHITEBOARD_BOARD_HEIGHT_PX,
+    temperature: float = 0.15,
+    max_new_tokens: int = 900,
+    thinking_enabled: bool = True,
+) -> Dict[str, Any]:
+    chunks = [c for c in (chunk_maps or []) if isinstance(c, dict)]
+    if not chunks:
+        return {"chunks": []}
+
+    prompts: List[str] = []
+    for ch in chunks:
+        payload = _compact_space_chunk_for_prompt(
+            ch,
+            board_width=int(board_width),
+            board_height=int(board_height),
+        )
+        prompt = (
+            "You are managing where images will be printed on a whiteboard\n"
+            "Goal: assign each image/text a non-overlapping print_bbox and choose which silence rows should be cleanup points\n"
+            "Entries are chronologically synced with range_start/range_end, range_words, and step_key\n"
+            "For each image/text entry you MUST output print_bbox\n"
+            "For each silence you MUST output delete_all true/false\n"
+            "Set delete_all=true only for pauses where board cleanup is useful and appropriate before the next cluster of visuals\n"
+            "Keep nearby chronology conceptually close where possible\n"
+            "Use large boxes, stay inside board bounds.\n"
+            "Try and fill up the board as much a possible before deletion (cram optimized close bboxes)\n"
+            "For images with long ranges you might have to use manual delete actions around them to make space, while they are still active\n"
+            "With that, and as a general rule, only delete an image after it's active range is ended\n"
+            "Diagram images are generally more substantial - so know to give them a solid free space in a good space"
+            "Board dimentions are -1000 to 1000 on x and -700 and 700 - 0,0 is the center, go from left to right"
+            "Dont place text on the same y level -> space them apart by at least 50."
+            "Output JSON only.\n\n"
+            "ADDED RULES FOR TEXT ENTRIES (append-only):\n"
+            "- For each entry where type='text', also output text_coord with exact write coordinates.\n"
+            "- text_coord must be: {\"x\": <int>, \"y\": <int>}.\n"
+            "- Keep text_coord inside its print_bbox.\n"
+            f"- Text on this board is large: assume about {WHITEBOARD_TEXT_CHAR_WIDTH_PX}px of width per character and about {WHITEBOARD_TEXT_DEFAULT_HEIGHT_PX}px of height at the usual whiteboard text size.\n"
+            "- Keep providing print_bbox for text entries as usual.\n\n"
+            "Input chunk:\n"
+            + json.dumps(payload, ensure_ascii=False, indent=2)
+            + "\n\nOutput schema:\n"
+            + json.dumps(
+                {
+                    "entries": [
+                        {"entry_index": 0, "type": "image", "print_bbox": {"x": 0, "y": 0, "w": -800, "h": 800}},
+                        {"entry_index": 1, "type": "text", "print_bbox": {"x": 900, "y": 100, "w": 500, "h": -300}, "text_coord": {"x": 920, "y": 140}},
+                        {"entry_index": 2, "type": "silence", "delete_all": False},
+                    ],
+                    "notes": "short optional note",
+                },
+                ensure_ascii=False,
+                separators=(",", ":"),
+            )
+        )
+        prompts.append(prompt)
+
+    parsed_objs, _ = _generate_json_objects_from_prompts_text_model(
+        model=bundle.get("model"),
+        tokenizer=bundle.get("tokenizer"),
+        device=bundle.get("device"),
+        prompts=prompts,
+        temperature=float(temperature),
+        max_new_tokens=int(max_new_tokens),
+        debug_label="plan_space_text",
+        thinking_enabled=bool(thinking_enabled),
+        batch_size=max(1, len(chunks)),
+    )
+
+    out_chunks: List[Dict[str, Any]] = []
+    for i, ch in enumerate(chunks):
+        obj = parsed_objs[i] if i < len(parsed_objs) else {}
+        plan_entries = obj.get("entries") if isinstance(obj, dict) else None
+        repaired = _repair_space_plan_chunk(
+            chunk=ch,
+            planned_entries=plan_entries if isinstance(plan_entries, list) else None,
+            board_w=int(board_width),
+            board_h=int(board_height),
+        )
+        out_chunks.append(repaired)
+    return {"chunks": out_chunks}
+
+
 def _default_visual_actions_for_event(ev: Dict[str, Any]) -> List[Dict[str, Any]]:
     s = int(ev.get("range_start", 0) or 0)
     e = int(ev.get("range_end", s) or s)
@@ -3685,6 +6859,15 @@ def _default_visual_actions_for_event(ev: Dict[str, Any]) -> List[Dict[str, Any]
             }
         )
         return acts
+
+    if int(ev.get("diagram", 0) or 0) > 0:
+        diagram_acts = _default_diagram_actions_for_event(
+            ev,
+            span=span,
+            draw_target=str(ev.get("name", "") or ""),
+        )
+        if diagram_acts:
+            return diagram_acts
 
     acts.append(
         {
@@ -3731,6 +6914,8 @@ _VISUAL_ACTION_ALIASES = {
     "zoom_cluster": "zoom_cluster",
     "unzoom_cluster": "unzoom_cluster",
     "write_label": "write_label",
+    "connect_cluster_to_cluster": "connect_cluster_to_cluster",
+    "connect_clusters": "connect_cluster_to_cluster",
 }
 
 
@@ -3739,6 +6924,21 @@ def _safe_float(v: Any, default: float = 0.0) -> float:
         return float(v)
     except Exception:
         return float(default)
+
+
+def _normalize_diagram_cluster_ref(value: Any, *, default_diagram_name: str = "") -> str:
+    raw = str(value or "").strip()
+    if not raw:
+        return ""
+    if ":" not in raw:
+        diagram_name = str(default_diagram_name or "").strip()
+        return f"{diagram_name} : {raw}" if diagram_name else raw
+    left, right = raw.split(":", 1)
+    diagram_name = str(left or "").strip() or str(default_diagram_name or "").strip()
+    cluster_name = str(right or "").strip()
+    if not diagram_name or not cluster_name:
+        return ""
+    return f"{diagram_name} : {cluster_name}"
 
 
 def _safe_int(v: Any, default: int = 0) -> int:
@@ -3784,7 +6984,14 @@ def _clean_visual_action_for_event(ev: Dict[str, Any], a: Dict[str, Any], *, act
         return None
 
     is_diagram = int(ev.get("diagram", 0) or 0) > 0
-    diagram_types = ("highlight_cluster", "unhighlight_cluster", "zoom_cluster", "unzoom_cluster", "write_label")
+    diagram_types = (
+        "highlight_cluster",
+        "unhighlight_cluster",
+        "zoom_cluster",
+        "unzoom_cluster",
+        "write_label",
+        "connect_cluster_to_cluster",
+    )
     if t in diagram_types and not is_diagram:
         return None
 
@@ -3848,21 +7055,49 @@ def _clean_visual_action_for_event(ev: Dict[str, Any], a: Dict[str, Any], *, act
         if not image_id:
             return None
         out["image_id"] = image_id
+    elif t == "connect_cluster_to_cluster":
+        from_default = str(a.get("from_diagram_name", "") or a.get("diagram_name", "") or default_name).strip()
+        to_default = str(a.get("to_diagram_name", "") or a.get("other_diagram_name", "") or default_name).strip()
+        from_cluster = _normalize_diagram_cluster_ref(
+            a.get("from_cluster", "") or a.get("source_cluster", "") or a.get("cluster_name", "") or "",
+            default_diagram_name=from_default,
+        )
+        to_cluster = _normalize_diagram_cluster_ref(
+            a.get("to_cluster", "")
+            or a.get("target_cluster", "")
+            or a.get("other_cluster", "")
+            or a.get("other_cluster_name", "")
+            or "",
+            default_diagram_name=to_default,
+        )
+        if not from_cluster or not to_cluster:
+            return None
+        out["from_cluster"] = from_cluster
+        out["to_cluster"] = to_cluster
+        out["duration_sec"] = max(
+            0.1,
+            float(_safe_float(a.get("duration_sec", a.get("duration_in_sec", 2.0)), 2.0)),
+        )
     elif t in diagram_types:
         objs = ev.get("objects_that_comprise_image") if isinstance(ev.get("objects_that_comprise_image"), list) else []
         first_obj = str(objs[0] if objs else "").strip()
-        cluster_name = str(
-            a.get("cluster_name", "")
+        raw_cluster_name = str(
+            a.get("target", "")
+            or a.get("cluster_name", "")
             or a.get("cluster", "")
             or a.get("object", "")
             or a.get("name", "")
             or first_obj
         ).strip()
+        cluster_name = _normalize_diagram_cluster_ref(
+            raw_cluster_name,
+            default_diagram_name=default_name,
+        )
         if not cluster_name:
             return None
         out["cluster_name"] = cluster_name
         if t == "write_label":
-            out["text"] = str(a.get("text", "") or cluster_name)
+            out["text"] = str(a.get("text", "") or raw_cluster_name)
 
     out["sync_local"] = _normalize_sync_local(a.get("sync_local"), span=span)
     return out
@@ -3876,11 +7111,11 @@ def plan_visual_actions_batch_transformers(
     events: List[Dict[str, Any]],
     batch_size: int = 8,
     temperature: float = 0.2,
-    max_new_tokens: int = 700,
+    max_new_tokens: int = 1400,
 ) -> Dict[str, Any]:
     """
     Plans actions for image/text/diagram events.
-    Uses static timeline context (only items before current event in current batch).
+    Uses static timeline context for visuals that overlap the current event's active range.
     """
     rows = [e for e in (events or []) if isinstance(e, dict)]
     if not rows:
@@ -3888,72 +7123,7 @@ def plan_visual_actions_batch_transformers(
 
     prompts: List[str] = []
     for ev in rows:
-        payload = {
-            "event": _compact_visual_event_for_prompt(ev),
-            "allowed_actions": {
-                "Base actions schema": [
-                    "draw_image: {type,target,x,y,sync_local}",
-                    "write_text: {type,target,text,x,y,scale,sync_local}",
-                    "move_inside_bbox: {type,target,new_x,new_y,sync_local}",
-                    "link_to_image: {type,target,image_name,sync_local}",
-                    "delete_self: {type,sync_local}",
-                    "delete_by_id: {type,image_id,sync_local}"
-                ],
-                "diagram_extra": [
-                    "highlight_cluster",
-                    "unhighlight_cluster",
-                    "zoom_cluster",
-                    "unzoom_cluster",
-                    "(all above use {type,cluster_name,sync_local} !!",
-                    "write_label: {type,cluster_name,text,sync_local}"
-                ],
-            },
-            "rules": {
-                "print_bbox_is_fixed_context": True,
-                "all_actions_inside_print_bbox": True,
-                "generic_delete_not_allowed": True,
-                "delete_self_only_for_temporary_non_diagram": True,
-                "delete_by_id_only_for_targeted_single_image_cleanup": True,
-                "must_emit_sync_local_per_action": True,
-                "sync_local_is_relative_to_event_range": True,
-            },
-        }
-        prompt = (
-            "You plan actions around drawing an image on a whiteboard under speech\n"
-            "Use ONLY the allowed actions and exactly their field names\n"
-            "Every action MUST include sync_local {start_word_offset,end_word_offset} to link it to parts of the speech\n"
-            "All actions must happen only inside print_bbox - respect image dimentions when picking print coords\n"
-            "Sometimes images come with  diagram = 1 - for them you have an list of interactable objects that comprise them\n"
-            "Diagrams often come with large ranges with many inner objects mentioned - highlight and interact with them at every possible point.\n"
-            "Minding that you'll also have to use the counter actions to deactivate objects after relevancy.\n"
-            "Always start with draw_image - self innit\n"
-            "You can use extra write_text actions to add detail in unused spacew\n"
-            "Create the most rich and complex sync -> match what is said with as many actions as possible\n"
-            "For digram == 0 - only base actions, for diagram == 1, also diagram_extra\n"
-            "You are also given a rought timeline of other images on the board, interact with them!\n"
-            "Use delete_self only if image is very temporary - unrelated to other images / speech\n"
-            "When you need targeted cleanup, use delete_by_id with image_id from event/static_plan_context processed_id values.\n"
-            "Return JSON only.\n"
-
-            "Input:\n"
-            + json.dumps(payload, ensure_ascii=False, indent=2)
-            + "\n\nOutput schema:\n"
-            + json.dumps(
-                {
-                    "actions": [
-                        {"type": "draw_image", "target": "img_name", "x": 100, "y": 180, "sync_local": {"start_word_offset": 0, "end_word_offset": 2}},
-                        {"type": "write_text", "target": "img_name__text_1", "text": "label", "x": 120, "y": 260, "scale": 1.0, "sync_local": {"start_word_offset": 2, "end_word_offset": 4}},
-                        {"type": "move_inside_bbox", "target": "img_name", "new_x": 180, "new_y": 220, "sync_local": {"start_word_offset": 4, "end_word_offset": 6}},
-                        {"type": "delete_by_id", "image_id": "processed_12", "sync_local": {"start_word_offset": 6, "end_word_offset": 6}},
-                        {"type": "highlight_cluster", "cluster_name": "nucleus", "sync_local": {"start_word_offset": 7, "end_word_offset": 9}},
-                        {"type": "write_label", "cluster_name": "nucleus", "text": "Nucleus", "sync_local": {"start_word_offset": 8, "end_word_offset": 10}},
-                    ]
-                },
-                ensure_ascii=False,
-                indent=2,
-            )
-        )
-        prompts.append(prompt)
+        prompts.append(build_visual_action_prompt(ev))
 
     parsed_objs, _ = _generate_json_objects_from_prompts(
         model=model,
@@ -3969,9 +7139,7 @@ def plan_visual_actions_batch_transformers(
     out_items: List[Dict[str, Any]] = []
     for i, ev in enumerate(rows):
         obj = parsed_objs[i] if i < len(parsed_objs) else {}
-        acts = obj.get("actions") if isinstance(obj, dict) else None
-        if not isinstance(acts, list):
-            acts = []
+        acts = _extract_action_list_from_model_obj(obj)
 
         cleaned: List[Dict[str, Any]] = []
         for ai, a in enumerate(acts):
@@ -3999,6 +7167,63 @@ def plan_visual_actions_batch_transformers(
         out_items.append(
             item
         )
+
+    return {"items": out_items}
+
+
+def plan_visual_actions_batch_text_model(
+    *,
+    bundle: Dict[str, Any],
+    events: List[Dict[str, Any]],
+    temperature: float = 0.2,
+    max_new_tokens: int = 1400,
+) -> Dict[str, Any]:
+    rows = [e for e in (events or []) if isinstance(e, dict)]
+    if not rows:
+        return {"items": []}
+
+    prompts: List[str] = [build_visual_action_prompt(ev) for ev in rows]
+    parsed_objs, _ = _generate_json_objects_from_prompts_text_model(
+        model=bundle.get("model"),
+        tokenizer=bundle.get("tokenizer"),
+        device=bundle.get("device"),
+        prompts=prompts,
+        temperature=float(temperature),
+        max_new_tokens=int(max_new_tokens),
+        debug_label="plan_visual_text",
+        thinking_enabled=False,
+        batch_size=max(1, len(rows)),
+    )
+
+    out_items: List[Dict[str, Any]] = []
+    for i, ev in enumerate(rows):
+        obj = parsed_objs[i] if i < len(parsed_objs) else {}
+        acts = _extract_action_list_from_model_obj(obj)
+
+        cleaned: List[Dict[str, Any]] = []
+        for ai, a in enumerate(acts):
+            if not isinstance(a, dict):
+                continue
+            one = _clean_visual_action_for_event(ev, a, action_index=ai)
+            if one is None:
+                continue
+            cleaned.append(one)
+
+        if not cleaned:
+            cleaned = _default_visual_actions_for_event(ev)
+
+        name = _clip_str(ev.get("name", ""), 56)
+        image_name = _clip_str(ev.get("image_name", "") or name, 56)
+        item: Dict[str, Any] = {
+            "name": name,
+            "image_name": image_name,
+            "actions": cleaned,
+        }
+        _blank_non_priority_overlaps(item, priority="name", fields=["name", "image_name"])
+        notes = str(obj.get("notes", "") or "").strip()
+        if notes:
+            item["notes"] = notes
+        out_items.append(item)
 
     return {"items": out_items}
 

@@ -49,7 +49,14 @@ PLAN_PATH = (
 # MODELS
 # ------------------------------------------------------------
 MINILM_NAME = os.getenv("MINILM_NAME", "all-MiniLM-L6-v2")
-SIGLIP_NAME = os.getenv("SIGLIP_NAME", "google/siglip-base-patch16-384")
+SIGLIP_NAME = (
+    str(
+        os.getenv("SIGLIP_MODEL_ID")
+        or os.getenv("SIGLIP_NAME")
+        or "google/siglip-base-patch16-384"
+    ).strip()
+    or "google/siglip-base-patch16-384"
+)
 
 
 # ------------------------------------------------------------

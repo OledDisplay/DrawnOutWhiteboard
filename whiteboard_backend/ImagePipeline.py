@@ -33,8 +33,6 @@ try:
 except Exception:
     pass
 
-import ImageText
-import ImageTranslate
 import ImagePreprocessor
 import ImageSkeletonizer
 import ImageVectorizer
@@ -51,15 +49,10 @@ from typing import Any, Dict, List, Optional
 
 @dataclass
 class PipelineWorkers:
-    # Qwen used for selection + refinement only
-    qwen_model: Any
-    qwen_processor: Any
-    qwen_device: Any
-    qwen_lock: threading.Lock
-
     # SigLIP + MiniLM are used by PineconeFetch (configured externally but passed through here)
     siglip_bundle: Any = None
     minilm_bundle: Any = None
+    precomputed_clip_embeddings_by_processed_id: Dict[str, List[float]] = field(default_factory=dict)
 
 
 IN_DIR_ROOT = Path("ResearchImages\\UniqueImages")
@@ -94,17 +87,9 @@ def stage_report() -> None:
 
 
 # ============================================
-# HOT MODEL REGISTRY (Qwen + SigLIP + MiniLM)
+# HOT MODEL REGISTRY (SigLIP + MiniLM)
 # Keep models loaded once per process
 # ============================================
-@dataclass
-class _QwenBundle:
-    model: Any
-    processor: Any
-    device: Any
-    model_id: str
-    gpu_index: int
-
 @dataclass
 class _SiglipBundle:
     model: Any
@@ -121,11 +106,9 @@ class _MiniLMBundle:
     use_sentence_transformers: bool
 
 _HOT_INIT_LOCK = threading.Lock()
-_QWEN_LOCK = threading.Lock()
 _SIGLIP_LOCK = threading.Lock()
 _MINILM_LOCK = threading.Lock()
 
-_HOT_QWEN: Optional[_QwenBundle] = None
 _HOT_SIGLIP: Optional[_SiglipBundle] = None
 _HOT_MINILM: Optional[_MiniLMBundle] = None
 
@@ -165,8 +148,8 @@ def _torch_post_config(cpu_threads: int) -> None:
 
 def ensure_hot_models(
     *,
-    qwen_model_id: str = "Qwen/Qwen3-VL-2B-Instruct",
-    siglip_model_id: str = "google/siglip-so400m-patch14-384",
+    qwen_model_id: Optional[str] = None,
+    siglip_model_id: Optional[str] = None,
     minilm_model_id: str = "sentence-transformers/all-MiniLM-L6-v2",
     gpu_index: int = 0,
     cpu_threads: int = _PIPE_CPU_THREADS,
@@ -175,45 +158,16 @@ def ensure_hot_models(
     load_minilm: bool = True,
 ) -> None:
     """
-    Loads Qwen/SigLIP/MiniLM exactly once per PROCESS and keeps them resident.
+    Loads SigLIP/MiniLM exactly once per PROCESS and keeps them resident.
     If you run this script as a persistent service (--serve), all calls reuse the same hot models.
+    `qwen_model_id` is accepted only for backward compatibility and is ignored.
     """
-    global _HOT_QWEN, _HOT_SIGLIP, _HOT_MINILM
+    global _HOT_SIGLIP, _HOT_MINILM
 
+    siglip_model_id = shared_models.resolve_siglip_model_id(siglip_model_id)
     _torch_post_config(cpu_threads)
 
     with _HOT_INIT_LOCK:
-        # ---- QWEN ----
-        if _HOT_QWEN is None or _HOT_QWEN.model_id != qwen_model_id or _HOT_QWEN.gpu_index != gpu_index:
-            _log(f"Loading Qwen (one-time): {qwen_model_id} gpu_index={gpu_index}")
-            try:
-                import qwentest  # local module
-                model, processor, device = qwentest.preload_qwen_cpu_only(qwen_model_id)
-
-                # Move ONCE to CUDA if available and keep it there
-                try:
-                    model, device = qwentest.move_qwen_to_cuda_if_available(model, gpu_index=gpu_index)
-                except Exception as e:
-                    _log(f"[WARN] Qwen CUDA move failed; staying on CPU: {e}")
-
-                try:
-                    model.eval()
-                except Exception:
-                    pass
-
-                if warmup:
-                    try:
-                        qwentest.warmup_qwen_once(model, processor, device)
-                    except Exception as e:
-                        _log(f"[WARN] Qwen warmup failed: {e}")
-
-                _HOT_QWEN = _QwenBundle(model=model, processor=processor, device=device, model_id=qwen_model_id, gpu_index=gpu_index)
-                _log("Qwen is hot.")
-            except Exception as e:
-                _HOT_QWEN = None
-                _log(f"[ERR] Qwen load failed: {repr(e)}")
-                traceback.print_exc()
-
         # ---- SIGLIP ----
         if load_siglip and _HOT_SIGLIP is None:
             _log(f"Loading SigLIP (one-time): {siglip_model_id}")
@@ -417,9 +371,9 @@ def _build_pinecone_jobs_from_text_items(
         "meta": {...}
       }
 
-    Diagram-only label saving:
-      - If pid is in handle.refined_labels_by_processed_id => is_diagram=1 and meta["labels"]=[...]
-      - Otherwise is_diagram=0 and NO labels field is written.
+    Diagram tagging:
+      - base_contexts flagged as diagrams are marked with is_diagram=1
+      - if labels are present in handle.refined_labels_by_processed_id they are included in metadata
     """
     rows: List[Dict[str, Any]] = []
     for t in (text_items_all or []):
@@ -479,6 +433,12 @@ def _build_pinecone_jobs_from_text_items(
             pvec = prompt_vecs[i]
 
         cvec = clip_vecs_full[i]
+        try:
+            precomputed_clip = workers.precomputed_clip_embeddings_by_processed_id.get(pid)
+        except Exception:
+            precomputed_clip = None
+        if cvec is None and isinstance(precomputed_clip, list) and precomputed_clip:
+            cvec = list(precomputed_clip)
 
         ctx_vec = None
         final_score = None
@@ -492,6 +452,13 @@ def _build_pinecone_jobs_from_text_items(
         except Exception:
             ctx_vec = None
 
+        # If live MiniLM prompt embedding is unavailable, reuse metadata prompt embedding when present.
+        if pvec is None and isinstance(meta_entry, dict):
+            try:
+                pvec = _pick_prompt_embedding(meta_entry)
+            except Exception:
+                pvec = None
+
         # If live SigLIP image embedding is unavailable, reuse metadata clip embedding when present.
         if cvec is None and isinstance(meta_entry, dict):
             try:
@@ -499,11 +466,22 @@ def _build_pinecone_jobs_from_text_items(
             except Exception:
                 cvec = None
 
+        # Generated/comfy images do not have smart_hits context, so use prompt space as context.
+        if ctx_vec is None and isinstance(meta_entry, dict) and _is_generated_or_comfy_meta(meta_entry):
+            if isinstance(pvec, list):
+                ctx_vec = pvec
+            else:
+                try:
+                    ctx_vec = _pick_prompt_embedding(meta_entry)
+                except Exception:
+                    ctx_vec = None
+
         # -------------------------
         # Diagram label + tag
         # -------------------------
         refined = handle.refined_labels_by_processed_id.get(pid, None)
-        is_diagram = 1 if isinstance(refined, list) and len(refined) > 0 else 0
+        diagram_mode = int(handle.diagram_mode_by_base_context.get(bc, 0) or 0)
+        is_diagram = 1 if diagram_mode > 0 or (isinstance(refined, list) and len(refined) > 0) else 0
 
         meta: Dict[str, Any] = {
             "final_score": final_score,
@@ -579,57 +557,16 @@ def _pinecone_upsert_after_colours(
 
 
 
-def get_hot_qwen() -> Optional[_QwenBundle]:
-    return _HOT_QWEN
+def get_hot_qwen() -> None:
+    return None
 
 def qwen_lock() -> threading.Lock:
-    return _QWEN_LOCK
+    return _HOT_INIT_LOCK
 
 
 def unload_hot_qwen() -> None:
-    """
-    Best-effort release for ImagePipeline's own hot Qwen registry.
-    This avoids accidental double residency when another module also owns Qwen.
-    """
-    global _HOT_QWEN
-    with _HOT_INIT_LOCK:
-        if _HOT_QWEN is None:
-            return
-        _log("Unloading ImagePipeline hot Qwen...")
-        bundle = _HOT_QWEN
-        _HOT_QWEN = None
-        try:
-            if hasattr(bundle.model, "cpu"):
-                bundle.model.cpu()
-        except Exception:
-            pass
-        try:
-            bundle.model = None
-        except Exception:
-            pass
-        try:
-            bundle.processor = None
-        except Exception:
-            pass
-        try:
-            import gc
-            gc.collect()
-        except Exception:
-            pass
-        try:
-            import torch
-            if torch.cuda.is_available():
-                try:
-                    torch.cuda.synchronize()
-                except Exception:
-                    pass
-                torch.cuda.empty_cache()
-                try:
-                    torch.cuda.ipc_collect()
-                except Exception:
-                    pass
-        except Exception:
-            pass
+    # Backward-compatible no-op: ImagePipeline no longer owns Qwen residency.
+    return None
 
 
 # Optional: expose hot SigLIP/MiniLM to other scripts in the SAME process
@@ -712,10 +649,149 @@ def load_unique_images_once(unique_paths: List[str]) -> List[Dict[str, Any]]:
     return items
 
 
+def _processed_dir_candidates() -> List[Path]:
+    return [
+        BASE_DIR / "ProccessedImages",
+        BASE_DIR / "ProcessedImages",
+        BASE_DIR / "PipelineOutputs" / "ProccessedImages",
+        BASE_DIR / "PipelineOutputs" / "ProcessedImages",
+        Path("ProccessedImages"),
+        Path("ProcessedImages"),
+        Path("PipelineOutputs") / "ProccessedImages",
+        Path("PipelineOutputs") / "ProcessedImages",
+    ]
+
+
+def _resolve_processed_png_path(pid: str) -> Optional[Path]:
+    for root in _processed_dir_candidates():
+        p = root / f"{pid}.png"
+        try:
+            if p.is_file():
+                return p
+        except Exception:
+            continue
+    return None
+
+
+def _resolve_processed_json_path(pid: str) -> Optional[Path]:
+    for root in _processed_dir_candidates():
+        p = root / f"{pid}.json"
+        try:
+            if p.is_file():
+                return p
+        except Exception:
+            continue
+    return None
+
+
+def load_processed_items_once(
+    *,
+    accepted_processed_ids_by_base_context: Optional[Dict[str, List[str]]] = None,
+    allowed_base_contexts: Optional[List[str]] = None,
+) -> Tuple[List[Dict[str, Any]], Dict[str, str], Dict[str, str]]:
+    items: List[Dict[str, Any]] = []
+    unique_to_processed: Dict[str, str] = {}
+    processed_to_unique: Dict[str, str] = {}
+
+    allowed_set = {
+        str(x or "").strip()
+        for x in (allowed_base_contexts or [])
+        if str(x or "").strip()
+    }
+
+    candidate_pairs: List[Tuple[str, str]] = []
+    seen_pairs = set()
+    if isinstance(accepted_processed_ids_by_base_context, dict) and accepted_processed_ids_by_base_context:
+        for bc, ids in accepted_processed_ids_by_base_context.items():
+            base_context = str(bc or "").strip()
+            if allowed_set and base_context and base_context not in allowed_set:
+                continue
+            if not isinstance(ids, list):
+                continue
+            for pid_raw in ids:
+                pid = str(pid_raw or "").strip()
+                if not pid:
+                    continue
+                key = (base_context, pid)
+                if key in seen_pairs:
+                    continue
+                seen_pairs.add(key)
+                candidate_pairs.append((base_context, pid))
+
+    if not candidate_pairs:
+        seen_pid = set()
+        for root in _processed_dir_candidates():
+            try:
+                if not root.is_dir():
+                    continue
+            except Exception:
+                continue
+            for json_path in sorted(root.glob("processed_*.json")):
+                pid = json_path.stem
+                if pid in seen_pid:
+                    continue
+                try:
+                    payload = json.loads(json_path.read_text(encoding="utf-8"))
+                except Exception:
+                    continue
+                base_context = str((payload or {}).get("base_context", "") or "").strip()
+                if allowed_set and base_context not in allowed_set:
+                    continue
+                seen_pid.add(pid)
+                candidate_pairs.append((base_context, pid))
+
+    for base_context_hint, pid in candidate_pairs:
+        png_path = _resolve_processed_png_path(pid)
+        json_path = _resolve_processed_json_path(pid)
+        if png_path is None or json_path is None:
+            continue
+
+        img = cv2.imread(str(png_path), cv2.IMREAD_UNCHANGED)
+        if img is None:
+            print(f"[skip] cannot read processed image {png_path}")
+            continue
+        if img.ndim == 2:
+            img = cv2.cvtColor(img, cv2.COLOR_GRAY2BGR)
+        elif img.ndim == 3 and img.shape[2] == 4:
+            img = cv2.cvtColor(img, cv2.COLOR_BGRA2BGR)
+
+        try:
+            payload = json.loads(json_path.read_text(encoding="utf-8")) or {}
+        except Exception:
+            payload = {}
+
+        base_context = str(payload.get("base_context", "") or base_context_hint or "").strip()
+        if allowed_set and base_context not in allowed_set:
+            continue
+
+        try:
+            idx = int(str(pid).split("_")[-1])
+        except Exception:
+            idx = len(items)
+
+        source_path = str(payload.get("source_path", "") or "").strip()
+        if source_path:
+            unique_to_processed[source_path] = pid
+            processed_to_unique[pid] = source_path
+
+        items.append(
+            {
+                "idx": int(idx),
+                "source_path": source_path,
+                "base_context": base_context,
+                "masked_bgr": img,
+                "payload_json": payload if isinstance(payload, dict) else {},
+                "processed_id": pid,
+            }
+        )
+
+    items.sort(key=lambda x: int(x.get("idx", 0) or 0))
+    return items, unique_to_processed, processed_to_unique
+
+
 def extract_candidate_words_from_text_payload(payload_json: dict) -> List[str]:
     """
-    qwentest previously got its candidates from processed_<idx>.json.
-    Now we build them directly from the in-memory OCR payload.
+    Extract unique OCR candidate words from a processed image payload.
     """
     words = payload_json.get("words") or []
     out: List[str] = []
@@ -819,6 +895,29 @@ def _pick_clip_embedding(meta_entry: Dict[str, Any]) -> Optional[List[float]]:
     return None
 
 
+def _pick_prompt_embedding(meta_entry: Dict[str, Any]) -> Optional[List[float]]:
+    vec = meta_entry.get("prompt_embedding")
+    if isinstance(vec, list) and vec and all(isinstance(x, (int, float)) for x in vec):
+        return vec
+    return None
+
+
+def _meta_source_text(meta_entry: Optional[Dict[str, Any]]) -> str:
+    if not isinstance(meta_entry, dict):
+        return ""
+    bits: List[str] = []
+    for key in ("source", "source_name", "source_kind"):
+        value = meta_entry.get(key)
+        if isinstance(value, str) and value.strip():
+            bits.append(value.strip().lower())
+    return " ".join(bits)
+
+
+def _is_generated_or_comfy_meta(meta_entry: Optional[Dict[str, Any]]) -> bool:
+    txt = _meta_source_text(meta_entry)
+    return ("comfy" in txt) or ("generated" in txt)
+
+
 def _resolve_meta_for_source(meta_map: Dict[str, Dict[str, Any]], source_path: str) -> Optional[Dict[str, Any]]:
     sp = str(source_path)
 
@@ -875,6 +974,7 @@ class PipelineHandle:
     refined_labels_dir: Path = field(default_factory=lambda: Path("PipelineOutputs") / "_refined_labels")
     refined_labels_by_processed_id: Dict[str, List[str]] = field(default_factory=dict)
 
+    diagram_mode_by_base_context: Dict[str, int] = field(default_factory=dict)
     diagram_required_objects_by_base_context: Dict[str, List[str]] = field(default_factory=dict)
 
 
@@ -923,6 +1023,7 @@ def _pipeline_worker(
     diagram_base_contexts: Optional[List[str]] = None,
     diagram_mode_by_base_context: Optional[Dict[str, int]] = None,
     diagram_required_objects_by_base_context: Optional[Dict[str, List[str]]] = None,
+    accepted_processed_ids_by_base_context: Optional[Dict[str, List[str]]] = None,
 ) -> None:
 
     out_dir = handle.out_dir
@@ -961,6 +1062,11 @@ def _pipeline_worker(
                 req_map[kk] = vv
 
     try:
+        handle.diagram_mode_by_base_context = dict(diagram_mode_map)
+    except Exception:
+        pass
+
+    try:
         handle.diagram_required_objects_by_base_context = dict(req_map)
     except Exception:
         pass
@@ -971,114 +1077,32 @@ def _pipeline_worker(
     refined_dir.mkdir(parents=True, exist_ok=True)
 
     try:
-        # Ensure models are hot inside worker too (safe no-op if already loaded)
-        # (model loading is owned by the timeline orchestrator now)
+        with stage("load_image_metadata_context_map"):
+            meta_ctx_map = load_image_metadata_context_map()
 
-        with stage("discover_unique_images"):
-            unique_paths = discover_unique_images(IN_DIR_ROOT)
+        print("[2/10] Load accepted processed images...")
+        with stage("load_processed_items_once"):
+            text_items, unique_to_processed, processed_to_unique = load_processed_items_once(
+                accepted_processed_ids_by_base_context=accepted_processed_ids_by_base_context,
+                allowed_base_contexts=allowed_base_contexts,
+            )
 
-        handle.unique_paths = [str(p) for p in unique_paths]
+        if not text_items:
+            handle.errors["pipeline"] = "no_processed_items_loaded"
+            return
+
+        handle.unique_paths = [
+            str(x.get("source_path", "") or "")
+            for x in text_items
+            if str(x.get("source_path", "") or "").strip()
+        ]
+        handle.unique_to_processed = dict(unique_to_processed)
+        handle.processed_to_unique = dict(processed_to_unique)
         try:
             (out_dir / "unique_paths.json").write_text(
                 json.dumps(handle.unique_paths, indent=2, ensure_ascii=False),
                 encoding="utf-8"
             )
-        except Exception:
-            pass
-
-        print("[2/10] Load ImageText base_context map + metadata map...")
-        with stage("ImageText.load_base_context_map"):
-            base_context_map = ImageText.load_base_context_map()
-
-        with stage("load_image_metadata_context_map"):
-            meta_ctx_map = load_image_metadata_context_map()
-
-        allowed_set: Optional[set[str]] = None
-        if allowed_base_contexts:
-            allowed_set = {
-                str(x or "").strip()
-                for x in allowed_base_contexts
-                if str(x or "").strip()
-            }
-
-        path_base_context: Dict[str, str] = {}
-        with stage("assign_base_context_for_paths"):
-            for sp in unique_paths:
-                sp_norm = _norm_path(sp)
-                bc = base_context_map.get(sp_norm, "")
-
-                if not bc:
-                    meta_entry = _resolve_meta_for_source(meta_ctx_map, sp)
-                    if meta_entry and isinstance(meta_entry.get("base_context"), str):
-                        bc = meta_entry["base_context"].strip()
-
-                path_base_context[sp] = (bc or "").strip()
-
-        try:
-            dist = Counter(str(bc or "").strip() for bc in path_base_context.values())
-            print("[ctx] base_context distribution:", dict(dist))
-        except Exception:
-            pass
-
-        if allowed_set is not None:
-            before = len(unique_paths)
-            unique_paths = [sp for sp in unique_paths if str(path_base_context.get(sp, "") or "").strip() in allowed_set]
-            print(f"[filter] base_context allowed={len(allowed_set)} images {before} -> {len(unique_paths)}")
-            if not unique_paths:
-                handle.errors["pipeline"] = "no_images_after_base_context_filter"
-                return
-
-        print("[3/10] Load UniqueImages ONCE -> numpy...")
-        with stage("load_unique_images_once"):
-            img_items = load_unique_images_once(unique_paths)
-
-        if not img_items:
-            handle.errors["pipeline"] = "no_images_loaded"
-            return
-
-        for it in img_items:
-            it["base_context"] = path_base_context.get(it["source_path"], "")
-
-        diagram_items: List[Dict[str, Any]] = []
-        for it in img_items:
-            bc = str(it.get("base_context", "") or "").strip()
-            mode = int(diagram_mode_map.get(bc, 0) or 0)
-            if mode > 0:
-                diagram_items.append(it)
-            else:
-                # Strict routing: diagram=0 bypasses ImageText/selection/labels/clusters/descriptors.
-                continue
-
-        print(
-            "[4/10] Process image ids by mode "
-            f"(diagram_items={len(diagram_items)} visual_items=0)..."
-        )
-
-        text_items: List[Dict[str, Any]] = []
-        unique_to_processed: Dict[str, str] = {}
-
-        if diagram_items:
-            with stage("ImageText.process_images_in_memory.diagrams"):
-                d_text_items, d_map = ImageText.process_images_in_memory(
-                    image_items=diagram_items,
-                    start_index=0,
-                    save_outputs=True,
-                    return_path_map=True,
-                )
-            text_items.extend(d_text_items or [])
-            unique_to_processed.update(d_map or {})
-
-        if not text_items:
-            handle.errors["pipeline"] = "image_translation_no_outputs"
-            return
-
-        text_items.sort(key=lambda x: int(x.get("idx", 0) or 0))
-        
-        text_items_all_for_pinecone = list(text_items)
-
-        handle.unique_to_processed = dict(unique_to_processed)
-        handle.processed_to_unique = {v: k for k, v in handle.unique_to_processed.items()}
-        try:
             (out_dir / "unique_to_processed.json").write_text(
                 json.dumps(handle.unique_to_processed, indent=2, ensure_ascii=False),
                 encoding="utf-8"
@@ -1090,188 +1114,29 @@ def _pipeline_worker(
         except Exception:
             pass
 
-        # =========================
-        # Qwen selection step (EXTERNAL worker)
-        # =========================
-        print("[5/10] selection routing (diagram-only qwentest)...")
-
-        qwen_model = workers.qwen_model
-        qwen_processor = workers.qwen_processor
-        qwen_device = workers.qwen_device
-        qwentest_mod = None
-
+        print("[3/10] Accept processed images without internal selection...")
         selected_ids_all: List[str] = []
         selection_payload_by_ctx: Dict[str, Any] = {}
         selected_ids_by_ctx: Dict[str, List[str]] = {}
-
         groups: Dict[str, List[Dict[str, Any]]] = {}
         for t in text_items:
             bc = str(t.get("base_context", "") or "").strip()
             groups.setdefault(bc, []).append(t)
 
-        group_keys = sorted(groups.keys(), key=lambda s: (s == "", s.lower()))
-
-        with stage("Qwen.selection.total"):
-            for bc in group_keys:
-                items = groups.get(bc) or []
-                if not items:
-                    continue
-
-                mode = int(diagram_mode_map.get(bc, 0) or 0)
-                if mode <= 0:
-                    # Defensive guard; mode<=0 items are filtered out earlier.
-                    continue
-
-                # Diagram with 0/1 candidate does not need qwentest cutdown.
-                if len(items) <= 1:
-                    picked_single: List[str] = []
-                    for t in items:
-                        pid = str(t.get("processed_id", "") or "").strip()
-                        if pid and pid not in picked_single:
-                            picked_single.append(pid)
-                    selected_ids_by_ctx[bc] = picked_single
-                    selection_payload_by_ctx[bc] = {
-                        "selection_mode": "passthrough_single_diagram_candidate",
-                        "count_in": len(items),
-                        "count_out": len(picked_single),
-                    }
-                    for pid in picked_single:
-                        if pid and pid not in selected_ids_all:
-                            selected_ids_all.append(pid)
-                    continue
-
-                processed_items_for_qwen: List[Dict[str, Any]] = []
-                comfy_passthrough_ids: List[str] = []
-                for t in items:
-                    pid = str(t.get("processed_id", "") or "").strip()
-                    if not pid:
-                        continue
-                    try:
-                        src = str(t.get("source_path", "") or "")
-                        if not src:
-                            src = str(handle.processed_to_unique.get(pid, "") or "")
-
-                        final_score = None
-                        meta_entry = None
-                        try:
-                            if src:
-                                meta_entry = _resolve_meta_for_source(meta_ctx_map, src)
-                                if meta_entry:
-                                    final_score = meta_entry.get("final_score", None)
-                        except Exception:
-                            final_score = None
-
-                        is_comfy_source = False
-                        if isinstance(meta_entry, dict):
-                            try:
-                                src_bits = []
-                                for kk in ("source", "source_name", "source_kind"):
-                                    vv = meta_entry.get(kk)
-                                    if isinstance(vv, str) and vv.strip():
-                                        src_bits.append(vv.strip().lower())
-                                if src_bits and "comfy" in " ".join(src_bits):
-                                    is_comfy_source = True
-                            except Exception:
-                                is_comfy_source = False
-
-                        if is_comfy_source:
-                            if pid not in comfy_passthrough_ids:
-                                comfy_passthrough_ids.append(pid)
-                            continue
-
-                        mbgr = t.get("masked_bgr")
-                        if mbgr is None:
-                            continue
-                        pil = _bgr_to_pil_fast(mbgr, longest_side=600)
-
-                        processed_items_for_qwen.append({
-                            "processed_id": pid,
-                            "image_pil": pil,
-                            "base_context": bc,
-                            "final_score": final_score,
-                        })
-
-                    except Exception:
-                        continue
-
-                if len(processed_items_for_qwen) <= 1:
-                    picked_passthrough: List[str] = list(comfy_passthrough_ids)
-                    for it in processed_items_for_qwen:
-                        pid = str(it.get("processed_id", "") or "").strip()
-                        if pid and pid not in picked_passthrough:
-                            picked_passthrough.append(pid)
-                    if picked_passthrough:
-                        selected_ids_by_ctx[bc] = picked_passthrough
-                        selection_payload_by_ctx[bc] = {
-                            "selection_mode": "passthrough_diagram_comfy_or_single_candidate",
-                            "count_in": len(items),
-                            "count_out": len(picked_passthrough),
-                        }
-                        for pid in picked_passthrough:
-                            if pid and pid not in selected_ids_all:
-                                selected_ids_all.append(pid)
-                    continue
-
-                picked: List[str] = []
-                payload: Dict[str, Any] = {}
-
-                try:
-                    if qwentest_mod is None:
-                        import qwentest as qwentest_mod  # type: ignore
-
-                    with workers.qwen_lock:
-                        payload = qwentest_mod.pick_two_processed_candidates_transformers(
-                            model=qwen_model,
-                            processor=qwen_processor,
-                            device=qwen_device,
-                            processed_items=processed_items_for_qwen,
-                            processed_to_unique=handle.processed_to_unique,
-                            base_context=bc,
-                            batch_size=8,
-                            longest_side=600,
-                        )
-
-                    cand = payload.get("candidates") or []
-                    if isinstance(cand, list):
-                        for c in cand:
-                            if isinstance(c, dict):
-                                pid = str(c.get("processed_id", "") or "").strip()
-                                if pid:
-                                    picked.append(pid)
-
-                except BaseException as e:
-                    handle.errors[f"qwen_select[{bc}]"] = f"{type(e).__name__}: {e}"
-                    print("[bg][ERR] Qwen selection crashed for base_context:", bc)
-                    traceback.print_exc()
-
-                if len(picked) < 1:
-                    tmp = []
-                    for it in processed_items_for_qwen:
-                        pid = str(it.get("processed_id", "") or "").strip()
-                        if pid:
-                            tmp.append(pid)
-                        if len(tmp) >= 2:
-                            break
-                    picked = tmp[:1]
-
-                if comfy_passthrough_ids:
-                    merged: List[str] = []
-                    for pid in list(comfy_passthrough_ids) + list(picked):
-                        if pid and pid not in merged:
-                            merged.append(pid)
-                    picked = merged
-                    try:
-                        payload["selection_mode"] = "diagram_qwen_plus_comfy_passthrough"
-                        payload["comfy_passthrough_ids"] = list(comfy_passthrough_ids)
-                    except Exception:
-                        pass
-
-                selection_payload_by_ctx[bc] = payload
-                selected_ids_by_ctx[bc] = list(picked)
-
-                for pid in picked:
-                    if pid and pid not in selected_ids_all:
-                        selected_ids_all.append(pid)
+        for bc in sorted(groups.keys(), key=lambda s: (s == "", s.lower())):
+            picked_passthrough: List[str] = []
+            for t in groups.get(bc) or []:
+                pid = str(t.get("processed_id", "") or "").strip()
+                if pid and pid not in picked_passthrough:
+                    picked_passthrough.append(pid)
+            selected_ids_by_ctx[bc] = picked_passthrough
+            selection_payload_by_ctx[bc] = {
+                "selection_mode": "accepted_processed_ids_passthrough",
+                "count_out": len(picked_passthrough),
+            }
+            for pid in picked_passthrough:
+                if pid and pid not in selected_ids_all:
+                    selected_ids_all.append(pid)
 
         handle.selected_processed_ids = list(selected_ids_all)
         handle.selected_ids_by_base_context = dict(selected_ids_by_ctx)
@@ -1284,7 +1149,7 @@ def _pipeline_worker(
             pass
 
         try:
-            (out_dir / "qwen_selection.json").write_text(
+            (out_dir / "selection.json").write_text(
                 json.dumps(
                     {
                         "selected_processed_ids": handle.selected_processed_ids,
@@ -1299,119 +1164,11 @@ def _pipeline_worker(
         except Exception:
             pass
 
-        refined_by_pid: Dict[str, List[str]] = {}
+        handle.refined_labels_by_processed_id = {}
 
-        with stage("Qwen.refine_labels.after_selection"):
-            for bc, picked in selected_ids_by_ctx.items():
-                if bc not in diagram_set:
-                    continue
-
-                for pid in picked[:1]:  # keep consistent with "pick 1"
-                    pid = str(pid or "").strip()
-                    if not pid:
-                        continue
-
-                    # find its text_item to get payload_json words
-                    t_match = None
-                    for t in text_items:
-                        if str(t.get("processed_id", "") or "").strip() == pid:
-                            t_match = t
-                            break
-                    if not t_match:
-                        continue
-
-                    raw_candidates_imagetext = extract_candidate_words_from_text_payload(t_match.get("payload_json") or {})
-                    raw_candidates_imagetext = raw_candidates_imagetext[:120]
-
-                    required_objs = req_map.get(bc) or []
-                    if not isinstance(required_objs, list):
-                        required_objs = []
-                    required_objs = [str(x).strip() for x in required_objs if str(x).strip()]
-
-                    merged: List[str] = []
-                    seen = set()
-
-                    def _push(s: str) -> None:
-                        ss = str(s or "").strip()
-                        if not ss:
-                            return
-                        kk = ss.lower()
-                        if kk in seen:
-                            return
-                        seen.add(kk)
-                        merged.append(ss)
-
-                    for s in required_objs:
-                        _push(s)
-                    for s in raw_candidates_imagetext:
-                        _push(s)
-
-                    raw_candidates = merged[:80]
-
-                    try:
-                        if qwentest_mod is None:
-                            import qwentest as qwentest_mod  # type: ignore
-                        with workers.qwen_lock:
-                            refined = qwentest_mod.refine_candidate_labels_with_qwen(
-                                model=qwen_model,
-                                processor=qwen_processor,
-                                device=qwen_device,
-                                base_context=bc,
-                                raw_candidates=raw_candidates,
-                            )
-                    except Exception as e:
-                        handle.errors[f"qwen_refine[{pid}]"] = f"{type(e).__name__}: {e}"
-                        refined = raw_candidates[:40]
-
-                    # force clean list[str]
-                    refined_list: List[str] = []
-                    if isinstance(refined, list):
-                        for s in refined:
-                            ss = str(s or "").strip()
-                            if ss:
-                                refined_list.append(ss)
-
-                    refined_by_pid[pid] = refined_list
-
-                    # store both keys:
-                    # - "objects": list[str] (semantic name for downstream qwen actions)
-                    # - "refined_labels": list[str] (back-compat / human clarity)
-                    try:
-                        (refined_dir / f"{pid}.json").write_text(
-                            json.dumps(
-                                {
-                                    "processed_id": pid,
-                                    "base_context": bc,
-                                    "diagram_required_objects": required_objs,
-                                    "raw_candidates_imagetext": raw_candidates_imagetext[:80],
-                                    "raw_candidates_merged": raw_candidates,
-                                    "objects": refined_list,
-                                    "refined_labels": refined_list,
-                                },
-                                ensure_ascii=False,
-                                indent=2,
-                            ),
-                            encoding="utf-8",
-                        )
-                    except Exception:
-                        pass
-
-        handle.refined_labels_by_processed_id = dict(refined_by_pid)
-
-        # Signal: selection + refine is done (timeline orchestrator can proceed)
+        # Signal: accepted processed ids are ready. Diagram components come from the external C2 pipeline.
         handle.selection_done.set()
         handle.qwen_done.set()
-
-        try:
-            workers.qwen_model = None
-            workers.qwen_processor = None
-            workers.qwen_device = None
-        except Exception:
-            pass
-        # Drop local refs too so the worker thread does not keep Qwen alive indirectly.
-        qwen_model = None
-        qwen_processor = None
-        qwen_device = None
 
         try:
             import gc
@@ -1450,16 +1207,22 @@ def _pipeline_worker(
         except Exception:
             pass
 
-        # Keep Pinecone payload aligned with qwen champions used downstream.
+        # Keep Pinecone payload aligned with selected outputs used downstream.
         text_items_all_for_pinecone = [
             t for t in text_items
             if str(t.get("processed_id", "") or "").strip() in selected_keep
         ]
+        selected_text_items = list(text_items_all_for_pinecone)
 
-        # Cut down to selected images for all contexts
-        text_items = [t for t in text_items if str(t.get("processed_id", "") or "").strip() in selected_keep]
-        if len(text_items) < 1:
-            # Upsert what we have (selection/refine already produced processed outputs)
+        # Diagram items still control later labeling/clustering, but colour/vector JSONs
+        # should exist for every selected image.
+        diagram_text_items = [
+            t for t in text_items_all_for_pinecone
+            if int(diagram_mode_map.get(str(t.get("base_context", "") or "").strip(), 0) or 0) > 0
+        ]
+
+        if len(text_items_all_for_pinecone) < 1:
+            # Upsert what we have from the externally accepted processed outputs.
             _pinecone_upsert_after_colours(
                 text_items_all=text_items_all_for_pinecone,
                 meta_ctx_map=meta_ctx_map,
@@ -1476,7 +1239,7 @@ def _pipeline_worker(
         print("[6/10] ImagePreprocessor (in-memory)...")
         with stage("ImagePreprocessor.process_images_in_memory"):
             preproc_by_idx = ImagePreprocessor.process_images_in_memory(
-                text_items=text_items,
+                text_items=selected_text_items,
                 save_outputs=debug_save,
                 parallel=parallel_cpu,
             )
@@ -1498,7 +1261,7 @@ def _pipeline_worker(
             )
 
         # ---------------------------------------------------------
-        # REMOVED: final cluster labeling stage call (qwentest.label_clusters_transformers)
+        # Cluster labeling is no longer run inside ImagePipeline.
         # Pipeline returns after colours are done.
         # ---------------------------------------------------------
 
@@ -1534,105 +1297,94 @@ def _pipeline_worker(
         )
         handle.pinecone_done.set()
 
-        if not visual_diagram_keep and not schematic_diagram_keep:
+        diagram_keep: set[str] = set(visual_diagram_keep) | set(schematic_diagram_keep)
+
+        if not diagram_keep:
             handle.colours_done.set()
             print("[done] no diagram prompts -> finished after colours.")
             return
 
-        # Schematic diagrams: build line descriptions from StrokeVectors (no clusters).
-        if schematic_diagram_keep:
-            schematic_indices: set[int] = set()
-            for t in text_items:
-                pid = str(t.get("processed_id", "") or "").strip()
-                if pid not in schematic_diagram_keep:
-                    continue
-                try:
-                    schematic_indices.add(int(t.get("idx")))
-                except Exception:
-                    continue
-
-            vec_json_paths: List[Path] = []
-            for idx in sorted(schematic_indices):
-                p = BASE_DIR / "StrokeVectors" / f"processed_{idx}.json"
-                if p.is_file():
-                    vec_json_paths.append(p)
-
-            if vec_json_paths:
-                print(f"[10/10] LineDescriptors (schematic) for {len(vec_json_paths)} files...")
-                with stage("LineDescriptors.describe_vectorizer_jsons_batch"):
-                    desc_summary = LineDescriptors.describe_vectorizer_jsons_batch(
-                        vec_json_paths,
-                        output_dir=BASE_DIR / "StrokeDescriptions",
-                        max_workers=min(8, max(1, len(vec_json_paths))),
-                    )
-                try:
-                    (out_dir / "line_descriptors_summary.json").write_text(
-                        json.dumps(desc_summary, ensure_ascii=False, indent=2),
-                        encoding="utf-8",
-                    )
-                except Exception:
-                    pass
-                if desc_summary.get("errors"):
-                    handle.errors["line_descriptors"] = json.dumps(desc_summary.get("errors", [])[:5], ensure_ascii=False)
-            else:
-                handle.errors["line_descriptors"] = "no_strokevectors_for_schematic_indices"
-
-        # Visual diagrams: keep existing cluster generation path.
-        if not visual_diagram_keep:
-            handle.colours_done.set()
-            print("[done] no visual diagram prompts -> finished after colours.")
-            return
-
-        visual_diagram_text_items = [
-            t for t in text_items
-            if str(t.get("processed_id", "") or "").strip() in visual_diagram_keep
-        ]
-        visual_diagram_indices: set[int] = set()
-        for t in text_items:
+        # Every accepted diagram now produces stroke-level descriptors so the
+        # downstream matcher can reason from the same substrate regardless of
+        # the original diagram mode.
+        diagram_indices: set[int] = set()
+        for t in selected_text_items:
             pid = str(t.get("processed_id", "") or "").strip()
-            if pid not in visual_diagram_keep:
+            if pid not in diagram_keep:
                 continue
             try:
-                visual_diagram_indices.add(int(t.get("idx")))
+                diagram_indices.add(int(t.get("idx")))
             except Exception:
                 continue
 
-        visual_preproc_by_idx = {idx: preproc_by_idx[idx] for idx in visual_diagram_indices if idx in preproc_by_idx}
-        visual_vectors_by_idx = {idx: vectors_by_idx[idx] for idx in visual_diagram_indices if idx in vectors_by_idx}
+        vec_json_paths: List[Path] = []
+        for idx in sorted(diagram_indices):
+            p = BASE_DIR / "StrokeVectors" / f"processed_{idx}.json"
+            if p.is_file():
+                vec_json_paths.append(p)
+
+        if vec_json_paths:
+            print(f"[10/10] LineDescriptors (all diagrams) for {len(vec_json_paths)} files...")
+            with stage("LineDescriptors.describe_vectorizer_jsons_batch"):
+                desc_summary = LineDescriptors.describe_vectorizer_jsons_batch(
+                    vec_json_paths,
+                    output_dir=BASE_DIR / "StrokeDescriptions",
+                    max_workers=min(8, max(1, len(vec_json_paths))),
+                )
+            try:
+                (out_dir / "line_descriptors_summary.json").write_text(
+                    json.dumps(desc_summary, ensure_ascii=False, indent=2),
+                    encoding="utf-8",
+                )
+            except Exception:
+                pass
+            if desc_summary.get("errors"):
+                handle.errors["line_descriptors"] = json.dumps(desc_summary.get("errors", [])[:5], ensure_ascii=False)
+        else:
+            handle.errors["line_descriptors"] = "no_strokevectors_for_diagram_indices"
+
+        # Every accepted diagram also produces clusters so the final matcher can
+        # choose between ready-made groups and stroke-level regrouping.
+        diagram_text_items = [
+            t for t in selected_text_items
+            if str(t.get("processed_id", "") or "").strip() in diagram_keep
+        ]
+        diagram_preproc_by_idx = {idx: preproc_by_idx[idx] for idx in diagram_indices if idx in preproc_by_idx}
+        diagram_vectors_by_idx = {idx: vectors_by_idx[idx] for idx in diagram_indices if idx in vectors_by_idx}
 
         try:
             print(
-                "[dbg][clusters] visual_diagram_text_items=%d visual_indices=%d preproc_hits=%d vector_hits=%d"
+                "[dbg][clusters] diagram_text_items=%d diagram_indices=%d preproc_hits=%d vector_hits=%d"
                 % (
-                    len(visual_diagram_text_items),
-                    len(visual_diagram_indices),
-                    len(visual_preproc_by_idx),
-                    len(visual_vectors_by_idx),
+                    len(diagram_text_items),
+                    len(diagram_indices),
+                    len(diagram_preproc_by_idx),
+                    len(diagram_vectors_by_idx),
                 )
             )
         except Exception:
             pass
-        if not visual_diagram_text_items or not visual_preproc_by_idx or not visual_vectors_by_idx:
+        if not diagram_text_items or not diagram_preproc_by_idx or not diagram_vectors_by_idx:
             try:
                 pre_keys = set(int(k) for k in preproc_by_idx.keys())
                 vec_keys = set(int(k) for k in vectors_by_idx.keys())
-                miss_pre = sorted(visual_diagram_indices - pre_keys)
-                miss_vec = sorted(visual_diagram_indices - vec_keys)
+                miss_pre = sorted(diagram_indices - pre_keys)
+                miss_vec = sorted(diagram_indices - vec_keys)
                 print(
-                    "[dbg][clusters] empty_visual_input_details missing_preproc=%s missing_vectors=%s"
+                    "[dbg][clusters] empty_diagram_input_details missing_preproc=%s missing_vectors=%s"
                     % (miss_pre[:10], miss_vec[:10])
                 )
             except Exception:
                 pass
             handle.colours_done.set()
-            print("[done] no visual diagram items available for clusters -> finished after colours.")
+            print("[done] no diagram items available for clusters -> finished after colours.")
             return
 
-        print("[11/11] ImageClusters (visual diagrams, in-memory)...")
+        print("[11/11] ImageClusters (all diagrams, in-memory)...")
         with stage("ImageClusters.cluster_in_memory"):
             ImageClusters.cluster_in_memory(
-                preproc_by_idx=visual_preproc_by_idx,
-                vectors_by_idx=visual_vectors_by_idx,
+                preproc_by_idx=diagram_preproc_by_idx,
+                vectors_by_idx=diagram_vectors_by_idx,
                 save_outputs=True,
             )
 
@@ -1656,7 +1408,7 @@ def _pipeline_worker(
 def start_pipeline_background(
     *,
     workers: PipelineWorkers,
-    model_id: str = "Qwen/Qwen3-VL-2B-Instruct",
+    model_id: str = "",
     debug_save: bool = False,
     parallel_cpu: bool = True,
     gpu_index: int = 0,
@@ -1664,6 +1416,7 @@ def start_pipeline_background(
     diagram_base_contexts: Optional[List[str]] = None,
     diagram_mode_by_base_context: Optional[Dict[str, int]] = None,
     diagram_required_objects_by_base_context: Optional[Dict[str, List[str]]] = None,
+    accepted_processed_ids_by_base_context: Optional[Dict[str, List[str]]] = None,
 ) -> PipelineHandle:
 
     if REMOTE_API:
@@ -1677,6 +1430,7 @@ def start_pipeline_background(
             diagram_base_contexts=diagram_base_contexts,
             diagram_mode_by_base_context=diagram_mode_by_base_context,
             diagram_required_objects_by_base_context=diagram_required_objects_by_base_context,
+            accepted_processed_ids_by_base_context=accepted_processed_ids_by_base_context,
         )
 
     out_dir = BASE_DIR / "PipelineOutputs"
@@ -1698,11 +1452,11 @@ def start_pipeline_background(
         pinecone_done=pinecone_done,
         out_dir=out_dir,
         errors={},
+        diagram_mode_by_base_context=dict(diagram_mode_by_base_context or {}),
         diagram_required_objects_by_base_context=dict(diagram_required_objects_by_base_context or {}),
     )
 
-    # HOT LOAD ONCE at startup (keeps Qwen/SigLIP/MiniLM resident for the life of the process)\
-    # (model loading is owned by the timeline orchestrator now)
+    # Model loading is owned by the timeline orchestrator now.
 
     t = threading.Thread(
         target=_pipeline_worker,
@@ -1719,6 +1473,7 @@ def start_pipeline_background(
             diagram_base_contexts=diagram_base_contexts,
             diagram_mode_by_base_context=diagram_mode_by_base_context,
             diagram_required_objects_by_base_context=diagram_required_objects_by_base_context,
+            accepted_processed_ids_by_base_context=accepted_processed_ids_by_base_context,
         ),
     )
     handle.thread = t
@@ -1729,7 +1484,7 @@ def start_pipeline_background(
 def run_pipeline_blocking(
     *,
     workers: PipelineWorkers,
-    model_id: str = "Qwen/Qwen3-VL-2B-Instruct",
+    model_id: str = "",
     debug_save: bool = False,
     parallel_cpu: bool = True,
     gpu_index: int = 0,
@@ -1737,6 +1492,7 @@ def run_pipeline_blocking(
     diagram_base_contexts: Optional[List[str]] = None,
     diagram_mode_by_base_context: Optional[Dict[str, int]] = None,
     diagram_required_objects_by_base_context: Optional[Dict[str, List[str]]] = None,
+    accepted_processed_ids_by_base_context: Optional[Dict[str, List[str]]] = None,
 ) -> PipelineHandle:
     if REMOTE_API:
         out = _http_post_json(
@@ -1750,6 +1506,7 @@ def run_pipeline_blocking(
                 "diagram_base_contexts": diagram_base_contexts or [],
                 "diagram_mode_by_base_context": diagram_mode_by_base_context or {},
                 "diagram_required_objects_by_base_context": diagram_required_objects_by_base_context or {},
+                "accepted_processed_ids_by_base_context": accepted_processed_ids_by_base_context or {},
             },
             timeout=3600,
         )
@@ -1764,6 +1521,7 @@ def run_pipeline_blocking(
             pinecone_done=threading.Event(),
             out_dir=out_dir,
             errors={},
+            diagram_mode_by_base_context=out.get("diagram_mode_by_base_context") or {},
             diagram_required_objects_by_base_context=out.get("diagram_required_objects_by_base_context") or {},
         )
         h.colours_done.set()
@@ -1779,6 +1537,7 @@ def run_pipeline_blocking(
         h.selected_processed_ids = out.get("selected_processed_ids") or []
         h.selected_ids_by_base_context = out.get("selected_ids_by_base_context") or {}
         h.refined_labels_by_processed_id = out.get("refined_labels_by_processed_id") or {}
+        h.diagram_mode_by_base_context = out.get("diagram_mode_by_base_context") or {}
         return h
 
     h = start_pipeline_background(
@@ -1791,6 +1550,7 @@ def run_pipeline_blocking(
         diagram_base_contexts=diagram_base_contexts,
         diagram_mode_by_base_context=diagram_mode_by_base_context,
         diagram_required_objects_by_base_context=diagram_required_objects_by_base_context,
+        accepted_processed_ids_by_base_context=accepted_processed_ids_by_base_context,
     )
     h.pipeline_done.wait()
     return h
@@ -1799,7 +1559,7 @@ def run_pipeline_blocking(
 
 def _parse_cli(argv: List[str]) -> Dict[str, Any]:
     args: Dict[str, Any] = {
-        "model_id": "Qwen/Qwen3-VL-2B-Instruct",
+        "model_id": "",
         "debug_save": False,
         "parallel_cpu": True,
         "gpu_index": 0,
@@ -1839,7 +1599,7 @@ def get_images_background(
     min_final_score: float = 0.78,
     min_modalities: int = 3,
     top_k_per_modality: int = 50,
-    model_id: str = "Qwen/Qwen3-VL-2B-Instruct",
+    model_id: str = "",
     gpu_index: int = 0,
 ) -> tuple[Dict[str, List[str]], Optional[PipelineHandle], Dict[str, int]]:
     """
@@ -1847,12 +1607,12 @@ def get_images_background(
       (pinecone_hits, pipeline_handle_or_none, diagram_mode_by_prompt)
 
     - Pinecone is checked first.
-    - If misses exist, this function ONLY starts ImagePipeline for those prompts.
+    - If misses exist, this function starts ImagePipeline for those prompts.
     - The caller is responsible for populating ResearchImages/UniqueImages first
       (researcher for diagrams, Comfy for non-diagrams, etc.).
     - Caller waits:
-        handle.wait_selection()  -> read handle.selected_ids_by_base_context + refined labels
-        handle.wait_colours()    -> colours ready (only for diagram prompts)
+        handle.wait_selection()  -> read handle.selected_ids_by_base_context
+        handle.wait_colours()    -> colours/upsert ready
     """
     prompt_to_topic: Dict[str, str] = {}
     diagram_flags: Dict[str, int] = {}
@@ -1933,10 +1693,7 @@ def get_images_background(
         return results, None, diagram_flags
 
     diagram_prompts = [p for p in misses.keys() if int(diagram_flags.get(p, 0) or 0) > 0]
-    if not diagram_prompts:
-        # Strict routing: diagram=0 requests do not run ImagePipeline stages.
-        return results, None, diagram_flags
-    diagram_mode_map = {p: int(diagram_flags.get(p, 0) or 0) for p in diagram_prompts}
+    diagram_mode_map = {p: int(diagram_flags.get(p, 0) or 0) for p in misses.keys()}
 
     h = start_pipeline_background(
         workers=workers,
@@ -1960,7 +1717,7 @@ def get_images(
     min_final_score: float = 0.78,
     min_modalities: int = 3,
     top_k_per_modality: int = 50,
-    model_id: str = "Qwen/Qwen3-VL-2B-Instruct",
+    model_id: str = "",
     gpu_index: int = 0,
 ) -> Dict[str, List[str]]:
     hits, h, diagram_flags = get_images_background(
@@ -1995,13 +1752,12 @@ def serve_hot_api(
     *,
     host: str = "127.0.0.1",
     port: int = 8787,
-    model_id: str = "Qwen/Qwen3-VL-2B-Instruct",
+    model_id: str = "",
     gpu_index: int = 0,
 ) -> None:
     from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
     ensure_hot_models(
-        qwen_model_id=model_id,
         gpu_index=gpu_index,
         cpu_threads=_PIPE_CPU_THREADS,
         warmup=True,
@@ -2059,7 +1815,7 @@ def serve_hot_api(
             return
 
     httpd = ThreadingHTTPServer((host, port), Handler)
-    print(f"[hot_api] listening on http://{host}:{port}  (Qwen/SigLIP/MiniLM hot)")
+    print(f"[hot_api] listening on http://{host}:{port}  (SigLIP/MiniLM hot)")
     httpd.serve_forever()
 
 
@@ -2073,23 +1829,11 @@ def _hardcoded_get_images_test() -> int:
     print("[TEST] prompts:", list(prompts.keys()))
 
     try:
-        shared_models.init_hot_models(
-            qwen_model_id="Qwen/Qwen3-VL-2B-Instruct",
-            gpu_index=0,
-            cpu_threads=_PIPE_CPU_THREADS,
-            warmup=True,
-        )
-        qwen = shared_models.get_qwen()
+        shared_models.init_siglip_hot(gpu_index=0, cpu_threads=_PIPE_CPU_THREADS, warmup=True)
+        shared_models.init_minilm_hot(gpu_index=0, cpu_threads=_PIPE_CPU_THREADS, warmup=True)
         siglip = shared_models.get_siglip()
         minilm = shared_models.get_minilm()
-        if qwen is None:
-            print("[TEST][ERR] qwen model not loaded from shared_models.")
-            return 2
         workers = PipelineWorkers(
-            qwen_model=qwen.model,
-            qwen_processor=qwen.processor,
-            qwen_device=qwen.device,
-            qwen_lock=shared_models.qwen_lock(),
             siglip_bundle=siglip,
             minilm_bundle=minilm,
         )
@@ -2105,7 +1849,7 @@ def _hardcoded_get_images_test() -> int:
             min_final_score=0.78,
             min_modalities=3,
             top_k_per_modality=50,
-            model_id="Qwen/Qwen3-VL-2B-Instruct",
+            model_id="",
             gpu_index=0,
         )
     except Exception as e:
@@ -2136,7 +1880,7 @@ if __name__ == "__main__":
         serve_hot_api(
             host=str(args.get("host") or "127.0.0.1"),
             port=int(args.get("port") or 8787),
-            model_id=str(args.get("model_id") or "Qwen/Qwen3-VL-2B-Instruct"),
+            model_id=str(args.get("model_id") or ""),
             gpu_index=int(args.get("gpu_index") or 0),
         )
         raise SystemExit(0)

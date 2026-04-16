@@ -45,15 +45,23 @@ def _resolve_main_deps(
     download_image_fn=None,
 ):
     main = sys.modules.get("__main__")
+    image_researcher = sys.modules.get("ImageResearcher")
 
-    IMAGES_PATH = images_path or getattr(main, "IMAGES_PATH", os.path.join(os.getcwd(), "ResearchImages"))
-    dbg = dbg_fn or getattr(main, "dbg", lambda *a, **k: None)
-    register_meta = register_meta_fn or getattr(main, "_register_image_metadata", lambda path, meta: None)
-    normalize_ctx_meta = normalize_ctx_meta_fn or getattr(main, "_normalize_ctx_meta", lambda d: d or {})
+    def _pick_attr(name: str, default):
+        if image_researcher is not None and hasattr(image_researcher, name):
+            return getattr(image_researcher, name)
+        if main is not None and hasattr(main, name):
+            return getattr(main, name)
+        return default
 
-    _UAS = getattr(main, "_UAS", _UAS_FALLBACK)
-    _BLOCKED_HOSTS = getattr(main, "_BLOCKED_HOSTS", _BLOCKED_HOSTS_FALLBACK)
-    _CC_RX = getattr(main, "_CC_RX", _CC_RX_FALLBACK)
+    IMAGES_PATH = images_path or _pick_attr("IMAGES_PATH", os.path.join(os.getcwd(), "ResearchImages"))
+    dbg = dbg_fn or _pick_attr("dbg", lambda *a, **k: None)
+    register_meta = register_meta_fn or _pick_attr("_register_image_metadata", lambda path, meta: None)
+    normalize_ctx_meta = normalize_ctx_meta_fn or _pick_attr("_normalize_ctx_meta", lambda d: d or {})
+
+    _UAS = _pick_attr("_UAS", _UAS_FALLBACK)
+    _BLOCKED_HOSTS = _pick_attr("_BLOCKED_HOSTS", _BLOCKED_HOSTS_FALLBACK)
+    _CC_RX = _pick_attr("_CC_RX", _CC_RX_FALLBACK)
 
     return {
         "IMAGES_PATH": IMAGES_PATH,
@@ -201,6 +209,15 @@ def ddg_cc_image_harvest(
     pid = _safe_dir(prompt_id or query)
     dest_dir = os.path.join(IMAGES_PATH, "ddg", pid)
     os.makedirs(dest_dir, exist_ok=True)
+    fallback_ctx_embedding = base_ctx_embedding
+    if fallback_ctx_embedding is None and query_embedding is not None:
+        if hasattr(query_embedding, "tolist"):
+            try:
+                fallback_ctx_embedding = query_embedding.tolist()
+            except Exception:
+                fallback_ctx_embedding = query_embedding
+        else:
+            fallback_ctx_embedding = query_embedding
 
     s = requests.Session()
     s.headers.update({
@@ -477,6 +494,8 @@ def ddg_cc_image_harvest(
             p = None
             if download_fn is not None:
                 try:
+                    p = download_fn(s, img_url, dest_dir, referer=page_url)
+                except TypeError:
                     p = download_fn(s, img_url, dest_dir)
                 except Exception:
                     p = None
@@ -495,6 +514,18 @@ def ddg_cc_image_harvest(
                     meta["prompt_embedding"] = base_ctx_embedding
                 if ctx_meta:
                     meta.update(ctx_meta)
+                elif fallback_ctx_embedding is not None or query:
+                    meta.update(
+                        normalize_ctx_meta(
+                            {
+                                "ctx_text": query,
+                                "ctx_embedding": fallback_ctx_embedding,
+                                "ctx_score": 0.0,
+                                "ctx_sem_score": 0.0,
+                                "ctx_confidence": 0.0,
+                            }
+                        )
+                    )
 
                 if "ctx_score" in meta or "ctx_sem_score" in meta:
                     meta["ctx_confidence"] = meta.get("ctx_sem_score", meta.get("ctx_score"))

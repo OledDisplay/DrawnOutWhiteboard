@@ -53,10 +53,25 @@ def color_rank(name: str) -> int:
 # CONFIG (simple + blunt)
 # ============================
 # “blanket threshold” in image pixels (bbox-to-bbox distance)
-GROUP_RADIUS_PX = 20
+GROUP_RADIUS_PX = 12
 
 # spatial hash cell size; should be >= radius so neighbors are local
 GRID_CELL_PX = 48.0
+
+# dynamic post-pass split for very spread-out same-colour clusters
+ENABLE_DYNAMIC_INTERNAL_CLUSTER_SPLIT = True
+
+# We only attempt the post-pass when there is enough internal structure to read.
+DYNAMIC_SPLIT_MIN_STROKES_FOR_CHECK = 6
+
+# "Huge" is treated relatively: cluster span vs its own typical nearest-neighbour spacing.
+DYNAMIC_SPLIT_MIN_SPREAD_RATIO = 5.0
+
+# Split only when candidate bridge edges are clearly weaker than local internal ties.
+DYNAMIC_SPLIT_BRIDGE_RATIO = 1.4
+DYNAMIC_SPLIT_MST_GAP_IQR_SCALE = 1.25
+DYNAMIC_SPLIT_MAX_GROUPS = 4
+DYNAMIC_SPLIT_MIN_COMPONENT_STROKES = 2
 
 # crop padding (image pixels)
 CLUSTER_CROP_PAD = 8
@@ -80,8 +95,9 @@ BBOX_PAD_MAX_PX = 15
 # ============================
 ENABLE_CROSS_COLOR_CLUSTER_MERGE = True
 
-# overlap ratio = intersection_area / area_of_smaller_cluster_bbox
-CROSS_COLOR_OVERLAP_RATIO = 0.70  # "high %" overlap
+# shared bbox growth =
+#   (shared_bbox_area - area_of_smaller_cluster_bbox) / area_of_smaller_cluster_bbox
+CROSS_COLOR_SHARED_BBOX_GROWTH_MAX = 0.20  # allow up to 20% growth vs the smaller cluster
 
 
 # ============================
@@ -101,11 +117,8 @@ WRAP_STROKE_THICKNESS = 1
 
 
 # ============================
-# OVERLAP MASK FOR MERGING (EXACT PIXEL OVERLAP OF STROKES)
+# MERGE SEARCH
 # ============================
-# This is used ONLY for cross-colour merge decisions, NOT for output crops.
-MERGE_MASK_STROKE_THICKNESS = 1
-MERGE_MASK_DILATE_PX = 1  # small dilation so pixel overlap is robust but not over-permissive
 MERGE_GRID_CELL_PX = 96.0
 
 
@@ -246,6 +259,38 @@ def _cluster_bbox(bboxes: List[Tuple[float,float,float,float]], idxs: List[int])
 def _bbox_area(bb: Tuple[float, float, float, float]) -> float:
     x0, y0, x1, y1 = bb
     return max(0.0, x1 - x0) * max(0.0, y1 - y0)
+
+
+def _bbox_union_xyxy(
+    a: Tuple[int, int, int, int],
+    b: Tuple[int, int, int, int],
+) -> Tuple[int, int, int, int]:
+    return (
+        int(min(a[0], b[0])),
+        int(min(a[1], b[1])),
+        int(max(a[2], b[2])),
+        int(max(a[3], b[3])),
+    )
+
+
+def _shared_bbox_growth_vs_smaller(
+    a: Tuple[int, int, int, int],
+    b: Tuple[int, int, int, int],
+) -> float:
+    """
+    How much larger the shared/union bbox is versus the smaller input bbox.
+    0.0 means one bbox is fully contained in the other (or identical).
+    0.20 means the shared bbox is 20% larger than the smaller bbox.
+    """
+    a_area = _bbox_area((float(a[0]), float(a[1]), float(a[2]), float(a[3])))
+    b_area = _bbox_area((float(b[0]), float(b[1]), float(b[2]), float(b[3])))
+    smaller = min(a_area, b_area)
+    if smaller <= 0.0:
+        return float("inf")
+
+    shared = _bbox_union_xyxy(a, b)
+    shared_area = _bbox_area((float(shared[0]), float(shared[1]), float(shared[2]), float(shared[3])))
+    return float((shared_area - smaller) / smaller)
 
 
 # ============================
@@ -527,6 +572,254 @@ def _cluster_indices_by_polyline_proximity(
     return out
 
 
+def _stroke_distance_px(
+    i: int,
+    j: int,
+    bboxes: List[Tuple[float, float, float, float]],
+    stroke_pts: List[Optional[np.ndarray]],
+    polyline_cutoff_px: float,
+) -> float:
+    bb_dist = float(_bbox_distance(bboxes[i], bboxes[j]))
+    pts_i = stroke_pts[i]
+    pts_j = stroke_pts[j]
+    if pts_i is None or pts_j is None:
+        return bb_dist
+    if bb_dist > float(polyline_cutoff_px):
+        return bb_dist
+
+    d2 = _polyline_min_distance_d2(pts_i, pts_j)
+    if not math.isfinite(d2):
+        return bb_dist
+    return float(math.sqrt(max(0.0, d2)))
+
+
+def _pairwise_cluster_distance_matrix(
+    idxs: List[int],
+    bboxes: List[Tuple[float, float, float, float]],
+    stroke_pts: List[Optional[np.ndarray]],
+    radius_px: float,
+) -> np.ndarray:
+    n = len(idxs)
+    dist = np.full((n, n), np.inf, dtype=np.float32)
+    if n <= 0:
+        return dist
+
+    polyline_cutoff_px = float(max(radius_px * 2.0, 16.0))
+    for i in range(n):
+        dist[i, i] = 0.0
+        gi = idxs[i]
+        for j in range(i + 1, n):
+            gj = idxs[j]
+            d = _stroke_distance_px(
+                gi,
+                gj,
+                bboxes=bboxes,
+                stroke_pts=stroke_pts,
+                polyline_cutoff_px=polyline_cutoff_px,
+            )
+            dist[i, j] = np.float32(d)
+            dist[j, i] = np.float32(d)
+    return dist
+
+
+def _mst_edges_from_dense_distances(dist: np.ndarray) -> List[Tuple[int, int, float]]:
+    n = int(dist.shape[0])
+    if n <= 1:
+        return []
+
+    in_tree = np.zeros(n, dtype=bool)
+    best = np.full(n, np.inf, dtype=np.float32)
+    parent = np.full(n, -1, dtype=np.int32)
+    best[0] = 0.0
+
+    edges: List[Tuple[int, int, float]] = []
+    for _ in range(n):
+        masked = np.where(in_tree, np.inf, best)
+        u = int(np.argmin(masked))
+        if not math.isfinite(float(masked[u])):
+            break
+
+        in_tree[u] = True
+        if parent[u] >= 0:
+            edges.append((int(parent[u]), u, float(best[u])))
+
+        row = dist[u]
+        for v in range(n):
+            if in_tree[v]:
+                continue
+            w = float(row[v])
+            if w < float(best[v]):
+                best[v] = np.float32(w)
+                parent[v] = np.int32(u)
+
+    return edges
+
+
+def _components_from_tree_edges(
+    n: int,
+    tree_edges: List[Tuple[int, int, float]],
+    cut_edge_ids: set[int],
+) -> List[List[int]]:
+    uf = UnionFind(n)
+    for ei, (u, v, _w) in enumerate(tree_edges):
+        if ei in cut_edge_ids:
+            continue
+        uf.union(int(u), int(v))
+
+    groups: Dict[int, List[int]] = {}
+    for i in range(n):
+        groups.setdefault(uf.find(i), []).append(i)
+    return list(groups.values())
+
+
+def _maybe_split_large_cluster_by_internal_proximity(
+    idxs: List[int],
+    bboxes: List[Tuple[float, float, float, float]],
+    stroke_pts: List[Optional[np.ndarray]],
+    radius_px: float,
+) -> List[List[int]]:
+    """
+    Conservative post-pass:
+    If a same-colour cluster became large via transitive threshold chaining,
+    look for a few unusually long bridge links inside its MST and split only
+    when that separation is clearly stronger than the local internal spacing.
+    """
+    n = len(idxs)
+    if n < int(DYNAMIC_SPLIT_MIN_STROKES_FOR_CHECK):
+        return [sorted(int(i) for i in idxs)]
+
+    dist = _pairwise_cluster_distance_matrix(
+        idxs=idxs,
+        bboxes=bboxes,
+        stroke_pts=stroke_pts,
+        radius_px=radius_px,
+    )
+    if dist.size == 0:
+        return [sorted(int(i) for i in idxs)]
+
+    nn_vals: List[float] = []
+    for i in range(n):
+        row = dist[i]
+        finite = row[np.isfinite(row)]
+        finite = finite[finite > 1e-3]
+        if finite.size > 0:
+            nn_vals.append(float(np.min(finite)))
+
+    if len(nn_vals) < 3:
+        return [sorted(int(i) for i in idxs)]
+
+    nn_arr = np.asarray(nn_vals, dtype=np.float32)
+    local_scale = float(np.median(nn_arr))
+    if not math.isfinite(local_scale) or local_scale <= 0.0:
+        return [sorted(int(i) for i in idxs)]
+
+    bb = _cluster_bbox(bboxes, idxs)
+    span_w = max(0.0, float(bb[2] - bb[0]))
+    span_h = max(0.0, float(bb[3] - bb[1]))
+    spread_ratio = float(math.hypot(span_w, span_h) / max(local_scale, 1.0))
+    if spread_ratio < float(DYNAMIC_SPLIT_MIN_SPREAD_RATIO):
+        return [sorted(int(i) for i in idxs)]
+
+    mst_edges = _mst_edges_from_dense_distances(dist)
+    if len(mst_edges) < n - 1:
+        return [sorted(int(i) for i in idxs)]
+
+    mst_weights = np.asarray(
+        [w for (_u, _v, w) in mst_edges if math.isfinite(w) and w > 1e-3],
+        dtype=np.float32,
+    )
+    if mst_weights.size < 2:
+        return [sorted(int(i) for i in idxs)]
+
+    q1 = float(np.percentile(mst_weights, 25))
+    q3 = float(np.percentile(mst_weights, 75))
+    iqr = max(0.0, q3 - q1)
+    bridge_floor = max(
+        float(local_scale) * float(DYNAMIC_SPLIT_BRIDGE_RATIO),
+        float(np.median(mst_weights)) + float(DYNAMIC_SPLIT_MST_GAP_IQR_SCALE) * iqr,
+    )
+
+    candidate_edges = [
+        (ei, u, v, w)
+        for ei, (u, v, w) in enumerate(mst_edges)
+        if math.isfinite(w) and w >= bridge_floor
+    ]
+    candidate_edges.sort(key=lambda it: it[3], reverse=True)
+    if not candidate_edges:
+        return [sorted(int(i) for i in idxs)]
+
+    max_cuts = min(
+        int(DYNAMIC_SPLIT_MAX_GROUPS) - 1,
+        len(candidate_edges),
+    )
+    best_components: Optional[List[List[int]]] = None
+    best_score: Optional[Tuple[float, float]] = None
+
+    for k in range(1, max_cuts + 1):
+        cut_ids = {int(ei) for (ei, _u, _v, _w) in candidate_edges[:k]}
+        components = _components_from_tree_edges(n, mst_edges, cut_ids)
+        if not (2 <= len(components) <= int(DYNAMIC_SPLIT_MAX_GROUPS)):
+            continue
+
+        comp_sizes = sorted((len(c) for c in components), reverse=True)
+        if comp_sizes and min(comp_sizes) < int(DYNAMIC_SPLIT_MIN_COMPONENT_STROKES):
+            continue
+
+        kept_weights = [
+            float(w)
+            for ei, (_u, _v, w) in enumerate(mst_edges)
+            if ei not in cut_ids and math.isfinite(w) and w > 1e-3
+        ]
+        if not kept_weights:
+            continue
+
+        removed_weights = [float(w) for (_ei, _u, _v, w) in candidate_edges[:k]]
+        kept_scale = float(np.median(np.asarray(kept_weights, dtype=np.float32)))
+        if not math.isfinite(kept_scale) or kept_scale <= 0.0:
+            continue
+
+        separation_ratio = float(min(removed_weights) / max(kept_scale, 1e-3))
+        if separation_ratio < float(DYNAMIC_SPLIT_BRIDGE_RATIO):
+            continue
+
+        score = (separation_ratio, -float(k))
+        if best_score is None or score > best_score:
+            best_score = score
+            best_components = components
+
+    if not best_components:
+        return [sorted(int(i) for i in idxs)]
+
+    out_groups: List[List[int]] = []
+    for comp in best_components:
+        out_groups.append(sorted(int(idxs[li]) for li in comp))
+    out_groups.sort(key=lambda g: (min(bboxes[i][0] for i in g), min(bboxes[i][1] for i in g)))
+    return out_groups
+
+
+def _split_large_clusters_by_internal_proximity(
+    groups: List[List[int]],
+    bboxes: List[Tuple[float, float, float, float]],
+    stroke_pts: List[Optional[np.ndarray]],
+    radius_px: float,
+) -> List[List[int]]:
+    if not groups:
+        return []
+
+    out: List[List[int]] = []
+    for g in groups:
+        pieces = _maybe_split_large_cluster_by_internal_proximity(
+            idxs=[int(i) for i in g],
+            bboxes=bboxes,
+            stroke_pts=stroke_pts,
+            radius_px=radius_px,
+        )
+        out.extend(pieces)
+
+    out.sort(key=lambda grp: (min(bboxes[i][0] for i in grp), min(bboxes[i][1] for i in grp)))
+    return out
+
+
 def _render_cluster_crop_keep_strokes_color_filled(
     img_rgb: np.ndarray,
     x0p: int,
@@ -664,121 +957,33 @@ def _cluster_tight_bbox_from_strokes(
     y1 = int(max(ys)) + 1
     return (x0, y0, x1, y1)
 
-def _cluster_stroke_mask_local(
-    stroke_indices: List[int],
+
+def _refresh_cluster_merge_geom(
+    cluster: Dict[str, Any],
     stroke_pts: List[Optional[np.ndarray]],
-    bbox_xyxy: Tuple[int, int, int, int],
-    dilate_px: int,
-    thickness: int,
-) -> Tuple[np.ndarray, int]:
-    """
-    Rasterize cluster strokes into a local mask (tight bbox coords), then (optional) dilate.
-    Returns (mask01, area_pixels) where mask01 is uint8 {0,1}.
-    """
-    x0, y0, x1, y1 = bbox_xyxy
-    w = int(max(0, x1 - x0))
-    h = int(max(0, y1 - y0))
-    if w <= 0 or h <= 0:
-        return np.zeros((0, 0), dtype=np.uint8), 0
-
-    m = np.zeros((h, w), dtype=np.uint8)
-
-    for si in stroke_indices:
-        if si < 0 or si >= len(stroke_pts):
-            continue
-        pts_img = stroke_pts[si]
-        if pts_img is None or pts_img.shape[0] < 2:
-            continue
-
-        pts = pts_img.copy()
-        pts[:, 0] -= int(x0)
-        pts[:, 1] -= int(y0)
-
-        # Clip to mask bounds
-        pts[:, 0] = np.clip(pts[:, 0], 0, w - 1)
-        pts[:, 1] = np.clip(pts[:, 1], 0, h - 1)
-
-        cv2.polylines(
-            m,
-            [pts.reshape(-1, 1, 2)],
-            isClosed=False,
-            color=255,
-            thickness=int(max(1, thickness)),
-            lineType=cv2.LINE_8,
-        )
-
-    if not np.any(m):
-        return np.zeros((h, w), dtype=np.uint8), 0
-
-    if dilate_px > 0:
-        k = 2 * int(dilate_px) + 1
-        ker = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (k, k))
-        m = cv2.dilate(m, ker, iterations=1)
-
-    m01 = (m > 0).astype(np.uint8)
-    area = int(np.count_nonzero(m01))
-    return m01, area
-
-def _mask_overlap_ratio_small_in_big(
-    small_bbox: Tuple[int, int, int, int],
-    small_mask01: np.ndarray,
-    small_area: int,
-    big_bbox: Tuple[int, int, int, int],
-    big_mask01: np.ndarray,
-) -> float:
-    """
-    overlap ratio = intersection_pixels / small_area  (exact pixels)
-    """
-    if small_area <= 0:
-        return 0.0
-    if small_mask01.size == 0 or big_mask01.size == 0:
-        return 0.0
-
-    sx0, sy0, sx1, sy1 = small_bbox
-    bx0, by0, bx1, by1 = big_bbox
-
-    ix0 = max(sx0, bx0)
-    iy0 = max(sy0, by0)
-    ix1 = min(sx1, bx1)
-    iy1 = min(sy1, by1)
-
-    if ix1 <= ix0 or iy1 <= iy0:
-        return 0.0
-
-    # slices into small
-    s_x0 = ix0 - sx0
-    s_y0 = iy0 - sy0
-    s_x1 = ix1 - sx0
-    s_y1 = iy1 - sy0
-
-    # slices into big
-    b_x0 = ix0 - bx0
-    b_y0 = iy0 - by0
-    b_x1 = ix1 - bx0
-    b_y1 = iy1 - by0
-
-    s_sub = small_mask01[s_y0:s_y1, s_x0:s_x1]
-    b_sub = big_mask01[b_y0:b_y1, b_x0:b_x1]
-
-    if s_sub.size == 0 or b_sub.size == 0:
-        return 0.0
-
-    inter = int(np.count_nonzero((s_sub & b_sub) > 0))
-    return float(inter / float(max(1, small_area)))
+) -> None:
+    bb = _cluster_tight_bbox_from_strokes(
+        [int(x) for x in (cluster.get("stroke_indexes") or [])],
+        stroke_pts,
+    )
+    cluster["_merge_bbox"] = bb
+    cluster["_merge_area"] = float(
+        _bbox_area((float(bb[0]), float(bb[1]), float(bb[2]), float(bb[3])))
+    )
+    cluster["bbox_raw"] = (float(bb[0]), float(bb[1]), float(bb[2]), float(bb[3]))
 
 def _merge_overlapping_clusters_across_colors_fast(
     clusters: List[Dict[str, Any]],
     stroke_pts: List[Optional[np.ndarray]],
-    overlap_ratio_thr: float,
+    shared_bbox_growth_max: float,
 ) -> List[Dict[str, Any]]:
     """
-    Cross-colour merging (FAST + robust):
-    - Build an exact pixel mask of STROKES for each cluster (tight bbox local).
-    - For each small cluster, find a bigger cluster of different color such that:
-        intersection_pixels / small_pixels >= overlap_ratio_thr
-      Then merge strokes small -> big and delete small.
-
-    This avoids square bbox overlap (your old issue), and removes the insane nested polyline loops.
+    Cross-colour merging using the cluster shared bbox:
+    - Build a tight bbox for each cluster from its strokes.
+    - First do a small -> big pass.
+    - Then do one follow-up pass over the remaining bigger clusters.
+    - In both passes, only merge when the shared bbox is no more than
+      `shared_bbox_growth_max` larger than the smaller cluster bbox.
     """
     if not clusters:
         return clusters
@@ -790,20 +995,9 @@ def _merge_overlapping_clusters_across_colors_fast(
         cc["stroke_indexes"] = [int(x) for x in (cc.get("stroke_indexes") or [])]
         work.append(cc)
 
-    # Precompute tight bbox + local stroke masks once
+    # Precompute tight merge bbox once
     for c in work:
-        st = c["stroke_indexes"]
-        bb = _cluster_tight_bbox_from_strokes(st, stroke_pts)
-        c["_mask_bbox"] = bb
-        m01, area = _cluster_stroke_mask_local(
-            stroke_indices=st,
-            stroke_pts=stroke_pts,
-            bbox_xyxy=bb,
-            dilate_px=int(MERGE_MASK_DILATE_PX),
-            thickness=int(MERGE_MASK_STROKE_THICKNESS),
-        )
-        c["_mask01"] = m01
-        c["_mask_area"] = int(area)
+        _refresh_cluster_merge_geom(c, stroke_pts)
 
     # Spatial grid for candidate lookup (bbox-based ONLY for speed)
     cell = float(max(16.0, MERGE_GRID_CELL_PX))
@@ -817,91 +1011,100 @@ def _merge_overlapping_clusters_across_colors_fast(
         gy1 = int(math.floor(float(y1) / cell))
         return gx0, gy0, gx1, gy1
 
-    for i, c in enumerate(work):
-        bb = c["_mask_bbox"]
+    def add_cluster_to_grid(cluster_idx: int) -> None:
+        bb = work[cluster_idx]["_merge_bbox"]
         gx0, gy0, gx1, gy1 = cell_range(bb)
         for gy in range(gy0, gy1 + 1):
             for gx in range(gx0, gx1 + 1):
-                grid.setdefault((gx, gy), []).append(i)
+                grid.setdefault((gx, gy), []).append(cluster_idx)
 
-    # Process small -> big
-    idxs = list(range(len(work)))
-    idxs.sort(key=lambda i: work[i].get("_mask_area", 0))  # smallest first
+    for i, _ in enumerate(work):
+        add_cluster_to_grid(i)
 
-    for si in idxs:
-        small = work[si]
-        if not small["_alive"]:
-            continue
-        a_small = int(small.get("_mask_area", 0))
-        if a_small <= 0:
-            continue
+    def run_merge_pass(*, smallest_first: bool) -> None:
+        idxs = [i for i, c in enumerate(work) if c["_alive"]]
+        idxs.sort(
+            key=lambda i: work[i].get("_merge_area", 0.0),
+            reverse=not smallest_first,
+        )
 
-        sbb = small["_mask_bbox"]
-        gx0, gy0, gx1, gy1 = cell_range(sbb)
-
-        candidates = set()
-        for gy in range(gy0, gy1 + 1):
-            for gx in range(gx0, gx1 + 1):
-                bucket = grid.get((gx, gy))
-                if bucket:
-                    for bi in bucket:
-                        if bi != si:
-                            candidates.add(bi)
-
-        best_big = None
-        best_ratio = 0.0
-        best_big_area = None
-
-        for bi in candidates:
-            big = work[bi]
-            if not big["_alive"]:
+        for si in idxs:
+            small = work[si]
+            if not small["_alive"]:
                 continue
-            # Different colours only (your rule)
-            if int(big["color_id"]) == int(small["color_id"]):
+            a_small = float(small.get("_merge_area", 0.0))
+            if a_small <= 0.0:
                 continue
 
-            a_big = int(big.get("_mask_area", 0))
-            if a_big < a_small:
-                continue
+            sbb = small["_merge_bbox"]
+            gx0, gy0, gx1, gy1 = cell_range(sbb)
 
-            ratio = _mask_overlap_ratio_small_in_big(
-                small_bbox=small["_mask_bbox"],
-                small_mask01=small["_mask01"],
-                small_area=a_small,
-                big_bbox=big["_mask_bbox"],
-                big_mask01=big["_mask01"],
-            )
+            candidates = set()
+            for gy in range(gy0, gy1 + 1):
+                for gx in range(gx0, gx1 + 1):
+                    bucket = grid.get((gx, gy))
+                    if bucket:
+                        for bi in bucket:
+                            if bi != si:
+                                candidates.add(bi)
 
-            if ratio < float(overlap_ratio_thr):
-                continue
+            best_big = None
+            best_big_idx = None
+            best_growth = None
+            best_big_area = None
 
-            # choose best by ratio, tie break by smallest big area (tighter containment)
-            if ratio > best_ratio:
-                best_ratio = ratio
-                best_big = big
-                best_big_area = a_big
-            elif ratio == best_ratio and best_big is not None:
-                if best_big_area is not None and a_big < best_big_area:
+            for bi in candidates:
+                big = work[bi]
+                if not big["_alive"]:
+                    continue
+                # Different colours only (your rule)
+                if int(big["color_id"]) == int(small["color_id"]):
+                    continue
+
+                a_big = float(big.get("_merge_area", 0.0))
+                if a_big < a_small:
+                    continue
+
+                growth = _shared_bbox_growth_vs_smaller(
+                    small["_merge_bbox"],
+                    big["_merge_bbox"],
+                )
+                if growth > float(shared_bbox_growth_max):
+                    continue
+
+                # choose the tightest shared bbox; tie break by the smaller big cluster
+                if best_growth is None or growth < best_growth:
+                    best_growth = growth
                     best_big = big
+                    best_big_idx = bi
                     best_big_area = a_big
+                elif growth == best_growth and best_big is not None:
+                    if best_big_area is not None and a_big < best_big_area:
+                        best_big = big
+                        best_big_idx = bi
+                        best_big_area = a_big
 
-        if best_big is None:
-            continue
+            if best_big is None or best_big_idx is None:
+                continue
 
-        # MERGE: small -> best_big
-        set_big = set(best_big["stroke_indexes"])
-        for sidx in small["stroke_indexes"]:
-            set_big.add(int(sidx))
-        best_big["stroke_indexes"] = sorted(set_big)
+            # MERGE: small -> best_big
+            set_big = set(best_big["stroke_indexes"])
+            for sidx in small["stroke_indexes"]:
+                set_big.add(int(sidx))
+            best_big["stroke_indexes"] = sorted(set_big)
+            _refresh_cluster_merge_geom(best_big, stroke_pts)
+            add_cluster_to_grid(best_big_idx)
 
-        small["_alive"] = False
+            small["_alive"] = False
+
+    run_merge_pass(smallest_first=True)
+    run_merge_pass(smallest_first=False)
 
     out = [c for c in work if c["_alive"]]
     for c in out:
         c.pop("_alive", None)
-        c.pop("_mask_bbox", None)
-        c.pop("_mask01", None)
-        c.pop("_mask_area", None)
+        c.pop("_merge_bbox", None)
+        c.pop("_merge_area", None)
     return out
 
 def cluster_in_memory(
@@ -1022,6 +1225,13 @@ def cluster_in_memory(
                 radius_px=float(GROUP_RADIUS_PX),
                 grid_cell_px=float(GRID_CELL_PX),
             )
+            if "ENABLE_DYNAMIC_INTERNAL_CLUSTER_SPLIT" in globals() and ENABLE_DYNAMIC_INTERNAL_CLUSTER_SPLIT:
+                groups = _split_large_clusters_by_internal_proximity(
+                    groups=groups,
+                    bboxes=bboxes_img_raw,
+                    stroke_pts=stroke_samples_px_cache,
+                    radius_px=float(GROUP_RADIUS_PX),
+                )
 
             for g in groups:
                 bb = _cluster_bbox(bboxes_img_raw, g)
@@ -1033,11 +1243,11 @@ def cluster_in_memory(
                 })
 
         if "ENABLE_CROSS_COLOR_CLUSTER_MERGE" in globals() and ENABLE_CROSS_COLOR_CLUSTER_MERGE:
-            overlap_thr = float(globals().get("CROSS_COLOR_OVERLAP_RATIO", 0.75))
+            shared_bbox_growth_max = float(globals().get("CROSS_COLOR_SHARED_BBOX_GROWTH_MAX", 0.20))
             clusters_raw = _merge_overlapping_clusters_across_colors_fast(
                 clusters=clusters_raw,
                 stroke_pts=stroke_samples_px_cache,
-                overlap_ratio_thr=overlap_thr,
+                shared_bbox_growth_max=shared_bbox_growth_max,
             )
 
         clusters_by_color: Dict[int, List[Dict[str, Any]]] = {}

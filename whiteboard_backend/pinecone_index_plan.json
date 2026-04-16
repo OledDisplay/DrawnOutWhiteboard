@@ -6,9 +6,5 @@
   "context": [
     "img-meta-promptctx-384",
     "context"
-  ],
-  "clip": [
-    "img-meta-clip-1536",
-    "clip"
   ]
 }

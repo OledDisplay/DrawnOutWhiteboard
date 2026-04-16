@@ -229,7 +229,7 @@ class CrawlExhaustion:
 
 
 
-from ImageRanker import SiglipBackend, rerank_image_candidates_siglip
+from ImageRanker import SiglipBackend, open_rgb_image_with_webp_fallback, rerank_image_candidates_siglip
 
 # -------------------------
 # Global SigLIP reuse (lazy)
@@ -526,6 +526,85 @@ def _load_ranker_metadata_for_prompt(
                     lst.append(meta)
     except Exception as e:
         dbg(f"[RANKER_TMP][WARN] failed to read prompt records prompt_id={prompt_id}: {e}")
+    return out
+
+def _load_in_memory_ranker_metadata_for_prompt(
+    prompt_id: str,
+    prompt_text: str = "",
+) -> Dict[str, List[dict]]:
+    out: Dict[str, List[dict]] = {}
+    pid = str(prompt_id or "").strip()
+    ptxt = str(prompt_text or "").strip().casefold()
+    if not pid and not ptxt:
+        return out
+
+    try:
+        with _IMAGE_META_LOCK:
+            items = list((IMAGE_METADATA or {}).items())
+    except Exception:
+        items = []
+
+    for img_path, metas in items:
+        if not isinstance(metas, list) or not metas:
+            continue
+        keep: List[dict] = []
+        for meta in metas:
+            if not isinstance(meta, dict):
+                continue
+            meta_pid = str(meta.get("prompt_id") or "").strip()
+            base_context = str(meta.get("base_context") or "").strip().casefold()
+            if (pid and meta_pid == pid) or (ptxt and base_context == ptxt):
+                keep.append(meta)
+        if keep:
+            out[img_path] = keep
+    return out
+
+def _load_ddg_disk_fallback_for_prompt(
+    prompt_id: str,
+    prompt_text: str = "",
+    base_ctx_embedding: Any = None,
+    images_root: str | None = None,
+) -> Dict[str, List[dict]]:
+    root = images_root or IMAGES_PATH
+    ddg_root = os.path.join(root, "ddg")
+    if not os.path.isdir(ddg_root):
+        return {}
+
+    def _safe_dir_name(s: str) -> str:
+        s = (s or "").strip()
+        s = re.sub(r"[^a-zA-Z0-9._-]+", "_", s)[:60]
+        return s or "prompt"
+
+    candidates: List[str] = []
+    for raw in (prompt_id, prompt_text):
+        safe = _safe_dir_name(str(raw or ""))
+        if safe and safe not in candidates:
+            candidates.append(safe)
+
+    out: Dict[str, List[dict]] = {}
+    for folder_name in candidates:
+        folder = os.path.join(ddg_root, folder_name)
+        if not os.path.isdir(folder):
+            continue
+        for fname in sorted(os.listdir(folder)):
+            if not IMG_EXT_RE.search(fname):
+                continue
+            img_path = os.path.join(folder, fname)
+            out[img_path] = [
+                {
+                    "source_kind": "ddg",
+                    "base_context": str(prompt_text or ""),
+                    "prompt_id": str(prompt_id or ""),
+                    "prompt_embedding": base_ctx_embedding,
+                    "ctx_text": str(prompt_text or ""),
+                    "ctx_embedding": base_ctx_embedding,
+                    "ctx_score": 0.0,
+                    "ctx_sem_score": 0.0,
+                    "ctx_confidence": 0.0,
+                }
+            ]
+        if out:
+            break
     return out
 
 MAX_STAGE2_IMAGES_PER_PROMPT = 10
@@ -3950,7 +4029,7 @@ def stage2_drill_search_and_images(
     terminal_index_min_terminals: int = 25,
     terminal_index_use_threshold: float = 0.22,
     terminal_index_store_cap: int = 600,
-    terminal_index_centroid_sample: int = 60,
+    terminal_index_centroid_sample: int = 0,
     terminal_js_mode: str = "none",          # "none" | "smart-light" | "light"
     terminal_collect_anchors: bool = False,  # terminals never need anchors
     terminal_js_fallback: bool = False,      # if True, re-render terminal with js_mode="light" when no img candidates
@@ -4095,8 +4174,8 @@ def stage2_drill_search_and_images(
                 dbg(f"[S2][URL_EMBED][ERR] batch={len(chunk)} offset={i} -> {e}")
 
     # NEW: dedupe on clean_url BEFORE scoring so you don't hammer the same page 8 times
-    def _score_and_sort_urls(urls: list[str], *, k: int) -> list[str]:
-        score_window = max(150, int(k) * 4) if k else 400
+    def _score_and_sort_urls(urls: list[str], *, k: int, full_score: bool = False) -> list[str]:
+        score_window = 0 if full_score else (max(150, int(k) * 4) if k else 400)
         to_score = list(urls or [])
         if score_window and len(to_score) > score_window:
             head = to_score[:score_window]
@@ -4268,8 +4347,12 @@ def stage2_drill_search_and_images(
         if encoder is None or not term_urls:
             return None
 
-        sampled = _subsample_terminals(term_urls, terminal_index_centroid_sample)
-        keys = [_url_key_for_embed(u) for u in sampled]
+        if int(terminal_index_centroid_sample or 0) > 0:
+            centroid_terms = _subsample_terminals(term_urls, terminal_index_centroid_sample)
+        else:
+            centroid_terms = list(term_urls)
+
+        keys = [_url_key_for_embed(u) for u in centroid_terms]
         keys = [k for k in keys if k]
         if not keys:
             return None
@@ -4325,6 +4408,8 @@ def stage2_drill_search_and_images(
             )
             return
 
+        centroid_terms_count = min(len(full_terms), int(terminal_index_centroid_sample or 0)) if int(terminal_index_centroid_sample or 0) > 0 else len(full_terms)
+
         cent = _centroid_for_terminal_urls(full_terms)
         if not cent:
             dbg(f"[IDX][PENDING][REJECT] entry={_short_url(entry)} terminals={len(full_terms)} reason=no-centroid")
@@ -4369,7 +4454,7 @@ def stage2_drill_search_and_images(
 
         dbg(
             f"[IDX][PENDING] ★ entry={_short_url(entry)} "
-            f"stored={len(store_terms)} total={len(full_terms)} sample={min(len(full_terms), terminal_index_centroid_sample)}"
+            f"stored={len(store_terms)} total={len(full_terms)} centroid_terms={centroid_terms_count}"
         )
 
 
@@ -4926,6 +5011,7 @@ def stage2_drill_search_and_images(
         fatigue_state: _FatigueState,
         no_accept_streak: list[int],
         layer_depth: int,
+        full_score: bool = False,
     ):
         if not terminal_pool:
             _s2_evt("pool_skip_empty", layer_depth=layer_depth)
@@ -4933,7 +5019,7 @@ def stage2_drill_search_and_images(
 
         k = max(75, int(batch_k))  # enforce >= top 75
         t_score0 = _hdbg_now()
-        batch = _score_and_sort_urls(terminal_pool, k=k)
+        batch = _score_and_sort_urls(terminal_pool, k=k, full_score=full_score)
         score_sec = float(_hdbg_now() - t_score0)
         if not batch:
             _s2_evt("pool_skip_unscored", layer_depth=layer_depth, score_sec=score_sec)
@@ -5068,6 +5154,7 @@ def stage2_drill_search_and_images(
                                 fatigue_state=fatigue_state,
                                 no_accept_streak=no_accept_streak,
                                 layer_depth=-1,
+                                full_score=True,
                             )
 
 
@@ -5114,6 +5201,7 @@ def stage2_drill_search_and_images(
                                         fatigue_state=fatigue_state,
                                         no_accept_streak=no_accept_streak,
                                         layer_depth=active_layer_depth,
+                                        full_score=True,
                                     )
                             except _SkipTerminals:
                                 pass
@@ -5306,6 +5394,7 @@ def stage2_drill_search_and_images(
                                 fatigue_state=fatigue_state,
                                 no_accept_streak=no_accept_streak,
                                 layer_depth=active_layer_depth,
+                                full_score=True,
                             )
                         except _SkipTerminals:
                             final_layer_images = 0
@@ -6947,7 +7036,7 @@ def handle_result_no_api(source: Source, query: str, subj: str, hard_image_cap: 
         terminal_index_min_terminals=25,
         terminal_index_use_threshold=0.22,
         terminal_index_store_cap=600,
-        terminal_index_centroid_sample=60,
+        terminal_index_centroid_sample=0,
 
         subject=subj,
         source_name=source.name,
@@ -6990,15 +7079,14 @@ def _ahash64(path: str, size: int = 8) -> str | None:
     64-bit average hash.
     """
     try:
-        with Image.open(path) as im:
-            im = im.convert("L").resize((size, size), Image.LANCZOS)
-            px = list(im.getdata())
-            avg = sum(px) / len(px)
-            bits = 0
-            for i, p in enumerate(px):
-                if p >= avg:
-                    bits |= (1 << i)
-            return f"{bits:016x}"
+        im = open_rgb_image_with_webp_fallback(path).convert("L").resize((size, size), Image.LANCZOS)
+        px = list(im.getdata())
+        avg = sum(px) / len(px)
+        bits = 0
+        for i, p in enumerate(px):
+            if p >= avg:
+                bits |= (1 << i)
+        return f"{bits:016x}"
     except Exception:
         return None
 
@@ -7136,6 +7224,32 @@ def collect_unique_images(
                 }
 
         if best_ctx is None:
+            fallback_ctx_text = ""
+            fallback_ctx_score = 0.0
+            for m in metas:
+                txt = str(m.get("ctx_text") or m.get("base_context") or "").strip()
+                if txt:
+                    fallback_ctx_text = txt
+                    break
+            for m in metas:
+                try:
+                    fallback_ctx_score = float(
+                        m.get("ctx_confidence", m.get("ctx_sem_score", m.get("ctx_score", 0.0))) or 0.0
+                    )
+                except Exception:
+                    fallback_ctx_score = 0.0
+                if fallback_ctx_score > 0.0:
+                    break
+            if img_prompt_emb is not None or fallback_ctx_text:
+                best_ctx = {
+                    "ctx_embedding": img_prompt_emb,
+                    "ctx_text": fallback_ctx_text or (prompt_text or ""),
+                    "ctx_score": fallback_ctx_score,
+                    "ctx_sem_score": fallback_ctx_score,
+                    "ctx_confidence": float(fallback_ctx_score),
+                }
+
+        if best_ctx is None:
             continue
 
         # pick best available source tags (don’t assume metas[0])
@@ -7167,32 +7281,12 @@ def collect_unique_images(
 
 
     if not candidates:
-        dbg("[collect] no candidates with ctx_embedding; skipping SigLIP ranking")
+        dbg("[collect] no candidates with usable context metadata; skipping ranking")
         return []
 
     prompt_text = prompt_text or ""
     backend = backend or get_siglip_backend()
     desired_final_k = 5
-    if backend is None:
-        dbg("[collect] SigLIP backend unavailable; skipping ranking")
-        return []
-
-    with _SIGLIP_INFER_LOCK:
-        raw = rerank_image_candidates_siglip(
-            candidates=candidates,
-            prompt_text=prompt_text,
-            backend=backend,
-            top_n=60,
-            final_k=max(25, desired_final_k * 6),
-        )
-
-
-    if not raw:
-        dbg("[collect] SigLIP ranking returned no winners")
-        return []
-
-    cand_by_path = {c["image_path"]: c for c in candidates}
-
     has_non_api = any((c.get("source_kind") or "") != "api" for c in candidates)
 
     SOURCE_KIND_WEIGHT = {
@@ -7208,19 +7302,73 @@ def collect_unique_images(
         "unknown": 0.85,
     }
 
-    for w in raw:
-        c = cand_by_path.get(w.get("image_path") or "", {})
-        sk = (c.get("source_kind") or "unknown").lower()
-        base = float(w.get("final_score") or 0.0)
-        weight = float(SOURCE_KIND_WEIGHT.get(sk, 0.85))
-        w["weighted_score"] = base * weight
+    def _fallback_rank_without_siglip() -> List[dict]:
+        rows: List[dict] = []
+        for c in candidates:
+            sk = str(c.get("source_kind") or "unknown").lower()
+            weight = float(SOURCE_KIND_WEIGHT.get(sk, 0.85))
+            ctx_conf = float(c.get("ctx_confidence") or c.get("ctx_sem_score") or c.get("ctx_score") or 0.0)
+            weighted = weight * ctx_conf
+            rows.append(
+                {
+                    "id": c.get("id"),
+                    "image_path": c["image_path"],
+                    "ctx_embedding": c.get("ctx_embedding"),
+                    "clip_embedding": None,
+                    "ctx_confidence": ctx_conf,
+                    "ctx_score": c.get("ctx_score"),
+                    "ctx_sem_score": c.get("ctx_sem_score"),
+                    "clip_score": None,
+                    "confidence_score": ctx_conf,
+                    "final_score": weighted,
+                    "weighted_score": weighted,
+                    "fallback_rank_reason": "ctx_confidence_only",
+                }
+            )
+        rows.sort(key=lambda x: float(x.get("weighted_score") or 0.0), reverse=True)
+        return rows[: max(1, desired_final_k)]
+
+    raw: List[dict] = []
+    used_siglip_rerank = False
+    if backend is None:
+        dbg("[collect][warn] SigLIP backend unavailable; falling back to metadata-only ranking")
+    else:
+        try:
+            with _SIGLIP_INFER_LOCK:
+                raw = rerank_image_candidates_siglip(
+                    candidates=candidates,
+                    prompt_text=prompt_text,
+                    backend=backend,
+                    top_n=60,
+                    final_k=max(25, desired_final_k * 6),
+                )
+        except Exception as e:
+            dbg(f"[collect][warn] SigLIP rerank failed; falling back to metadata-only ranking: {e}")
+            raw = []
+
+    cand_by_path = {c["image_path"]: c for c in candidates}
+
+    if raw:
+        used_siglip_rerank = True
+        for w in raw:
+            c = cand_by_path.get(w.get("image_path") or "", {})
+            sk = (c.get("source_kind") or "unknown").lower()
+            base = float(w.get("final_score") or 0.0)
+            weight = float(SOURCE_KIND_WEIGHT.get(sk, 0.85))
+            w["weighted_score"] = base * weight
+    else:
+        dbg("[collect][warn] SigLIP ranking returned no winners; using metadata-only fallback")
+        raw = _fallback_rank_without_siglip()
+        if not raw:
+            dbg("[collect] metadata-only fallback produced no winners")
+            return []
 
     raw.sort(key=lambda x: float(x.get("weighted_score") or 0.0), reverse=True)
     ranked = raw[:desired_final_k]
 
 
     if not ranked:
-        dbg("[collect] SigLIP ranking returned no winners")
+        dbg("[collect] ranking produced no winners")
         return []
 
     winners_by_path = {w["image_path"]: w for w in ranked}
@@ -7358,7 +7506,10 @@ def collect_unique_images(
     except Exception as e:
         dbg(f"[collect][err][meta] {e}")
 
-    dbg(f"[collect] winners={len(unique_paths)} saved to {unique_dir}")
+    if used_siglip_rerank:
+        dbg(f"[collect] winners={len(unique_paths)} saved to {unique_dir}")
+    else:
+        dbg(f"[collect] winners={len(unique_paths)} saved to {unique_dir} (metadata-only fallback)")
     return unique_paths
 
 
@@ -7399,17 +7550,25 @@ def collect_unique_images_all_prompts(
 
     backend = backend or get_siglip_backend()
     if backend is None:
-        dbg("[RANKER_TMP] SigLIP backend unavailable; finalize skipped")
-        return out
+        dbg("[RANKER_TMP] SigLIP backend unavailable; using metadata-only fallback")
 
     for row in prompt_rows:
         pid = str((row or {}).get("prompt_id") or "").strip()
         if not pid:
             continue
 
-        metadata_by_path = _load_ranker_metadata_for_prompt(pid, images_root=images_root)
         prompt_text = str((row or {}).get("prompt_text") or "").strip()
+        metadata_by_path = _load_ranker_metadata_for_prompt(pid, images_root=images_root)
+        if not metadata_by_path:
+            metadata_by_path = _load_in_memory_ranker_metadata_for_prompt(pid, prompt_text=prompt_text)
         base_ctx_embedding = (row or {}).get("base_ctx_embedding")
+        if not metadata_by_path:
+            metadata_by_path = _load_ddg_disk_fallback_for_prompt(
+                pid,
+                prompt_text=prompt_text,
+                base_ctx_embedding=base_ctx_embedding,
+                images_root=images_root,
+            )
 
         if not prompt_text:
             for metas in metadata_by_path.values():
@@ -7471,6 +7630,110 @@ def _embed_prompt_to_list(text: str):
     return v
 
 
+def _prefetch_prompt_embeddings(prompts: List[str]) -> Dict[str, Dict[str, Any]]:
+    """
+    Batch prompt embeddings once up front so prompt workers do not serialize on
+    MiniLM before they can start DDG / source research.
+    """
+    out: Dict[str, Dict[str, Any]] = {}
+    clean_prompts = [str(p or "").strip() for p in (prompts or []) if str(p or "").strip()]
+    if not clean_prompts or _EMBED_MODEL is None:
+        return out
+
+    try:
+        embs = _EMBED_MODEL.encode(clean_prompts)
+        arr = np.asarray(embs, dtype=np.float32)
+        if arr.ndim == 1:
+            arr = arr.reshape(1, -1)
+        if arr.shape[0] != len(clean_prompts):
+            raise ValueError(f"expected {len(clean_prompts)} rows, got {arr.shape[0]}")
+    except Exception as e:
+        dbg(f"[MECH][EMBED][WARN] batch prefetch failed: {e}")
+        return out
+
+    for idx, prompt in enumerate(clean_prompts):
+        row = np.asarray(arr[idx], dtype=np.float32)
+        out[prompt] = {
+            "query_embedding": row.copy(),
+            "base_ctx_embedding": row.tolist(),
+        }
+
+    dbg(f"[MECH][EMBED] prefetched prompt embeddings count={len(out)}")
+    return out
+
+
+def _run_parallel_mechanical_research(
+    items: List[Tuple[str, str]],
+    *,
+    max_workers: int,
+) -> None:
+    if not items:
+        return
+
+    prompt_state = _prefetch_prompt_embeddings([p for p, _ in items])
+    worker_cap = max(1, int(max_workers))
+    errors: List[Tuple[str, Exception]] = []
+    errors_lock = threading.Lock()
+
+    def _run_one(prompt: str, topic: str, startup_gate: threading.Event | None = None) -> None:
+        pid = _prompt_key(prompt)
+        state = prompt_state.get(prompt) or {}
+        try:
+            research(
+                prompt,
+                topic,
+                pid,
+                False,
+                None,
+                prefetched_base_ctx_embedding=state.get("base_ctx_embedding"),
+                prefetched_query_embedding=state.get("query_embedding"),
+                startup_gate=startup_gate,
+            )
+        except Exception as e:
+            with errors_lock:
+                errors.append((prompt, e))
+
+    if worker_cap >= len(items):
+        startup_gate = threading.Event()
+        threads: List[threading.Thread] = []
+        for prompt, topic in items:
+            pid = _prompt_key(prompt)
+            dbg(f"[MECH][SUBMIT] prompt='{prompt}' topic='{topic}' prompt_id={pid}")
+            thr = threading.Thread(
+                target=_run_one,
+                args=(prompt, topic, startup_gate),
+                name=f"research_mech_{pid}",
+                daemon=False,
+            )
+            threads.append(thr)
+
+        for thr in threads:
+            thr.start()
+
+        dbg(f"[MECH][START_SYNC] releasing prompts={len(items)}")
+        startup_gate.set()
+
+        for thr in threads:
+            thr.join()
+    else:
+        with ThreadPoolExecutor(max_workers=worker_cap) as ex:
+            futures = []
+            for prompt, topic in items:
+                pid = _prompt_key(prompt)
+                dbg(f"[MECH][SUBMIT] prompt='{prompt}' topic='{topic}' prompt_id={pid}")
+                futures.append(ex.submit(_run_one, prompt, topic, None))
+
+            for fut in as_completed(futures):
+                try:
+                    fut.result()
+                except Exception as e:
+                    with errors_lock:
+                        errors.append(("<executor>", e))
+
+    for prompt, err in errors:
+        dbg(f"[MECH][ERR] worker failed prompt='{prompt}': {err}")
+
+
 def _reset_research_images_dir() -> None:
     try:
         shutil.rmtree(IMAGES_PATH, ignore_errors=True)
@@ -7503,18 +7766,10 @@ def research_many_mechanical(
     if reset_images_dir:
         _reset_research_images_dir()
 
-    with ThreadPoolExecutor(max_workers=max(1, int(max_workers))) as ex:
-        futures = []
-        for prompt, topic in items:
-            pid = _prompt_key(prompt)
-            dbg(f"[MECH][SUBMIT] prompt='{prompt}' topic='{topic}' prompt_id={pid}")
-            futures.append(ex.submit(research, prompt, topic, pid, False, None))
-
-        for fut in as_completed(futures):
-            try:
-                fut.result()
-            except Exception as e:
-                dbg(f"[MECH][ERR] worker failed: {e}")
+    _run_parallel_mechanical_research(
+        items,
+        max_workers=max_workers,
+    )
 
 
 def research_many(prompt_to_topic: Dict[str, str], max_workers: int = 3) -> Dict[str, List[str]]:
@@ -7534,18 +7789,10 @@ def research_many(prompt_to_topic: Dict[str, str], max_workers: int = 3) -> Dict
     _reset_research_images_dir()
 
     # Phase A: parallel gather
-    futures = []
-    with ThreadPoolExecutor(max_workers=max(1, int(max_workers))) as ex:
-        for prompt, topic in items:
-            pid = _prompt_key(prompt)
-            dbg(f"[MULTI][SUBMIT] prompt='{prompt}' topic='{topic}' prompt_id={pid}")
-            futures.append(ex.submit(research, prompt, topic, pid, False, None))  # rank_images=False
-
-        for fut in as_completed(futures):
-            try:
-                fut.result()
-            except Exception as e:
-                dbg(f"[MULTI][ERR] worker failed: {e}")
+    _run_parallel_mechanical_research(
+        items,
+        max_workers=max_workers,
+    )
 
     # Phase B: serial rank from saved ranker state, SigLIP loaded once
     backend = SiglipBackend()
@@ -7573,15 +7820,25 @@ def research(
     siglip_backend: SiglipBackend | None = None,
     api_fallback_only: bool = True,   # NEW: APIs run only if DDG + sources yield 0
     heavy_debug: bool | None = None,
+    prefetched_base_ctx_embedding: Optional[Any] = None,
+    prefetched_query_embedding: Optional[Any] = None,
+    startup_gate: threading.Event | None = None,
 ):
     prompt_id = prompt_id or _prompt_key(query)
+    if startup_gate is not None:
+        startup_gate.wait()
+
     heavy_debug_run = _hdbg_make_run(query=query, subj=subj, prompt_id=prompt_id, enabled=heavy_debug)
     _hdbg_append(
         heavy_debug_run,
         "orchestration",
         {"kind": "start", "ts": _hdbg_iso_now(), "rank_images": bool(rank_images), "api_fallback_only": bool(api_fallback_only)},
     )
-    base_ctx_embedding = _embed_prompt_to_list(query)
+    dbg(f"[RESEARCH][START] prompt='{query}' prompt_id={prompt_id}")
+
+    base_ctx_embedding = prefetched_base_ctx_embedding
+    if base_ctx_embedding is None:
+        base_ctx_embedding = _embed_prompt_to_list(query)
     try:
         _remember_prompt_for_ranker(
             prompt_id=prompt_id,
@@ -7593,8 +7850,14 @@ def research(
         dbg(f"[RANKER_TMP][WARN] prompt manifest save failed prompt_id={prompt_id}: {e}")
 
     encoder = _EMBED_MODEL
-    query_embedding = None
-    if encoder is not None:
+    query_embedding = prefetched_query_embedding
+    if query_embedding is not None:
+        try:
+            query_embedding = np.asarray(query_embedding, dtype=np.float32)
+            dbg(f"[EMBED] prefetched query embedding dim={len(query_embedding)}")
+        except Exception:
+            pass
+    elif encoder is not None:
         try:
             query_embedding = encoder.encode(query)
             dbg(f"[EMBED] query embedding dim={len(query_embedding)}")
@@ -7631,6 +7894,12 @@ def research(
                 encoder=encoder,
                 query_embedding=query_embedding,
                 base_ctx_embedding=base_ctx_embedding,
+                prompt_id=prompt_id,
+                images_path=IMAGES_PATH,
+                dbg_fn=dbg,
+                register_meta_fn=_register_image_metadata,
+                normalize_ctx_meta_fn=_normalize_ctx_meta,
+                download_image_fn=download_image,
             )
         except Exception as e:
             ddg_err["exc"] = e
@@ -7893,10 +8162,8 @@ class _SharedSiglipBackend:
     def encode_image(self, path: str):
         from shared_models import siglip_embed_pil_images
         import numpy as np
-        from PIL import Image
 
-        with Image.open(path) as img:
-            pil = img.convert("RGB")
+        pil = open_rgb_image_with_webp_fallback(path)
         vecs = siglip_embed_pil_images([pil])
         if not vecs:
             raise RuntimeError("shared_models SigLIP worker unavailable")

@@ -5,6 +5,44 @@ import traceback
 import numpy as np
 from PIL import Image, UnidentifiedImageError
 
+def open_rgb_image_with_webp_fallback(path: str) -> Image.Image:
+    """
+    Open an image as RGB, with a cv2-backed fallback for WEBP/other formats when
+    Pillow decoding is unavailable in the current runtime.
+    """
+    try:
+        with Image.open(path) as img:
+            return img.convert("RGB")
+    except (UnidentifiedImageError, OSError) as pil_err:
+        try:
+            import cv2
+
+            arr = cv2.imread(str(path), cv2.IMREAD_UNCHANGED)
+            if arr is None:
+                raise UnidentifiedImageError(f"cv2 could not decode image: {path}")
+
+            if arr.ndim == 2:
+                rgb = cv2.cvtColor(arr, cv2.COLOR_GRAY2RGB)
+                return Image.fromarray(rgb)
+
+            if arr.ndim == 3 and arr.shape[2] == 4:
+                bgra = cv2.cvtColor(arr, cv2.COLOR_BGRA2RGBA)
+                rgba = Image.fromarray(bgra)
+                bg = Image.new("RGB", rgba.size, (255, 255, 255))
+                bg.paste(rgba.convert("RGB"), mask=rgba.getchannel("A"))
+                return bg
+
+            if arr.ndim == 3 and arr.shape[2] == 3:
+                rgb = cv2.cvtColor(arr, cv2.COLOR_BGR2RGB)
+                return Image.fromarray(rgb)
+
+            raise UnidentifiedImageError(f"unsupported image array shape from cv2: {getattr(arr, 'shape', None)}")
+        except Exception as cv_err:
+            raise UnidentifiedImageError(
+                f"failed to decode image '{path}' via Pillow and cv2; "
+                f"pillow_error={pil_err}; cv2_error={cv_err}"
+            ) from cv_err
+
 # keep your SiglipBackend as-is, but I strongly recommend this small safety tweak:
 # (this does NOT change your existing comments)
 class SiglipBackend:
@@ -22,11 +60,7 @@ class SiglipBackend:
 
     @staticmethod
     def _open_rgb(path: str) -> Image.Image:
-        # fails loud and clear if Pillow cannot decode the file
-        img = Image.open(path)
-        if img.mode != "RGB":
-            img = img.convert("RGB")
-        return img
+        return open_rgb_image_with_webp_fallback(path)
 
     def encode_text(self, text: str) -> np.ndarray:
         import torch

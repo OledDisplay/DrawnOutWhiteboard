@@ -16,7 +16,7 @@ custom nodes (clone in ComfyUI/custom_nodes:
 http://github.com/Comfy-Org/ComfyUI-Manager
 https://github.com/chengzeyi/Comfy-WaveSpeed
 
-to run comfy command:
+run comfy command:
 python main.py --listen 0.0.0.0 --port 8188 --disable-auto-launch --verbose INFO --use-quad-cross-attention --fast --disable-metadata --dont-upcast-attention --force-channels-last --preview-method none
 
 drop in FluxModel.json in user\default\workflows

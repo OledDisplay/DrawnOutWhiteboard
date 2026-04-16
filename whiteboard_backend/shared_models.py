@@ -26,6 +26,20 @@ def _log(msg: str) -> None:
     print(f"[{ts}][{th}] {msg}")
 
 
+_SIGLIP_DEFAULT_FALLBACK = "google/siglip-base-patch16-384"
+
+
+def resolve_siglip_model_id(explicit: Optional[str] = None) -> str:
+    raw = (
+        explicit
+        or os.getenv("SIGLIP_MODEL_ID")
+        or os.getenv("SIGLIP_NAME")
+        or _SIGLIP_DEFAULT_FALLBACK
+    )
+    model_id = str(raw or "").strip()
+    return model_id or _SIGLIP_DEFAULT_FALLBACK
+
+
 @dataclass
 class QwenBundle:
     model: Any
@@ -125,19 +139,98 @@ def _batch_to_device(batch: Any, device: str) -> Any:
         return batch
 
 
-def _clear_cuda_cache() -> None:
+def _clear_cuda_cache(*, gpu_index: Optional[int] = None, reset_peak: bool = False) -> None:
     try:
         import torch
         if torch.cuda.is_available():
+            dev = None
+            dev_count = int(torch.cuda.device_count() or 0)
+            if gpu_index is not None and 0 <= int(gpu_index) < dev_count:
+                try:
+                    torch.cuda.set_device(int(gpu_index))
+                except Exception:
+                    pass
+                dev = torch.device(f"cuda:{int(gpu_index)}")
             try:
-                torch.cuda.synchronize()
+                if dev is not None:
+                    torch.cuda.synchronize(dev)
+                else:
+                    torch.cuda.synchronize()
             except Exception:
                 pass
-            torch.cuda.empty_cache()
+            try:
+                torch.cuda.empty_cache()
+            except Exception:
+                pass
             try:
                 torch.cuda.ipc_collect()
             except Exception:
                 pass
+            if bool(reset_peak):
+                try:
+                    if dev is not None:
+                        torch.cuda.reset_peak_memory_stats(dev)
+                    else:
+                        torch.cuda.reset_peak_memory_stats()
+                except Exception:
+                    pass
+        else:
+            return
+    except Exception:
+        pass
+
+
+def _release_model_cuda_refs(model: Any) -> None:
+    if model is None:
+        return
+
+    try:
+        import qwentest
+
+        clear_runtime = getattr(qwentest, "_clear_model_runtime_cache_refs", None)
+        if callable(clear_runtime):
+            clear_runtime(model)
+    except Exception:
+        pass
+
+    for attr in ("_cache", "_past_key_values", "past_key_values"):
+        try:
+            if hasattr(model, attr):
+                setattr(model, attr, None)
+        except Exception:
+            pass
+
+    try:
+        gen_cfg = getattr(model, "generation_config", None)
+        if gen_cfg is not None and hasattr(gen_cfg, "cache_implementation"):
+            gen_cfg.cache_implementation = None
+    except Exception:
+        pass
+
+    moved = False
+    try:
+        if hasattr(model, "to_empty"):
+            model.to_empty(device="meta")
+            moved = True
+    except Exception:
+        moved = False
+
+    if moved:
+        return
+
+    try:
+        hf_device_map = getattr(model, "hf_device_map", None)
+    except Exception:
+        hf_device_map = None
+
+    if hf_device_map:
+        return
+
+    try:
+        if hasattr(model, "to"):
+            model.to("cpu")
+        elif hasattr(model, "cpu"):
+            model.cpu()
     except Exception:
         pass
 
@@ -313,7 +406,7 @@ class _SiglipTextOnlyModelAdapter:
 
 def init_siglip_text_hot(
     *,
-    siglip_model_id: str = "google/siglip2-giant-opt-patch16-384",
+    siglip_model_id: Optional[str] = None,
     gpu_index: int = 0,
     cpu_threads: int = 4,
     warmup: bool = True,
@@ -325,6 +418,7 @@ def init_siglip_text_hot(
     """
     global _SIGLIP_TEXT
 
+    siglip_model_id = resolve_siglip_model_id(siglip_model_id)
     configure_threads(cpu_threads)
     _torch_and_cv2_post_config(cpu_threads)
 
@@ -408,13 +502,14 @@ def init_siglip_text_hot(
 
 def init_siglip_hot(
     *,
-    siglip_model_id: str = "google/siglip2-giant-opt-patch16-384",
+    siglip_model_id: Optional[str] = None,
     gpu_index: int = 0,
     cpu_threads: int = 4,
     warmup: bool = True,
 ) -> None:
     global _SIGLIP
 
+    siglip_model_id = resolve_siglip_model_id(siglip_model_id)
     configure_threads(cpu_threads)
     _torch_and_cv2_post_config(cpu_threads)
 
@@ -432,7 +527,15 @@ def init_siglip_hot(
                 for device in _preferred_siglip_devices(gpu_index):
                     model = None
                     try:
-                        model = AutoModel.from_pretrained(siglip_model_id)
+                        load_kwargs: dict[str, Any] = {
+                            "low_cpu_mem_usage": True,
+                        }
+                        if device == "cuda":
+                            load_kwargs["torch_dtype"] = torch.bfloat16 if torch.cuda.is_bf16_supported() else torch.float16
+                        else:
+                            load_kwargs["torch_dtype"] = torch.float32
+
+                        model = AutoModel.from_pretrained(siglip_model_id, **load_kwargs)
                         model.to(device)
                         model.eval()
 
@@ -526,7 +629,7 @@ def init_minilm_hot(
 
 def init_siglip_minilm_hot(
     *,
-    siglip_model_id: str = "google/siglip2-giant-opt-patch16-384",
+    siglip_model_id: Optional[str] = None,
     minilm_model_id: str = "sentence-transformers/all-MiniLM-L6-v2",
     gpu_index: int = 0,
     cpu_threads: int = 4,
@@ -563,12 +666,26 @@ def init_qwen_hot(
             _log(f"Loading Qwen once: {qwen_model_id} (gpu_index={gpu_index})")
             import qwentest  # local module
 
-            model, processor, device = qwentest.preload_qwen_cpu_only(qwen_model_id, warmup=False)
-
             try:
-                model, device = qwentest.move_qwen_to_cuda_if_available(model, gpu_index=gpu_index)
-            except Exception as e:
-                _log(f"[WARN] Qwen CUDA move failed, staying on CPU: {e}")
+                # Prefer direct low-peak load path (avoids CPU float32 staging spikes).
+                orig_model_id = getattr(qwentest, "MODEL_ID", None)
+                orig_gpu_index = getattr(qwentest, "GPU_INDEX", None)
+                try:
+                    qwentest.MODEL_ID = qwen_model_id
+                    qwentest.GPU_INDEX = int(gpu_index)
+                    model, processor, device, _used_quant = qwentest.load_model_and_processor()
+                finally:
+                    if orig_model_id is not None:
+                        qwentest.MODEL_ID = orig_model_id
+                    if orig_gpu_index is not None:
+                        qwentest.GPU_INDEX = orig_gpu_index
+            except Exception as direct_load_err:
+                _log(f"[WARN] Qwen direct load path failed, falling back to CPU staging: {direct_load_err}")
+                model, processor, device = qwentest.preload_qwen_cpu_only(qwen_model_id, warmup=False)
+                try:
+                    model, device = qwentest.move_qwen_to_cuda_if_available(model, gpu_index=gpu_index)
+                except Exception as e:
+                    _log(f"[WARN] Qwen CUDA move failed, staying on CPU: {e}")
 
             try:
                 model.eval()
@@ -638,7 +755,15 @@ def init_efficientsam3_hot(
             except Exception:
                 pass
 
-            processor = Sam3Processor(model)
+            raw_thr = str(os.getenv("EFFICIENTSAM3_CONF_THRESHOLD", "0.01") or "0.01").strip()
+            try:
+                conf_thr = float(raw_thr)
+            except Exception:
+                conf_thr = 0.01
+            conf_thr = max(0.0, min(1.0, conf_thr))
+
+            processor = Sam3Processor(model, confidence_threshold=conf_thr)
+            _log(f"EfficientSAM3 processor confidence_threshold={conf_thr:.4f}")
 
             if warmup:
                 try:
@@ -668,8 +793,7 @@ def unload_qwen() -> None:
             import gc
 
             try:
-                if hasattr(bundle.model, "cpu"):
-                    bundle.model.cpu()
+                _release_model_cuda_refs(bundle.model)
             except Exception:
                 pass
 
@@ -682,7 +806,8 @@ def unload_qwen() -> None:
             except Exception:
                 pass
             gc.collect()
-            _clear_cuda_cache()
+            gc.collect()
+            _clear_cuda_cache(gpu_index=bundle.gpu_index, reset_peak=True)
         except Exception:
             _QWEN = None
 
@@ -698,7 +823,6 @@ def unload_siglip() -> None:
             return
         _log("Unloading SigLIP...")
         try:
-            import torch
             import gc
 
             try:
@@ -709,8 +833,7 @@ def unload_siglip() -> None:
 
             _SIGLIP = None
             gc.collect()
-            if torch.cuda.is_available():
-                torch.cuda.empty_cache()
+            _clear_cuda_cache()
         except Exception:
             _SIGLIP = None
         finally:
@@ -728,7 +851,6 @@ def unload_siglip_text() -> None:
             return
         _log("Unloading SigLIP text-only...")
         try:
-            import torch
             import gc
 
             try:
@@ -739,8 +861,7 @@ def unload_siglip_text() -> None:
 
             _SIGLIP_TEXT = None
             gc.collect()
-            if torch.cuda.is_available():
-                torch.cuda.empty_cache()
+            _clear_cuda_cache()
         except Exception:
             _SIGLIP_TEXT = None
         finally:
@@ -797,8 +918,7 @@ def unload_efficientsam3() -> None:
             import gc
 
             try:
-                if hasattr(bundle.model, "cpu"):
-                    bundle.model.cpu()
+                _release_model_cuda_refs(bundle.model)
             except Exception:
                 pass
 
@@ -811,7 +931,8 @@ def unload_efficientsam3() -> None:
             except Exception:
                 pass
             gc.collect()
-            _clear_cuda_cache()
+            gc.collect()
+            _clear_cuda_cache(gpu_index=bundle.gpu_index, reset_peak=True)
         except Exception:
             _SAM = None
 
@@ -819,7 +940,7 @@ def unload_efficientsam3() -> None:
 def init_hot_models(
     *,
     qwen_model_id: str = "Qwen/Qwen3-VL-2B-Instruct",
-    siglip_model_id: str = "google/siglip-so400m-patch14-384",
+    siglip_model_id: Optional[str] = None,
     minilm_model_id: str = "sentence-transformers/all-MiniLM-L6-v2",
     gpu_index: int = 0,
     cpu_threads: int = 4,

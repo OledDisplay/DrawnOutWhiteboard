@@ -1,11 +1,14 @@
+import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
 import 'dart:math' as math;
 import 'dart:ui';
 
 import 'package:flutter/material.dart';
-import 'package:http/http.dart' as http;  // <-- ADD THIS
+import 'package:http/http.dart' as http;
 
+import 'lesson_tts_stream_accepter.dart';
+import 'whiteboard_actions.dart';
 
 void main() {
   runApp(const WhiteboardApp());
@@ -30,26 +33,38 @@ class VectorViewerScreen extends StatefulWidget {
   State<VectorViewerScreen> createState() => _VectorViewerScreenState();
 }
 
-
 class _VectorViewerScreenState extends State<VectorViewerScreen>
     with SingleTickerProviderStateMixin {
-  // === BASE FOLDER FOR JSONS (IMAGES) ===
-  // === BASE FOLDER FOR JSONS (IMAGES) ===
-  static String get _vectorsFolder =>
-      _resolveBackendSubdir('StrokeVectors');
+  static String get _vectorsFolder => _resolveBackendSubdir('StrokeVectors');
 
-  // FONT GLYPH JSONS (TEXT)
-  static String get _fontVectorsFolder =>
-      _resolveBackendSubdir('Font');
+  static String get _fontVectorsFolder => _resolveBackendSubdir('Font');
 
-  static String get _fontMetricsPath =>
-      '${_fontVectorsFolder}\\font_metrics.json';
+  static String get _fontMetricsPath => '${_fontVectorsFolder}\\font_metrics.json';
 
-  // RAW strokes from last loaded file (kept for debugging)
+  static String get _clustersFolder =>
+      _resolveBackendSubdir(r'PipelineOutputs\_diagram_part_stroke_maps');
+
+  static const String _lessonWsUrl = 'ws://127.0.0.1:8765';
+
+  static const double _targetResolution = 2000.0;
+  static const double _defaultImageObjectScale = 0.75;
+  static const double _basePenWidthPx = 4.0;
+  static const double _boardWidth = _targetResolution;
+  static const double _boardHeight = _targetResolution;
+  static const int _maxDisplayPointsPerStroke = 120;
+  static const bool _forceMaxObjectAnimationDuration = true;
+  static const double _forcedMaxObjectAnimationDurationSec = 5.0;
+  static const bool _enableParallelStrokeWorkers = true;
+  static const int _maxParallelStrokeWorkers = 24;
+
+  static const String _apiBaseUrl = 'http://127.0.0.1:8000';
+  static const bool _backendEnabled = true;
+
+  Uri _apiUri(String path) => Uri.parse('$_apiBaseUrl$path');
+
   List<StrokePolyline> _polyStrokes = const [];
   List<StrokeCubic> _cubicStrokes = const [];
 
-  // DRAWABLE strokes on the board
   List<DrawableStroke> _drawableStrokes = const [];
   List<DrawableStroke> _staticStrokes = const [];
   List<DrawableStroke> _animStrokes = const [];
@@ -62,69 +77,26 @@ class _VectorViewerScreenState extends State<VectorViewerScreen>
   late final AnimationController _controller;
   double _animValue = 0.0;
 
-  // step mode
   bool _stepMode = false;
   int _stepStrokeCount = 0;
 
-  static const double _targetResolution = 2000.0; // target max side
-  static const double _basePenWidthPx = 4; // logical image px
-
-  // ------------ Backend API config ------------
-  static const String _apiBaseUrl = 'http://127.0.0.1:8000'; // change if needed
-  static const bool _backendEnabled = true;
-
-  Uri _apiUri(String path) => Uri.parse('$_apiBaseUrl$path');
-
-
-  // Virtual board extents in world coordinates.
-  static const double _boardWidth = _targetResolution;
-  static const double _boardHeight = _targetResolution;
-
-  // Max number of points we keep per stroke for display.
-  static const int _maxDisplayPointsPerStroke = 120;
-
-  // ------------------- CORE TIMING PARAMETERS (NON-TEXT) -------------------
-
-  // Stroke draw timing (seconds) for normal objects/images
-  double _minStrokeTimeSec = 0.29;
+  double _minStrokeTimeSec = 0.17;
   double _maxStrokeTimeSec = 0.8;
-
-  // Extra time from length: seconds per 1000px of stroke length
   double _lengthTimePerKPxSec = 0.3;
-
-  // Extra time from curvature: max seconds added at "full" curvature
   double _curvatureExtraMaxSec = 0.08;
-
-  // Curvature profile along the stroke (local slowdowns)
   double _curvatureProfileFactor = 1.5;
   double _curvatureAngleScale = 80.0;
-
-  // Travel / pause between strokes (seconds) for normal objects
   double _baseTravelTimeSec = 0.15;
   double _travelTimePerKPxSec = 0.12;
   double _minTravelTimeSec = 0.15;
   double _maxTravelTimeSec = 0.35;
-
-  // Global animation timing
   double _globalSpeedMultiplier = 1.0;
+  double _textLetterGapPx = 20.0;
+  double _strokeSpeedStartPct = 0.08;
+  double _strokeSpeedEndPct = 0.25;
+  double _strokeSpeedPeakMult = 2.50;
+  double _strokeSpeedPeakTime = 0.6;
 
-  double _textLetterGapPx = 20.0; // default gap in board pixels between letters
-
-    // ------------------- WITHIN-STROKE SPEED ENVELOPE -------------------
-  // Human-like accel -> peak -> decel inside a single stroke.
-  // start/end are fractions of stroke time (0..1).
-  // peakMult is the peak speed relative to baseline cruise=1.
-  // peakTime is where the peak happens (0..1).
-  double _strokeSpeedStartPct = 0.08;  // 0..0.35
-  double _strokeSpeedEndPct = 0.25;    // 0..0.35
-  double _strokeSpeedPeakMult = 2.50;  // 1..4
-  double _strokeSpeedPeakTime = 0.6;  // 0..1
-
-
-
-  // --------------- MULTI-OBJECT SUPPORT ---------------
-
-  // UI controllers for loading JSONs (images)
   final TextEditingController _fileNameController =
       TextEditingController(text: 'processed_4.json');
   final TextEditingController _posXController =
@@ -132,31 +104,23 @@ class _VectorViewerScreenState extends State<VectorViewerScreen>
   final TextEditingController _posYController =
       TextEditingController(text: '0');
   final TextEditingController _scaleController =
-      TextEditingController(text: '1.0');
+      TextEditingController(text: _defaultImageObjectScale.toString());
 
-  // list of distinct json names currently on board (including text prompts)
   final List<String> _drawnJsonNames = [];
   String? _selectedEraseName;
 
-  // --------------- TEXT ENGINE STATE ---------------
-
-  // cached glyphs by code unit
   final Map<int, GlyphData> _glyphCache = {};
-  double? _fontLineHeightPx; // ascent+descent in font pixels
-  double? _fontImageHeightPx; // image_height used in font generation
+  double? _fontLineHeightPx;
+  double? _fontImageHeightPx;
 
-  // text timing: when _animIsText = true, we use these rules
   bool _animIsText = false;
   static const double _defaultTextStrokeSlowdown = 8.0;
   double _textStrokeSlowdown = _defaultTextStrokeSlowdown;
-  double _textStrokeBaseTimeSec = 0.035; // constant per stroke
-  double _textStrokeCurveExtraFrac = 0.25; // fraction of base added at max curvature
-  double _textLetterPauseSec = 0.0; // currently unused (no waits)
-
-  // reference used only for text scaling UI defaults
+  double _textStrokeBaseTimeSec = 0.017;
+  double _textStrokeCurveExtraFrac = 0.25;
+  double _textLetterPauseSec = 0.0;
   double _textBaseFontSizeRef = 200.0;
 
-  // text UI controllers
   final TextEditingController _textPromptController =
       TextEditingController(text: 'Hello, world');
   final TextEditingController _textXController =
@@ -166,11 +130,77 @@ class _VectorViewerScreenState extends State<VectorViewerScreen>
   final TextEditingController _textSizeController =
       TextEditingController(text: '180');
   final TextEditingController _textGapController =
-    TextEditingController(text: '20'); 
+      TextEditingController(text: '20');
+
+  final Map<String, BoardObjectRecord> _boardObjectsById = {};
+  final Map<String, Set<String>> _boardObjectIdsByAlias = {};
+  final Map<String, DiagramRuntimeState> _diagramStatesByObjectId = {};
+  final Set<String> _highlightedClusterRefs = <String>{};
+  final Map<String, DiagramPlacedLabel> _diagramLabelsByClusterRef = {};
+  final List<DiagramConnectionRecord> _diagramConnections = [];
+  String? _zoomedClusterRef;
+
+  static String get _processedImagesFolder =>
+      _resolveBackendSubdir('ProcessedImages');
+
+  final Map<String, double> _objectSaturationById = {};
+  final Map<String, Set<String>> _activeHighlightRefsByDiagramId = {};
+  final Map<String, int> _highlightRefCountsByClusterRef = {};
+  final Map<String, double> _diagramNonFocusSaturationByObjectId = {};
+  final Map<String, VectorBlueprint> _vectorBlueprintCache = {};
+  final Map<String, List<DiagramLabelAnchor>> _labelAnchorCacheByProcessedId = {};
+  final Map<int, ActiveLessonAction> _activeLessonActionsByGlobalIndex = {};
+  final Set<String> _processedSilenceEventKeys = <String>{};
+  Future<void> _lessonActionQueue = Future<void>.value();
+  String? _zoomedDiagramObjectId;
+  double _boardZoomScale = 1.0;
+  Offset _boardZoomWorldCenter = Offset.zero;
+  int _tempObjectCounter = 0;
+  double _activeAnimationDurationSec = 0.0;
+  int _activeAnimationWorkerCount = 1;
+  Completer<void>? _animationCompletionCompleter;
+
+  late final WhiteboardActions _whiteboardActions;
+  late final LessonTtsStreamAccepter _lessonStreamAccepter;
 
   @override
   void initState() {
     super.initState();
+    _whiteboardActions = WhiteboardActions(
+      onDrawImage: _addObjectFromJson,
+      onWriteText: _writeTextPrompt,
+      onDeleteObject: ({String? id, String? name}) =>
+          _deleteObject(id: id, name: name),
+      onMoveObject: ({required String target, required Offset newOrigin}) =>
+          _moveObjectTo(target: target, newOrigin: newOrigin),
+      onLinkToImage: ({required String target, required String imageName}) =>
+          _linkObjectToImage(target: target, imageName: imageName),
+      onDeleteSelf: ({required String target}) => _deleteObject(name: target),
+      onDrawCluster: ({required String clusterRef}) =>
+          _drawCluster(clusterRef: clusterRef),
+      onHighlightCluster: ({required String clusterRef}) =>
+          _highlightCluster(clusterRef: clusterRef),
+      onZoomCluster: ({required String clusterRef}) =>
+          _zoomCluster(clusterRef: clusterRef),
+      onWriteLabel: ({required String clusterRef, required String text}) =>
+          _writeDiagramLabel(clusterRef: clusterRef, text: text),
+      onConnectClusters: ({
+        required String fromClusterRef,
+        required String toClusterRef,
+      }) =>
+          _connectClusters(
+        fromClusterRef: fromClusterRef,
+        toClusterRef: toClusterRef,
+      ),
+    );
+    WhiteboardActionHost.instance.bind(_whiteboardActions);
+    _lessonStreamAccepter = LessonTtsStreamAccepter(
+      websocketUrl: _lessonWsUrl,
+      autoReconnect: true,
+      onPacket: _handleLessonStreamPacket,
+      onError: _handleLessonStreamError,
+    );
+
     _controller = AnimationController(
       vsync: this,
       duration: const Duration(milliseconds: 20000),
@@ -194,24 +224,2214 @@ class _VectorViewerScreenState extends State<VectorViewerScreen>
                   'Animation finished. Total strokes: ${_drawableStrokes.length}';
             });
           }
+          final completer = _animationCompletionCompleter;
+          _animationCompletionCompleter = null;
+          if (completer != null && !completer.isCompleted) {
+            completer.complete();
+          }
         }
       });
 
-    // Load any objects saved on the backend (if enabled)
     _loadObjectsFromBackend();
+    unawaited(_lessonStreamAccepter.connect());
   }
-
-
-  
 
   @override
   void dispose() {
+    WhiteboardActionHost.instance.unbind(_whiteboardActions);
+    unawaited(_lessonStreamAccepter.dispose());
     _controller.dispose();
+    _fileNameController.dispose();
+    _posXController.dispose();
+    _posYController.dispose();
+    _scaleController.dispose();
+    _textPromptController.dispose();
+    _textXController.dispose();
+    _textYController.dispose();
+    _textSizeController.dispose();
+    _textGapController.dispose();
     super.dispose();
   }
 
-  // ------------------- FONT METRICS (TEXT) -------------------
+  void _handleLessonStreamPacket(LessonStreamPacket packet) {
+    if (!mounted) {
+      return;
+    }
 
+    if (packet.rawType == 'deletion_silence') {
+      final emitPhase = (packet.rawJson['emit_phase'] ?? '').toString();
+      final chapterIndex = _coerceInt(packet.rawJson['chapter_index']);
+
+      setState(() {
+        _status =
+            'Received deletion silence packet ($emitPhase) for chapter $chapterIndex.';
+      });
+
+      _enqueueLessonOperation(() async {
+        if (emitPhase == 'start') {
+          await _executeDeletionSilenceFromRaw(packet.rawJson);
+        }
+      });
+      return;
+    }
+
+    final actionPacket = packet.actionPacket;
+    if (actionPacket != null) {
+      setState(() {
+        _status =
+            'Received ${actionPacket.action.type} packet (${actionPacket.emitPhase}) '
+            'for chapter ${actionPacket.chapterIndex}.';
+      });
+
+      _enqueueLessonOperation(() async {
+        if (actionPacket.isStartPhase) {
+          await _executeActionPacket(actionPacket);
+        } else {
+          await _executeActionPacketEnd(actionPacket);
+        }
+      });
+      return;
+    }
+
+    setState(() {
+      _status = 'Received lesson stream packet: ${packet.rawType}.';
+    });
+  }
+
+  void _handleLessonStreamError(Object error, StackTrace stackTrace) {
+    if (!mounted) {
+      return;
+    }
+
+    setState(() {
+      _status = 'Lesson stream error: $error';
+    });
+  }
+
+  void _enqueueLessonOperation(Future<void> Function() operation) {
+    _lessonActionQueue = _lessonActionQueue.then((_) => operation()).catchError(
+      (Object error, StackTrace stackTrace) {
+        _handleLessonStreamError(error, stackTrace);
+      },
+    );
+  }
+
+  int _coerceInt(dynamic value, [int fallback = 0]) {
+    if (value is int) {
+      return value;
+    }
+    if (value is num) {
+      return value.toInt();
+    }
+    return int.tryParse(value?.toString() ?? '') ?? fallback;
+  }
+
+  Future<void> _executeDeletionSilenceFromRaw(
+    Map<String, dynamic> raw,
+  ) async {
+    final eventKey =
+        '${_coerceInt(raw['chapter_index'])}:${_coerceInt(raw['event_index'])}';
+    if (_processedSilenceEventKeys.contains(eventKey)) {
+      return;
+    }
+    _processedSilenceEventKeys.add(eventKey);
+
+    final protectedNames = <String>{};
+    final blocked = raw['delete_targets_blocked_due_active_diagram'];
+    if (blocked is List) {
+      protectedNames.addAll(
+        blocked.map((e) => e.toString().trim()).where((e) => e.isNotEmpty),
+      );
+    }
+    final shifted = raw['manual_shift_targets_due_active_diagram'];
+    if (shifted is List) {
+      protectedNames.addAll(
+        shifted.map((e) => e.toString().trim()).where((e) => e.isNotEmpty),
+      );
+    }
+
+    final protectedRootIds = <String>{};
+    for (final name in protectedNames) {
+      protectedRootIds.addAll(_resolveObjectIds(name));
+    }
+
+    final candidates = _boardObjectsById.values
+        .where((record) {
+          if (protectedRootIds.contains(record.objectId)) {
+            return false;
+          }
+
+          final ownerDiagramId = record.ownerDiagramObjectId;
+          if (ownerDiagramId != null &&
+              protectedRootIds.contains(ownerDiagramId)) {
+            return false;
+          }
+
+          return true;
+        })
+        .toList(growable: false)
+      ..sort((a, b) {
+        final aBounds = _objectBounds(a.objectId);
+        final bBounds = _objectBounds(b.objectId);
+
+        final aTop = aBounds?.top ?? a.origin.dy;
+        final bTop = bBounds?.top ?? b.origin.dy;
+        final byTop = aTop.compareTo(bTop);
+        if (byTop != 0) {
+          return byTop;
+        }
+
+        final aLeft = aBounds?.left ?? a.origin.dx;
+        final bLeft = bBounds?.left ?? b.origin.dx;
+        return aLeft.compareTo(bLeft);
+      });
+
+    if (candidates.isEmpty) {
+      if (!mounted) {
+        return;
+      }
+      setState(() {
+        _status =
+            'Deletion silence: nothing to delete. Protected roots: ${protectedRootIds.length}.';
+      });
+      return;
+    }
+
+    for (final record in candidates) {
+      await _deleteObject(id: record.objectId, silentIfMissing: true);
+      await Future<void>.delayed(const Duration(milliseconds: 35));
+    }
+
+    if (!mounted) {
+      return;
+    }
+    setState(() {
+      _status =
+          'Deletion silence cleared ${candidates.length} object(s). Protected roots: ${protectedRootIds.length}.';
+    });
+  }
+
+  Future<void> _executeActionPacket(LessonActionPacket packet) async {
+    final action = packet.action;
+
+    if (packet.eventKind == 'silence' &&
+        (action.type == 'delete_by_name' || action.type == 'delete_by_id')) {
+      await _executeDeletionSilenceFromRaw(packet.rawJson);
+      return;
+    }
+
+    switch (action.type) {
+      case 'draw_image':
+        final fileName = _resolveVectorFileName(packet, action);
+        if (fileName == null) {
+          setState(() {
+            _status =
+                'draw_image skipped: no processed_id/file name for ${packet.name}';
+          });
+          return;
+        }
+
+        final logicalName = action.target?.trim().isNotEmpty == true
+            ? action.target!.trim()
+            : packet.name;
+        final aliases = <String>{
+          if (logicalName.isNotEmpty) logicalName,
+          if (packet.name.isNotEmpty) packet.name,
+          if (packet.processedId.isNotEmpty) packet.processedId,
+          fileName,
+          _stemWithoutJson(fileName),
+        };
+
+        await _whiteboardActions.drawImage(
+          fileName: fileName,
+          origin: Offset(action.x ?? 0.0, action.y ?? 0.0),
+          objectScale: action.scale ?? _defaultImageObjectScale,
+          boardObjectId: packet.processedId.isNotEmpty
+              ? packet.processedId
+              : _stemWithoutJson(fileName),
+          logicalName: logicalName,
+          processedId: packet.processedId.isEmpty ? null : packet.processedId,
+          aliases: aliases,
+        );
+        await _waitForStrokeAnimationComplete();
+        return;
+
+      case 'write_text':
+        final prompt = action.text ?? action.target ?? packet.name;
+        if (prompt.trim().isEmpty) {
+          return;
+        }
+
+        final attachedIds = _resolveObjectIds(action.target);
+        final attachedToObjectId = attachedIds.isEmpty ? null : attachedIds.first;
+
+        await _whiteboardActions.writeText(
+          prompt: prompt,
+          origin: Offset(action.x ?? 0.0, action.y ?? 0.0),
+          letterSize: _deriveLetterSizeFromScale(action.scale ?? 1.0),
+          boardObjectId: 'text_action_${packet.globalActionIndex}',
+          logicalName: prompt,
+          attachedToObjectId: attachedToObjectId,
+          aliases: <String>{
+            prompt,
+            if ((action.target ?? '').trim().isNotEmpty) action.target!.trim(),
+            if (packet.name.trim().isNotEmpty) packet.name.trim(),
+          },
+        );
+        await _waitForStrokeAnimationComplete();
+        return;
+
+      case 'move_inside_bbox':
+        await _moveObjectTo(
+          target: action.target ?? packet.name,
+          newOrigin: Offset(action.newX ?? 0.0, action.newY ?? 0.0),
+        );
+        return;
+
+      case 'link_to_image':
+        if ((action.target ?? '').isEmpty || (action.imageName ?? '').isEmpty) {
+          return;
+        }
+        await _startLinkToImageAction(packet, action);
+        return;
+
+      case 'delete_self':
+        await _whiteboardActions.deleteSelf(
+          target: _bestDeleteTarget(packet, action),
+        );
+        return;
+
+      case 'delete_by_name':
+        final target = action.target?.trim();
+        if (target == null || target.isEmpty) {
+          return;
+        }
+        await _whiteboardActions.deleteObject(name: target);
+        return;
+
+      case 'delete_by_id':
+        final targetId = action.imageId?.trim();
+        if (targetId == null || targetId.isEmpty) {
+          return;
+        }
+        await _whiteboardActions.deleteObject(id: targetId);
+        return;
+
+      case 'draw_cluster':
+        final clusterRef = action.clusterName?.trim();
+        if (clusterRef == null || clusterRef.isEmpty) {
+          return;
+        }
+        await _startDrawClusterAction(packet, clusterRef);
+        return;
+
+      case 'highlight_cluster':
+        final clusterRef = action.clusterName?.trim();
+        if (clusterRef == null || clusterRef.isEmpty) {
+          return;
+        }
+        await _startHighlightClusterAction(packet, clusterRef);
+        return;
+
+      case 'zoom_cluster':
+        final clusterRef = action.clusterName?.trim();
+        if (clusterRef == null || clusterRef.isEmpty) {
+          return;
+        }
+        await _startZoomClusterAction(packet, clusterRef);
+        return;
+
+      case 'write_label':
+        final clusterRef = action.clusterName?.trim();
+        final labelText = action.text?.trim();
+        if (clusterRef == null || clusterRef.isEmpty || labelText == null || labelText.isEmpty) {
+          return;
+        }
+        await _startWriteLabelAction(packet, clusterRef, labelText);
+        return;
+
+      case 'connect_cluster_to_cluster':
+        final fromCluster = action.fromCluster?.trim();
+        final toCluster = action.toCluster?.trim();
+        if (fromCluster == null ||
+            fromCluster.isEmpty ||
+            toCluster == null ||
+            toCluster.isEmpty) {
+          return;
+        }
+        await _startConnectClustersAction(packet, fromCluster, toCluster);
+        return;
+
+      default:
+        setState(() {
+          _status = 'Unsupported action type: ${action.type}';
+        });
+    }
+  }
+
+  Future<void> _executeActionPacketEnd(LessonActionPacket packet) async {
+    switch (packet.action.type) {
+      case 'link_to_image':
+      case 'highlight_cluster':
+      case 'zoom_cluster':
+      case 'connect_cluster_to_cluster':
+        await _runCounterActionByIndex(packet.globalActionIndex);
+        return;
+      default:
+        return;
+    }
+  }
+
+  Future<void> _runCounterActionByIndex(int globalActionIndex) async {
+    final action = _activeLessonActionsByGlobalIndex[globalActionIndex];
+    if (action == null) {
+      return;
+    }
+    await _runCounterAction(action);
+  }
+
+  Future<void> _runCounterAction(ActiveLessonAction action) async {
+    switch (action.type) {
+      case 'link_to_image':
+        if (action.tempObjectId != null) {
+          await _deleteObject(id: action.tempObjectId, silentIfMissing: true);
+        }
+        break;
+      case 'highlight_cluster':
+        if (action.primaryClusterRef != null && action.diagramObjectId != null) {
+          await _removeHighlightClusterRef(
+            diagramObjectId: action.diagramObjectId!,
+            clusterRef: action.primaryClusterRef!,
+          );
+        }
+        break;
+      case 'zoom_cluster':
+        if (action.primaryClusterRef != null && action.diagramObjectId != null) {
+          await _deactivateZoom(
+            diagramObjectId: action.diagramObjectId!,
+            clusterRef: action.primaryClusterRef!,
+          );
+        }
+        break;
+      case 'connect_cluster_to_cluster':
+        if (action.tempObjectId != null) {
+          await _deleteObject(id: action.tempObjectId, silentIfMissing: true);
+        }
+        if (action.diagramObjectId != null && action.primaryClusterRef != null) {
+          await _removeHighlightClusterRef(
+            diagramObjectId: action.diagramObjectId!,
+            clusterRef: action.primaryClusterRef!,
+          );
+        }
+        if (action.secondaryDiagramObjectId != null &&
+            action.secondaryClusterRef != null) {
+          await _removeHighlightClusterRef(
+            diagramObjectId: action.secondaryDiagramObjectId!,
+            clusterRef: action.secondaryClusterRef!,
+          );
+        }
+        break;
+    }
+    _activeLessonActionsByGlobalIndex.remove(action.globalActionIndex);
+  }
+
+  Future<void> _cancelIncompatibleDiagramActionsForStart({
+    required String incomingType,
+    required Set<String> incomingDiagramIds,
+    required int incomingActionId,
+  }) async {
+    final activeActions = _activeLessonActionsByGlobalIndex.values.toList();
+    for (final active in activeActions) {
+      if (!active.isDiagramAction || active.globalActionIndex == incomingActionId) {
+        continue;
+      }
+
+      final sameDiagramHighlight = incomingType == 'highlight_cluster' &&
+          active.type == 'highlight_cluster' &&
+          incomingDiagramIds.length == 1 &&
+          active.affectedDiagramObjectIds.length == 1 &&
+          incomingDiagramIds.first == active.affectedDiagramObjectIds.first;
+
+      if (sameDiagramHighlight) {
+        continue;
+      }
+
+      await _runCounterAction(active);
+    }
+  }
+
+  Future<void> _handleSilenceDeletionStart(LessonActionPacket packet) {
+    return _executeDeletionSilenceFromRaw(packet.rawJson);
+  }
+
+  Future<void> _startLinkToImageAction(
+    LessonActionPacket packet,
+    LessonBoardAction action,
+  ) async {
+    final targetIds = _resolveObjectIds(action.target);
+    final imageIds = _resolveObjectIds(action.imageName);
+    if (targetIds.isEmpty || imageIds.isEmpty) {
+      setState(() {
+        _status =
+            'link_to_image skipped: target="${action.target}", image="${action.imageName}"';
+      });
+      return;
+    }
+
+    final fromId = targetIds.first;
+    final toId = imageIds.first;
+    final fromBounds = _objectBounds(fromId);
+    final toBounds = _objectBounds(toId);
+    if (fromBounds == null || toBounds == null) {
+      return;
+    }
+
+    final segments = _buildDoubleArrowConnectorSegments(
+      fromBounds: fromBounds,
+      toBounds: toBounds,
+      gap: 30.0,
+      arrowLength: 48.0,
+      arrowHalfWidth: 18.0,
+    );
+
+    final connectorId = _nextTempObjectId('link');
+    await _addGeneratedPolylineObject(
+      objectId: connectorId,
+      displayName: connectorId,
+      polylines: segments,
+      color: Colors.black,
+      isTemporary: true,
+      ownerDiagramObjectId: null,
+      syncWithBackend: false,
+      aliases: <String>{connectorId, 'connector_${packet.globalActionIndex}'},
+      awaitAnimation: true,
+    );
+
+    _activeLessonActionsByGlobalIndex[packet.globalActionIndex] = ActiveLessonAction(
+      globalActionIndex: packet.globalActionIndex,
+      type: 'link_to_image',
+      tempObjectId: connectorId,
+      affectedDiagramObjectIds: const <String>{},
+    );
+  }
+
+  Future<void> _startDrawClusterAction(
+    LessonActionPacket packet,
+    String clusterRef,
+  ) async {
+    final resolved = await _resolveOrCreateCluster(packet, clusterRef);
+    if (resolved == null) {
+      setState(() {
+        _status = 'draw_cluster skipped: no cluster for "$clusterRef".';
+      });
+      return;
+    }
+
+    await _cancelIncompatibleDiagramActionsForStart(
+      incomingType: 'draw_cluster',
+      incomingDiagramIds: <String>{resolved.diagram.objectId},
+      incomingActionId: packet.globalActionIndex,
+    );
+
+    await _drawCluster(clusterRef: clusterRef, resolved: resolved);
+  }
+
+  Future<void> _startHighlightClusterAction(
+    LessonActionPacket packet,
+    String clusterRef,
+  ) async {
+    final resolved = await _resolveOrCreateCluster(packet, clusterRef);
+    if (resolved == null) {
+      setState(() {
+        _status = 'highlight_cluster skipped: no cluster for "$clusterRef".';
+      });
+      return;
+    }
+
+    await _cancelIncompatibleDiagramActionsForStart(
+      incomingType: 'highlight_cluster',
+      incomingDiagramIds: <String>{resolved.diagram.objectId},
+      incomingActionId: packet.globalActionIndex,
+    );
+
+    await _highlightCluster(clusterRef: clusterRef, resolved: resolved);
+    _activeLessonActionsByGlobalIndex[packet.globalActionIndex] = ActiveLessonAction(
+      globalActionIndex: packet.globalActionIndex,
+      type: 'highlight_cluster',
+      diagramObjectId: resolved.diagram.objectId,
+      primaryClusterRef: resolved.cluster.clusterRef,
+      affectedDiagramObjectIds: <String>{resolved.diagram.objectId},
+    );
+  }
+
+  Future<void> _startZoomClusterAction(
+    LessonActionPacket packet,
+    String clusterRef,
+  ) async {
+    final resolved = await _resolveOrCreateCluster(packet, clusterRef);
+    if (resolved == null) {
+      setState(() {
+        _status = 'zoom_cluster skipped: no cluster for "$clusterRef".';
+      });
+      return;
+    }
+
+    await _cancelIncompatibleDiagramActionsForStart(
+      incomingType: 'zoom_cluster',
+      incomingDiagramIds: <String>{resolved.diagram.objectId},
+      incomingActionId: packet.globalActionIndex,
+    );
+
+    await _zoomCluster(clusterRef: clusterRef, resolved: resolved);
+    _activeLessonActionsByGlobalIndex[packet.globalActionIndex] = ActiveLessonAction(
+      globalActionIndex: packet.globalActionIndex,
+      type: 'zoom_cluster',
+      diagramObjectId: resolved.diagram.objectId,
+      primaryClusterRef: resolved.cluster.clusterRef,
+      affectedDiagramObjectIds: <String>{resolved.diagram.objectId},
+    );
+  }
+
+  Future<void> _startWriteLabelAction(
+    LessonActionPacket packet,
+    String clusterRef,
+    String labelText,
+  ) async {
+    final resolved = await _resolveOrCreateCluster(packet, clusterRef);
+    if (resolved == null) {
+      setState(() {
+        _status = 'write_label skipped: no cluster for "$clusterRef".';
+      });
+      return;
+    }
+
+    await _cancelIncompatibleDiagramActionsForStart(
+      incomingType: 'write_label',
+      incomingDiagramIds: <String>{resolved.diagram.objectId},
+      incomingActionId: packet.globalActionIndex,
+    );
+
+    await _writeDiagramLabel(
+      clusterRef: clusterRef,
+      text: labelText,
+      resolved: resolved,
+      actionKey: packet.globalActionIndex,
+    );
+  }
+
+  Future<void> _startConnectClustersAction(
+    LessonActionPacket packet,
+    String fromClusterRef,
+    String toClusterRef,
+  ) async {
+    final fromResolved = await _resolveOrCreateCluster(packet, fromClusterRef);
+    final toResolved = await _resolveOrCreateCluster(packet, toClusterRef);
+    if (fromResolved == null || toResolved == null) {
+      setState(() {
+        _status =
+            'connect_cluster_to_cluster skipped: "$fromClusterRef" -> "$toClusterRef".';
+      });
+      return;
+    }
+
+    await _cancelIncompatibleDiagramActionsForStart(
+      incomingType: 'connect_cluster_to_cluster',
+      incomingDiagramIds: <String>{
+        fromResolved.diagram.objectId,
+        toResolved.diagram.objectId,
+      },
+      incomingActionId: packet.globalActionIndex,
+    );
+
+    await _applyHighlightClusterRef(
+      diagramObjectId: fromResolved.diagram.objectId,
+      clusterRef: fromResolved.cluster.clusterRef,
+    );
+    await _applyHighlightClusterRef(
+      diagramObjectId: toResolved.diagram.objectId,
+      clusterRef: toResolved.cluster.clusterRef,
+    );
+
+    final fromCenter = _clusterCenterForResolved(fromResolved) ??
+        (_objectBounds(fromResolved.diagram.objectId)?.center);
+    final toCenter = _clusterCenterForResolved(toResolved) ??
+        (_objectBounds(toResolved.diagram.objectId)?.center);
+    if (fromCenter == null || toCenter == null) {
+      return;
+    }
+
+    final dottedSegments = _buildDottedLineSegments(
+      from: fromCenter,
+      to: toCenter,
+      gapFromStart: 24.0,
+      gapFromEnd: 24.0,
+      dashLength: 22.0,
+      dashGap: 16.0,
+    );
+
+    final connectorId = _nextTempObjectId('diagram_connect');
+    await _addGeneratedPolylineObject(
+      objectId: connectorId,
+      displayName: connectorId,
+      polylines: dottedSegments,
+      color: const Color(0xFF26A69A),
+      isTemporary: true,
+      ownerDiagramObjectId: fromResolved.diagram.objectId,
+      syncWithBackend: false,
+      aliases: <String>{connectorId, 'diagram_connect_${packet.globalActionIndex}'},
+      awaitAnimation: true,
+    );
+
+    _activeLessonActionsByGlobalIndex[packet.globalActionIndex] = ActiveLessonAction(
+      globalActionIndex: packet.globalActionIndex,
+      type: 'connect_cluster_to_cluster',
+      diagramObjectId: fromResolved.diagram.objectId,
+      primaryClusterRef: fromResolved.cluster.clusterRef,
+      secondaryDiagramObjectId: toResolved.diagram.objectId,
+      secondaryClusterRef: toResolved.cluster.clusterRef,
+      tempObjectId: connectorId,
+      affectedDiagramObjectIds: <String>{
+        fromResolved.diagram.objectId,
+        toResolved.diagram.objectId,
+      },
+    );
+  }
+
+  Future<ResolvedDiagramCluster?> _resolveOrCreateCluster(
+    LessonActionPacket packet,
+    String rawClusterRef,
+  ) async {
+    var resolved = _resolveCluster(rawClusterRef);
+    if (resolved != null) {
+      return resolved;
+    }
+
+    final parsed = DiagramClusterTarget.tryParse(rawClusterRef);
+    if (parsed == null) {
+      return null;
+    }
+
+    final processedId = packet.processedId.trim();
+    if (processedId.isEmpty) {
+      return null;
+    }
+
+    final objectId = processedId;
+    final existing = _boardObjectsById[objectId];
+    if (existing == null) {
+      final blueprint = await _loadVectorBlueprint('${processedId}.json');
+      if (blueprint == null) {
+        return null;
+      }
+      final origin = Offset(packet.action.x ?? 0.0, packet.action.y ?? 0.0);
+      final scale = packet.action.scale ?? _defaultImageObjectScale;
+      final record = BoardObjectRecord(
+        objectId: objectId,
+        kind: BoardObjectKind.image,
+        displayName: parsed.diagramName,
+        origin: origin,
+        scale: scale,
+        fileName: blueprint.fileName,
+        processedId: processedId,
+        aliases: <String>{
+          parsed.diagramName,
+          packet.name,
+          processedId,
+          blueprint.fileName,
+          _stemWithoutJson(blueprint.fileName),
+        },
+        sourceWidth: blueprint.srcWidth,
+        sourceHeight: blueprint.srcHeight,
+        sourceBounds: blueprint.sourceBounds,
+      );
+      setState(() {
+        _registerObject(record);
+      });
+      await _loadDiagramStateIfPresent(
+        objectId: objectId,
+        diagramName: parsed.diagramName,
+        processedId: processedId,
+      );
+    }
+
+    resolved = _resolveCluster(rawClusterRef);
+    return resolved;
+  }
+
+  String? _resolveVectorFileName(
+    LessonActionPacket packet,
+    LessonBoardAction action,
+  ) {
+    if (packet.processedId.trim().isNotEmpty) {
+      return '${packet.processedId.trim()}.json';
+    }
+
+    final imageName = packet.imageName.trim();
+    if (imageName.isNotEmpty) {
+      return imageName.endsWith('.json') ? imageName : '$imageName.json';
+    }
+
+    final target = (action.target ?? '').trim();
+    if (target.endsWith('.json')) {
+      return target;
+    }
+
+    return null;
+  }
+
+  String _bestDeleteTarget(LessonActionPacket packet, LessonBoardAction action) {
+    final rawTarget = (action.target ?? '').trim();
+    if (rawTarget.isNotEmpty) {
+      return rawTarget;
+    }
+    if (packet.processedId.trim().isNotEmpty) {
+      return packet.processedId.trim();
+    }
+    return packet.name.trim();
+  }
+
+  double _deriveLetterSizeFromScale(double scale) {
+    final safeScale = scale <= 0 ? 1.0 : scale;
+    return _textBaseFontSizeRef * safeScale;
+  }
+
+  String _stemWithoutJson(String value) {
+    if (value.toLowerCase().endsWith('.json')) {
+      return value.substring(0, value.length - 5);
+    }
+    return value;
+  }
+
+  String _normalizeLookupKey(String value) {
+    final trimmed = value.trim().toLowerCase();
+    final collapsed = trimmed.replaceAll(RegExp(r'\s+'), ' ');
+    return collapsed.replaceAll(RegExp(r'[^a-z0-9 ]'), '');
+  }
+
+  Iterable<String> _aliasLookupKeys(String value) sync* {
+    final trimmed = value.trim();
+    if (trimmed.isEmpty) {
+      return;
+    }
+    yield trimmed;
+    final normalized = _normalizeLookupKey(trimmed);
+    if (normalized.isNotEmpty && normalized != trimmed) {
+      yield normalized;
+    }
+  }
+
+  void _registerObject(BoardObjectRecord record) {
+    _boardObjectsById[record.objectId] = record;
+    _objectSaturationById.putIfAbsent(record.objectId, () => 1.0);
+
+    for (final alias in record.aliases) {
+      for (final key in _aliasLookupKeys(alias)) {
+        final bucket = _boardObjectIdsByAlias.putIfAbsent(key, () => <String>{});
+        bucket.add(record.objectId);
+      }
+    }
+
+    if (!record.isTemporary) {
+      if (!_drawnJsonNames.contains(record.displayName)) {
+        _drawnJsonNames.add(record.displayName);
+      }
+      _selectedEraseName ??= record.displayName;
+    }
+  }
+
+  void _unregisterObject(String objectId) {
+    final record = _boardObjectsById.remove(objectId);
+    if (record == null) {
+      return;
+    }
+
+    _objectSaturationById.remove(objectId);
+    _diagramNonFocusSaturationByObjectId.remove(objectId);
+    _activeHighlightRefsByDiagramId.remove(objectId);
+    if (_zoomedDiagramObjectId == objectId) {
+      _zoomedDiagramObjectId = null;
+      _zoomedClusterRef = null;
+      _boardZoomScale = 1.0;
+      _boardZoomWorldCenter = Offset.zero;
+    }
+
+    for (final alias in record.aliases) {
+      for (final key in _aliasLookupKeys(alias)) {
+        final bucket = _boardObjectIdsByAlias[key];
+        if (bucket == null) {
+          continue;
+        }
+        bucket.remove(objectId);
+        if (bucket.isEmpty) {
+          _boardObjectIdsByAlias.remove(key);
+        }
+      }
+    }
+
+    final diagramState = _diagramStatesByObjectId.remove(objectId);
+    if (diagramState != null) {
+      for (final clusterRef in diagramState.clustersByCanonicalRef.keys) {
+        _highlightedClusterRefs.remove(clusterRef);
+        _highlightRefCountsByClusterRef.remove(clusterRef);
+        _diagramLabelsByClusterRef.remove(clusterRef);
+        if (_zoomedClusterRef == clusterRef) {
+          _zoomedClusterRef = null;
+        }
+      }
+    }
+
+    _diagramConnections.removeWhere(
+      (connection) =>
+          connection.fromObjectId == objectId || connection.toObjectId == objectId,
+    );
+    _activeLessonActionsByGlobalIndex.removeWhere(
+      (_, action) => action.tempObjectId == objectId,
+    );
+
+    if (!record.isTemporary) {
+      final stillUsedDisplayName = _boardObjectsById.values
+          .any((candidate) => !candidate.isTemporary && candidate.displayName == record.displayName);
+      if (!stillUsedDisplayName) {
+        _drawnJsonNames.remove(record.displayName);
+      }
+
+      if (_selectedEraseName == record.displayName) {
+        _selectedEraseName = _drawnJsonNames.isEmpty ? null : _drawnJsonNames.last;
+      }
+    }
+  }
+
+  Set<String> _resolveObjectIds(String? rawKey) {
+    final key = (rawKey ?? '').trim();
+    if (key.isEmpty) {
+      return <String>{};
+    }
+
+    final resolved = <String>{};
+
+    if (_boardObjectsById.containsKey(key)) {
+      resolved.add(key);
+    }
+
+    final fileStem = _stemWithoutJson(key);
+    if (_boardObjectsById.containsKey(fileStem)) {
+      resolved.add(fileStem);
+    }
+
+    for (final lookupKey in <String>{
+      ..._aliasLookupKeys(key),
+      ..._aliasLookupKeys(fileStem),
+    }) {
+      final bucket = _boardObjectIdsByAlias[lookupKey];
+      if (bucket != null && bucket.isNotEmpty) {
+        resolved.addAll(bucket);
+      }
+    }
+
+    return resolved;
+  }
+
+  Rect? _objectBounds(String objectId) {
+    final strokes = <DrawableStroke>[
+      ..._staticStrokes.where((stroke) => stroke.jsonName == objectId),
+      ..._animStrokes.where((stroke) => stroke.jsonName == objectId),
+    ];
+    if (strokes.isEmpty) {
+      return null;
+    }
+    Rect bounds = strokes.first.bounds;
+    for (int i = 1; i < strokes.length; i++) {
+      bounds = bounds.expandToInclude(strokes[i].bounds);
+    }
+    return bounds;
+  }
+
+  Offset? _clusterCenterForResolved(ResolvedDiagramCluster resolved) {
+    final bounds = _clusterBoundsForResolved(resolved);
+    if (bounds == null) {
+      return null;
+    }
+    return bounds.center;
+  }
+
+  Rect? _clusterBoundsForResolved(ResolvedDiagramCluster resolved) {
+    final strokes = <DrawableStroke>[
+      ..._staticStrokes,
+      ..._animStrokes,
+    ].where((stroke) {
+      return stroke.jsonName == resolved.diagram.objectId &&
+          resolved.cluster.strokeIndexes.contains(stroke.sourceStrokeIndex);
+    }).toList(growable: false);
+    if (strokes.isEmpty) {
+      return null;
+    }
+    Rect bounds = strokes.first.bounds;
+    for (int i = 1; i < strokes.length; i++) {
+      bounds = bounds.expandToInclude(strokes[i].bounds);
+    }
+    return bounds;
+  }
+
+  Future<void> _deleteObject({
+    String? id,
+    String? name,
+    bool silentIfMissing = false,
+    bool animate = true,
+  }) async {
+    final ids = <String>{};
+    if (id != null && id.trim().isNotEmpty) {
+      ids.addAll(_resolveObjectIds(id));
+      if (ids.isEmpty && _boardObjectsById.containsKey(id.trim())) {
+        ids.add(id.trim());
+      }
+    }
+    if (name != null && name.trim().isNotEmpty) {
+      ids.addAll(_resolveObjectIds(name));
+    }
+
+    if (ids.isEmpty) {
+      if (!silentIfMissing) {
+        setState(() {
+          _status = 'Delete skipped: no object matches id=$id name=$name';
+        });
+      }
+      return;
+    }
+
+    if (animate) {
+      for (final objectId in ids) {
+        await _animateDeleteObject(objectId);
+      }
+    }
+
+    final deletedRecords = <BoardObjectRecord>[];
+    setState(() {
+      _staticStrokes = _staticStrokes.where((s) => !ids.contains(s.jsonName)).toList();
+      _animStrokes = _animStrokes.where((s) => !ids.contains(s.jsonName)).toList();
+      _drawableStrokes = [..._staticStrokes, ..._animStrokes];
+
+      for (final objectId in ids) {
+        final record = _boardObjectsById[objectId];
+        if (record != null) {
+          deletedRecords.add(record);
+        }
+        _unregisterObject(objectId);
+      }
+
+      _status =
+          'Deleted ${ids.length} object(s). Remaining strokes: ${_drawableStrokes.length}';
+    });
+
+    if (_animStrokes.isEmpty) {
+      _controller.stop();
+      setState(() {
+        _animValue = 0.0;
+        _stepMode = false;
+        _stepStrokeCount = 0;
+        _activeAnimationDurationSec = 0.0;
+        _activeAnimationWorkerCount = 1;
+      });
+      final completer = _animationCompletionCompleter;
+      _animationCompletionCompleter = null;
+      if (completer != null && !completer.isCompleted) {
+        completer.complete();
+      }
+    }
+
+    if (_backendEnabled) {
+      for (final record in deletedRecords.where((r) => r.syncWithBackend)) {
+        () async {
+          try {
+            await _syncDeleteOnBackend(record.backendDeleteName);
+          } catch (e) {
+            if (!mounted) return;
+            setState(() {
+              _status += '\n[Backend delete failed: $e]';
+            });
+          }
+        }();
+      }
+    }
+  }
+
+  Future<void> _animateDeleteObject(String objectId) async {
+    final strokes = <DrawableStroke>[
+      ..._staticStrokes.where((stroke) => stroke.jsonName == objectId),
+      ..._animStrokes.where((stroke) => stroke.jsonName == objectId),
+    ];
+    if (strokes.isEmpty) {
+      return;
+    }
+    final bounds = _objectBounds(objectId);
+    if (bounds == null) {
+      return;
+    }
+
+    final remaining = strokes.toList(growable: true);
+    const steps = 18;
+    final radius = math.max(bounds.width, bounds.height) * 0.16;
+
+    for (int step = 0; step < steps && remaining.isNotEmpty; step++) {
+      final t = step / math.max(1, steps - 1);
+      final sweepY = lerpDouble(bounds.top, bounds.bottom, t) ?? bounds.top;
+      final swing = ((step % 2 == 0) ? 0.18 : 0.82) * bounds.width;
+      final eraser = Offset(bounds.left + swing, sweepY);
+
+      final removeNow = <DrawableStroke>[];
+      for (final stroke in remaining) {
+        if ((stroke.centroid - eraser).distance <= radius ||
+            stroke.bounds.overlaps(Rect.fromCircle(center: eraser, radius: radius))) {
+          removeNow.add(stroke);
+        }
+      }
+      if (removeNow.isEmpty && remaining.isNotEmpty) {
+        remaining.sort(
+          (a, b) =>
+              (a.centroid - eraser).distance.compareTo((b.centroid - eraser).distance),
+        );
+        removeNow.add(remaining.first);
+      }
+
+      remaining.removeWhere(removeNow.contains);
+      if (mounted) {
+        setState(() {
+          _staticStrokes = _staticStrokes.where((stroke) => !removeNow.contains(stroke)).toList(growable: false);
+          _animStrokes = _animStrokes.where((stroke) => !removeNow.contains(stroke)).toList(growable: false);
+          _drawableStrokes = [..._staticStrokes, ..._animStrokes];
+        });
+      }
+      await Future<void>.delayed(const Duration(milliseconds: 18));
+    }
+  }
+
+  Future<void> _moveObjectTo({
+    required String target,
+    required Offset newOrigin,
+  }) async {
+    final ids = _resolveObjectIds(target);
+    if (ids.isEmpty) {
+      setState(() {
+        _status = 'Move skipped: no object matches "$target".';
+      });
+      return;
+    }
+
+    final startOrigins = <String, Offset>{};
+    for (final objectId in ids) {
+      final record = _boardObjectsById[objectId];
+      if (record != null) {
+        startOrigins[objectId] = record.origin;
+      }
+    }
+    if (startOrigins.isEmpty) {
+      return;
+    }
+
+    for (final objectId in ids) {
+      await _animateObjectSaturation(objectId, 0.0, durationMs: 110);
+    }
+
+    const steps = 22;
+    for (int step = 1; step <= steps; step++) {
+      final t = step / steps;
+      final eased = _smoothMotion(t);
+      final deltas = <String, Offset>{};
+      for (final entry in startOrigins.entries) {
+        final currentRecord = _boardObjectsById[entry.key];
+        if (currentRecord == null) {
+          continue;
+        }
+        final desiredOrigin = Offset.lerp(entry.value, newOrigin, eased) ?? newOrigin;
+        deltas[entry.key] = desiredOrigin - currentRecord.origin;
+        currentRecord.origin = desiredOrigin;
+      }
+      if (deltas.isNotEmpty && mounted) {
+        setState(() {
+          _staticStrokes = _translateObjectsInList(_staticStrokes, deltas);
+          _animStrokes = _translateObjectsInList(_animStrokes, deltas);
+          _drawableStrokes = [..._staticStrokes, ..._animStrokes];
+        });
+      }
+      await Future<void>.delayed(const Duration(milliseconds: 16));
+    }
+
+    for (final objectId in ids) {
+      await _animateObjectSaturation(objectId, 1.0, durationMs: 110);
+    }
+
+    if (mounted) {
+      setState(() {
+        _status = 'Moved ${ids.length} object(s) to (${newOrigin.dx}, ${newOrigin.dy}).';
+      });
+    }
+  }
+
+  List<DrawableStroke> _translateObjectsInList(
+    List<DrawableStroke> source,
+    Map<String, Offset> deltas,
+  ) {
+    return source.map((stroke) {
+      final delta = deltas[stroke.jsonName];
+      if (delta == null || delta == Offset.zero) {
+        return stroke;
+      }
+      return _translateStroke(stroke, delta);
+    }).toList(growable: false);
+  }
+
+  DrawableStroke _translateStroke(DrawableStroke source, Offset delta) {
+    if (delta == Offset.zero) {
+      return source;
+    }
+
+    final movedPoints = source.points
+        .map((p) => Offset(p.dx + delta.dx, p.dy + delta.dy))
+        .toList(growable: false);
+    final movedOriginalPoints = source.originalPoints
+        .map((p) => Offset(p.dx + delta.dx, p.dy + delta.dy))
+        .toList(growable: false);
+
+    return source.copyWith(
+      objectOrigin: Offset(
+        source.objectOrigin.dx + delta.dx,
+        source.objectOrigin.dy + delta.dy,
+      ),
+      points: movedPoints,
+      originalPoints: movedOriginalPoints,
+      centroid: Offset(
+        source.centroid.dx + delta.dx,
+        source.centroid.dy + delta.dy,
+      ),
+      bounds: source.bounds.shift(delta),
+    );
+  }
+
+  Future<void> _linkObjectToImage({
+    required String target,
+    required String imageName,
+  }) async {
+    final targetIds = _resolveObjectIds(target);
+    final imageIds = _resolveObjectIds(imageName);
+
+    if (targetIds.isEmpty || imageIds.isEmpty) {
+      setState(() {
+        _status = 'link_to_image skipped: target="$target", image="$imageName"';
+      });
+      return;
+    }
+
+    final linkedTo = imageIds.first;
+    for (final targetId in targetIds) {
+      final record = _boardObjectsById[targetId];
+      if (record != null) {
+        record.linkedToObjectId = linkedTo;
+      }
+    }
+
+    setState(() {
+      _status = 'Linked ${targetIds.length} object(s) to $linkedTo.';
+    });
+  }
+
+  Future<void> _drawCluster({
+    required String clusterRef,
+    ResolvedDiagramCluster? resolved,
+  }) async {
+    resolved ??= _resolveCluster(clusterRef);
+    if (resolved == null) {
+      setState(() {
+        _status = 'draw_cluster skipped: no cluster for "$clusterRef".';
+      });
+      return;
+    }
+
+    final record = _boardObjectsById[resolved.diagram.objectId];
+    if (record == null || record.fileName == null) {
+      return;
+    }
+    final blueprint = await _loadVectorBlueprint(record.fileName!);
+    if (blueprint == null) {
+      return;
+    }
+
+    final missingIndexes = resolved.cluster.strokeIndexes
+        .difference(resolved.diagram.drawnStrokeIndexes)
+        .toSet();
+    if (missingIndexes.isEmpty) {
+      return;
+    }
+
+    final poly = blueprint.polylines
+        .where((stroke) => missingIndexes.contains(stroke.sourceStrokeIndex))
+        .toList(growable: false);
+    final cubics = blueprint.cubics
+        .where((stroke) => missingIndexes.contains(stroke.sourceStrokeIndex))
+        .toList(growable: false);
+
+    if (poly.isEmpty && cubics.isEmpty) {
+      return;
+    }
+
+    final newStrokes = _buildDrawableStrokesForObject(
+      jsonName: resolved.diagram.objectId,
+      origin: record.origin,
+      objectScale: record.scale,
+      polylines: poly,
+      cubics: cubics,
+      srcWidth: record.sourceWidth ?? blueprint.srcWidth,
+      srcHeight: record.sourceHeight ?? blueprint.srcHeight,
+      targetResolution: _targetResolution,
+      basePenWidth: _basePenWidthPx,
+    );
+
+    setState(() {
+      _finishCurrentAnimIntoStatic();
+      _animIsText = false;
+      _animStrokes = newStrokes;
+      _drawableStrokes = [..._staticStrokes, ..._animStrokes];
+      resolved!.cluster.wasExplicitlyDrawn = true;
+      resolved.diagram.drawnStrokeIndexes.addAll(missingIndexes);
+      _status = 'Drawing cluster ${resolved.cluster.clusterRef}';
+    });
+
+    _recomputeTimingForAnimStrokes();
+    await _waitForStrokeAnimationComplete();
+  }
+
+  Future<void> _highlightCluster({
+    required String clusterRef,
+    ResolvedDiagramCluster? resolved,
+  }) async {
+    resolved ??= _resolveCluster(clusterRef);
+    if (resolved == null) {
+      setState(() {
+        _status = 'highlight_cluster skipped: no cluster for "$clusterRef".';
+      });
+      return;
+    }
+
+    await _applyHighlightClusterRef(
+      diagramObjectId: resolved.diagram.objectId,
+      clusterRef: resolved.cluster.clusterRef,
+    );
+  }
+
+  Future<void> _zoomCluster({
+    required String clusterRef,
+    ResolvedDiagramCluster? resolved,
+  }) async {
+    resolved ??= _resolveCluster(clusterRef);
+    if (resolved == null) {
+      setState(() {
+        _status = 'zoom_cluster skipped: no cluster for "$clusterRef".';
+      });
+      return;
+    }
+
+    await _activateZoom(
+      diagramObjectId: resolved.diagram.objectId,
+      clusterRef: resolved.cluster.clusterRef,
+      focus: _clusterCenterForResolved(resolved) ??
+          (_objectBounds(resolved.diagram.objectId)?.center ?? Offset.zero),
+    );
+  }
+
+  Future<void> _writeDiagramLabel({
+    required String clusterRef,
+    required String text,
+    ResolvedDiagramCluster? resolved,
+    int? actionKey,
+  }) async {
+    resolved ??= _resolveCluster(clusterRef);
+    if (resolved == null) {
+      setState(() {
+        _status = 'write_label skipped: no cluster for "$clusterRef".';
+      });
+      return;
+    }
+
+    final diagramRecord = _boardObjectsById[resolved.diagram.objectId];
+    if (diagramRecord == null) {
+      return;
+    }
+
+    final writeTarget = await _resolveDiagramWriteTarget(
+      diagram: resolved.diagram,
+      cluster: resolved.cluster,
+      diagramRecord: diagramRecord,
+      text: text,
+    );
+
+    final labelObjectId = _nextTempObjectId('label');
+    await _writeTextPromptLocal(
+      prompt: text,
+      origin: writeTarget.origin,
+      letterSize: writeTarget.letterSize,
+      strokeSlowdown: 1.0,
+      boardObjectId: labelObjectId,
+      logicalName: labelObjectId,
+      attachedToObjectId: resolved.diagram.objectId,
+      aliases: <String>{labelObjectId, text, clusterRef},
+      isTemporary: true,
+      ownerDiagramObjectId: resolved.diagram.objectId,
+      syncWithBackend: false,
+    );
+    await _waitForStrokeAnimationComplete();
+
+    final labelBounds = _objectBounds(labelObjectId);
+    final clusterBounds = _clusterBoundsForResolved(resolved);
+    if (labelBounds != null && clusterBounds != null) {
+      final lineSegments = _buildLeaderLineSegments(
+        fromBounds: labelBounds,
+        toBounds: clusterBounds,
+        gap: 12.0,
+      );
+      await _appendGeneratedPolylinesToObject(
+        objectId: labelObjectId,
+        polylines: lineSegments,
+        color: const Color(0xFF1976D2),
+        awaitAnimation: true,
+      );
+    }
+
+    setState(() {
+      resolved!.cluster.lastWrittenLabel = text;
+      _diagramLabelsByClusterRef[resolved.cluster.clusterRef] = DiagramPlacedLabel(
+        objectId: resolved.diagram.objectId,
+        clusterRef: resolved.cluster.clusterRef,
+        text: text,
+      );
+      resolved.diagram.labelWriteCount += 1;
+    });
+  }
+
+  Future<void> _connectClusters({
+    required String fromClusterRef,
+    required String toClusterRef,
+  }) async {
+    // direct calls are routed through the packet aware starter.
+    final fromResolved = _resolveCluster(fromClusterRef);
+    final toResolved = _resolveCluster(toClusterRef);
+    if (fromResolved == null || toResolved == null) {
+      return;
+    }
+    final connectionKey =
+        '${fromResolved.cluster.clusterRef}>>${toResolved.cluster.clusterRef}';
+
+    final existing = _diagramConnections.any(
+      (connection) => connection.connectionKey == connectionKey,
+    );
+    if (!existing) {
+      setState(() {
+        _diagramConnections.add(
+          DiagramConnectionRecord(
+            connectionKey: connectionKey,
+            fromObjectId: fromResolved.diagram.objectId,
+            fromClusterRef: fromResolved.cluster.clusterRef,
+            toObjectId: toResolved.diagram.objectId,
+            toClusterRef: toResolved.cluster.clusterRef,
+          ),
+        );
+      });
+    }
+  }
+
+  ResolvedDiagramCluster? _resolveCluster(String rawClusterRef) {
+    final parsed = DiagramClusterTarget.tryParse(rawClusterRef);
+    if (parsed == null) {
+      return null;
+    }
+
+    final objectIds = _resolveObjectIds(parsed.diagramName);
+    for (final objectId in objectIds) {
+      final diagram = _diagramStatesByObjectId[objectId];
+      if (diagram == null) {
+        continue;
+      }
+
+      final cluster = diagram.resolveCluster(parsed.clusterName);
+      if (cluster != null) {
+        return ResolvedDiagramCluster(diagram: diagram, cluster: cluster);
+      }
+    }
+
+    return null;
+  }
+
+  Future<void> _loadDiagramStateIfPresent({
+    required String objectId,
+    required String diagramName,
+    required String processedId,
+  }) async {
+    final path = '$_clustersFolder\\$processedId.json';
+    final file = File(path);
+    if (!file.existsSync()) {
+      return;
+    }
+
+    try {
+      final raw = await file.readAsString();
+      final decoded = json.decode(raw);
+      if (decoded is! Map) {
+        return;
+      }
+
+      final diagramState = DiagramRuntimeState(
+        objectId: objectId,
+        diagramName: diagramName,
+        processedId: processedId,
+      );
+
+      final refinedLabelMap = decoded['refined_label_to_strokes'];
+      if (refinedLabelMap is Map) {
+        for (final entry in refinedLabelMap.entries) {
+          final matchedLabel = entry.key.toString().trim();
+          if (matchedLabel.isEmpty) {
+            continue;
+          }
+
+          final labelEntry = entry.value;
+          if (labelEntry is! Map) {
+            continue;
+          }
+
+          final strokeIndexes = _coerceStrokeIndexes(labelEntry['stroke_indexes']);
+          if (strokeIndexes.isEmpty) {
+            continue;
+          }
+
+          final cluster = DiagramClusterRecord(
+            clusterRef: '$diagramName : $matchedLabel',
+            diagramName: diagramName,
+            label: matchedLabel,
+            normalizedLabel: _normalizeLookupKey(matchedLabel),
+            strokeIndexes: strokeIndexes,
+            targetKey:
+                (labelEntry['source_key'] ?? labelEntry['target_key'])
+                    ?.toString(),
+          );
+
+          diagramState.addCluster(cluster);
+        }
+      } else if (decoded['labels'] is List) {
+        final labelsJson = decoded['labels'] as List;
+        for (final labelEntry in labelsJson) {
+          if (labelEntry is! Map) {
+            continue;
+          }
+
+          final matchedLabel =
+              (labelEntry['matched_label'] ?? '').toString().trim();
+          if (matchedLabel.isEmpty) {
+            continue;
+          }
+
+          final strokeIndexes = _coerceStrokeIndexes(labelEntry['stroke_indexes']);
+          if (strokeIndexes.isEmpty) {
+            continue;
+          }
+
+          final cluster = DiagramClusterRecord(
+            clusterRef: '$diagramName : $matchedLabel',
+            diagramName: diagramName,
+            label: matchedLabel,
+            normalizedLabel: _normalizeLookupKey(matchedLabel),
+            strokeIndexes: strokeIndexes,
+            targetKey: labelEntry['target_key']?.toString(),
+          );
+
+          diagramState.addCluster(cluster);
+        }
+      }
+
+      if (diagramState.clustersByCanonicalRef.isNotEmpty) {
+        setState(() {
+          _diagramStatesByObjectId[objectId] = diagramState;
+        });
+      }
+    } catch (_) {
+      // Ignore malformed diagram label metadata.
+    }
+  }
+
+  Future<void> _animateDrawCluster({
+    required DiagramClusterRecord cluster,
+  }) async {}
+
+  Set<int> _coerceStrokeIndexes(dynamic rawValue) {
+    if (rawValue is! List) {
+      return <int>{};
+    }
+
+    final indexes = <int>{};
+    for (final entry in rawValue) {
+      if (entry is int) {
+        indexes.add(entry);
+        continue;
+      }
+      if (entry is num) {
+        indexes.add(entry.toInt());
+        continue;
+      }
+      final parsed = int.tryParse(entry.toString());
+      if (parsed != null) {
+        indexes.add(parsed);
+      }
+    }
+    return indexes;
+  }
+
+  Future<void> _animateHighlightCluster({
+    required DiagramClusterRecord cluster,
+  }) async {}
+
+  Future<void> _animateZoomCluster({
+    required DiagramClusterRecord cluster,
+  }) async {}
+
+  Future<void> _animateWriteLabel({
+    required DiagramClusterRecord cluster,
+    required String text,
+  }) async {}
+
+  Future<void> _animateConnectClusters({
+    required DiagramClusterRecord fromCluster,
+    required DiagramClusterRecord toCluster,
+  }) async {}
+
+  Future<void> _applyHighlightClusterRef({
+    required String diagramObjectId,
+    required String clusterRef,
+  }) async {
+    final refs = _activeHighlightRefsByDiagramId.putIfAbsent(
+      diagramObjectId,
+      () => <String>{},
+    );
+    final previousCount = refs.length;
+    refs.add(clusterRef);
+    _highlightedClusterRefs.add(clusterRef);
+    _highlightRefCountsByClusterRef[clusterRef] =
+        (_highlightRefCountsByClusterRef[clusterRef] ?? 0) + 1;
+    if (previousCount == 0) {
+      await _animateDiagramNonFocusSaturation(
+        diagramObjectId: diagramObjectId,
+        target: 0.5,
+      );
+    } else {
+      setState(() {});
+    }
+  }
+
+  Future<void> _removeHighlightClusterRef({
+    required String diagramObjectId,
+    required String clusterRef,
+  }) async {
+    final currentCount = _highlightRefCountsByClusterRef[clusterRef] ?? 0;
+    if (currentCount <= 1) {
+      _highlightRefCountsByClusterRef.remove(clusterRef);
+      _highlightedClusterRefs.remove(clusterRef);
+    } else {
+      _highlightRefCountsByClusterRef[clusterRef] = currentCount - 1;
+    }
+
+    final refs = _activeHighlightRefsByDiagramId[diagramObjectId];
+    if (refs != null) {
+      final stillAnyForRef = (_highlightRefCountsByClusterRef[clusterRef] ?? 0) > 0;
+      if (!stillAnyForRef) {
+        refs.remove(clusterRef);
+      }
+      if (refs.isEmpty) {
+        _activeHighlightRefsByDiagramId.remove(diagramObjectId);
+        await _animateDiagramNonFocusSaturation(
+          diagramObjectId: diagramObjectId,
+          target: 1.0,
+        );
+        return;
+      }
+    }
+    if (mounted) {
+      setState(() {});
+    }
+  }
+
+  Future<void> _activateZoom({
+    required String diagramObjectId,
+    required String clusterRef,
+    required Offset focus,
+  }) async {
+    _zoomedDiagramObjectId = diagramObjectId;
+    _zoomedClusterRef = clusterRef;
+    final startScale = _boardZoomScale;
+    final startFocus = _boardZoomWorldCenter;
+    final startSat = _diagramNonFocusSaturationByObjectId[diagramObjectId] ?? 1.0;
+    const targetScale = 1.5;
+    const targetSat = 0.0;
+    const steps = 20;
+    for (int i = 1; i <= steps; i++) {
+      final t = _smoothMotion(i / steps);
+      if (!mounted) break;
+      setState(() {
+        _boardZoomScale = lerpDouble(startScale, targetScale, t) ?? targetScale;
+        _boardZoomWorldCenter = Offset.lerp(startFocus, focus, t) ?? focus;
+        _diagramNonFocusSaturationByObjectId[diagramObjectId] =
+            lerpDouble(startSat, targetSat, t) ?? targetSat;
+      });
+      await Future<void>.delayed(const Duration(milliseconds: 16));
+    }
+  }
+
+  Future<void> _deactivateZoom({
+    required String diagramObjectId,
+    required String clusterRef,
+  }) async {
+    if (_zoomedDiagramObjectId != diagramObjectId || _zoomedClusterRef != clusterRef) {
+      return;
+    }
+    final startScale = _boardZoomScale;
+    final startFocus = _boardZoomWorldCenter;
+    final startSat = _diagramNonFocusSaturationByObjectId[diagramObjectId] ?? 0.0;
+    const steps = 18;
+    for (int i = 1; i <= steps; i++) {
+      final t = _smoothMotion(i / steps);
+      if (!mounted) break;
+      setState(() {
+        _boardZoomScale = lerpDouble(startScale, 1.0, t) ?? 1.0;
+        _boardZoomWorldCenter = Offset.lerp(startFocus, Offset.zero, t) ?? Offset.zero;
+        _diagramNonFocusSaturationByObjectId[diagramObjectId] =
+            lerpDouble(startSat, 1.0, t) ?? 1.0;
+      });
+      await Future<void>.delayed(const Duration(milliseconds: 16));
+    }
+    _zoomedDiagramObjectId = null;
+    _zoomedClusterRef = null;
+    if (mounted) {
+      setState(() {});
+    }
+  }
+
+  Future<void> _animateDiagramNonFocusSaturation({
+    required String diagramObjectId,
+    required double target,
+  }) async {
+    final start = _diagramNonFocusSaturationByObjectId[diagramObjectId] ?? 1.0;
+    const steps = 14;
+    for (int i = 1; i <= steps; i++) {
+      final t = _smoothMotion(i / steps);
+      if (!mounted) break;
+      setState(() {
+        _diagramNonFocusSaturationByObjectId[diagramObjectId] =
+            lerpDouble(start, target, t) ?? target;
+      });
+      await Future<void>.delayed(const Duration(milliseconds: 16));
+    }
+  }
+
+  Future<void> _animateObjectSaturation(
+    String objectId,
+    double target, {
+    int durationMs = 120,
+  }) async {
+    final start = _objectSaturationById[objectId] ?? 1.0;
+    final steps = math.max(4, durationMs ~/ 16);
+    for (int i = 1; i <= steps; i++) {
+      final t = _smoothMotion(i / steps);
+      if (!mounted) break;
+      setState(() {
+        _objectSaturationById[objectId] = lerpDouble(start, target, t) ?? target;
+      });
+      await Future<void>.delayed(const Duration(milliseconds: 16));
+    }
+  }
+
+  double _smoothMotion(double t) {
+    t = t.clamp(0.0, 1.0).toDouble();
+    return t * t * (3.0 - 2.0 * t);
+  }
+
+  Future<void> _waitForStrokeAnimationComplete() async {
+    final completer = _animationCompletionCompleter;
+    if (completer != null) {
+      await completer.future;
+    }
+  }
+
+  void _finishCurrentAnimIntoStatic() {
+    if (_animStrokes.isNotEmpty) {
+      _controller.stop();
+      _staticStrokes = [..._staticStrokes, ..._animStrokes];
+      _animStrokes = const [];
+      _animValue = 0.0;
+      _drawableStrokes = [..._staticStrokes];
+      final completer = _animationCompletionCompleter;
+      _animationCompletionCompleter = null;
+      if (completer != null && !completer.isCompleted) {
+        completer.complete();
+      }
+    }
+  }
+
+  Future<void> _addGeneratedPolylineObject({
+    required String objectId,
+    required String displayName,
+    required List<List<Offset>> polylines,
+    required Color color,
+    required bool isTemporary,
+    required bool syncWithBackend,
+    String? ownerDiagramObjectId,
+    Set<String>? aliases,
+    bool awaitAnimation = false,
+  }) async {
+    await _deleteObject(id: objectId, silentIfMissing: true, animate: false);
+    final bounds = _boundsOfPolylineGroups(polylines);
+    final origin = bounds.center;
+    final diagBoard =
+        math.sqrt(_boardWidth * _boardWidth + _boardHeight * _boardHeight);
+    final strokes = <DrawableStroke>[];
+    for (int i = 0; i < polylines.length; i++) {
+      final points = polylines[i];
+      if (points.length < 2) {
+        continue;
+      }
+      strokes.add(
+        _makeDrawableFromPoints(
+          jsonName: objectId,
+          objectOrigin: origin,
+          objectScale: 1.0,
+          pts: points,
+          basePenWidth: _basePenWidthPx,
+          diag: diagBoard,
+          sourceStrokeIndex: i,
+          strokeColor: color,
+        ),
+      );
+    }
+    if (strokes.isEmpty) {
+      return;
+    }
+
+    final record = BoardObjectRecord(
+      objectId: objectId,
+      kind: BoardObjectKind.image,
+      displayName: displayName,
+      origin: origin,
+      scale: 1.0,
+      fileName: null,
+      processedId: null,
+      aliases: <String>{displayName, objectId, ...?aliases},
+      ownerDiagramObjectId: ownerDiagramObjectId,
+      isTemporary: isTemporary,
+      syncWithBackend: syncWithBackend,
+      sourceBounds: bounds,
+      sourceWidth: bounds.width,
+      sourceHeight: bounds.height,
+    );
+
+    if (!mounted) return;
+    setState(() {
+      _finishCurrentAnimIntoStatic();
+      _animIsText = false;
+      _animStrokes = strokes;
+      _drawableStrokes = [..._staticStrokes, ..._animStrokes];
+      _registerObject(record);
+    });
+    _recomputeTimingForAnimStrokes();
+    if (awaitAnimation) {
+      await _waitForStrokeAnimationComplete();
+    }
+  }
+
+  Future<void> _appendGeneratedPolylinesToObject({
+    required String objectId,
+    required List<List<Offset>> polylines,
+    required Color color,
+    bool awaitAnimation = false,
+  }) async {
+    final record = _boardObjectsById[objectId];
+    if (record == null) {
+      return;
+    }
+    final diagBoard =
+        math.sqrt(_boardWidth * _boardWidth + _boardHeight * _boardHeight);
+    final baseIndex = <DrawableStroke>[
+      ..._staticStrokes.where((stroke) => stroke.jsonName == objectId),
+      ..._animStrokes.where((stroke) => stroke.jsonName == objectId),
+    ].length;
+    final strokes = <DrawableStroke>[];
+    for (int i = 0; i < polylines.length; i++) {
+      final points = polylines[i];
+      if (points.length < 2) {
+        continue;
+      }
+      strokes.add(
+        _makeDrawableFromPoints(
+          jsonName: objectId,
+          objectOrigin: record.origin,
+          objectScale: record.scale,
+          pts: points,
+          basePenWidth: _basePenWidthPx,
+          diag: diagBoard,
+          sourceStrokeIndex: baseIndex + i,
+          strokeColor: color,
+        ),
+      );
+    }
+    if (strokes.isEmpty || !mounted) {
+      return;
+    }
+    setState(() {
+      _finishCurrentAnimIntoStatic();
+      _animIsText = false;
+      _animStrokes = strokes;
+      _drawableStrokes = [..._staticStrokes, ..._animStrokes];
+    });
+    _recomputeTimingForAnimStrokes();
+    if (awaitAnimation) {
+      await _waitForStrokeAnimationComplete();
+    }
+  }
+
+  Rect _boundsOfPolylineGroups(List<List<Offset>> polylines) {
+    final pts = polylines.expand((group) => group).toList(growable: false);
+    return _boundsOfPoints(pts);
+  }
+
+  List<List<Offset>> _buildDoubleArrowConnectorSegments({
+    required Rect fromBounds,
+    required Rect toBounds,
+    required double gap,
+    required double arrowLength,
+    required double arrowHalfWidth,
+  }) {
+    final fromCenter = fromBounds.center;
+    final toCenter = toBounds.center;
+    final trimmed = _trimLineBetweenBounds(
+      fromBounds: fromBounds,
+      toBounds: toBounds,
+      extraGap: gap,
+    );
+    final start = trimmed.$1;
+    final end = trimmed.$2;
+    final dir = (end - start);
+    final len = dir.distance;
+    if (len <= 1e-6) {
+      return const <List<Offset>>[];
+    }
+    final unit = Offset(dir.dx / len, dir.dy / len);
+    final normal = Offset(-unit.dy, unit.dx);
+
+    final startArrowBase = start + unit * arrowLength;
+    final endArrowBase = end - unit * arrowLength;
+
+    return <List<Offset>>[
+      <Offset>[start, end],
+      <Offset>[start, startArrowBase + normal * arrowHalfWidth],
+      <Offset>[start, startArrowBase - normal * arrowHalfWidth],
+      <Offset>[end, endArrowBase + normal * arrowHalfWidth],
+      <Offset>[end, endArrowBase - normal * arrowHalfWidth],
+    ];
+  }
+
+  List<List<Offset>> _buildLeaderLineSegments({
+    required Rect fromBounds,
+    required Rect toBounds,
+    required double gap,
+  }) {
+    final trimmed = _trimLineBetweenBounds(
+      fromBounds: fromBounds,
+      toBounds: toBounds,
+      extraGap: gap,
+    );
+    return <List<Offset>>[
+      <Offset>[trimmed.$1, trimmed.$2],
+    ];
+  }
+
+  List<List<Offset>> _buildDottedLineSegments({
+    required Offset from,
+    required Offset to,
+    required double gapFromStart,
+    required double gapFromEnd,
+    required double dashLength,
+    required double dashGap,
+  }) {
+    final vector = to - from;
+    final len = vector.distance;
+    if (len <= gapFromStart + gapFromEnd + dashLength) {
+      return <List<Offset>>[];
+    }
+    final unit = Offset(vector.dx / len, vector.dy / len);
+    final start = from + unit * gapFromStart;
+    final end = to - unit * gapFromEnd;
+    final usable = (end - start).distance;
+    final segments = <List<Offset>>[];
+    double cursor = 0.0;
+    while (cursor < usable) {
+      final dashEnd = math.min(cursor + dashLength, usable);
+      final p0 = start + unit * cursor;
+      final p1 = start + unit * dashEnd;
+      if ((p1 - p0).distance > 1e-3) {
+        segments.add(<Offset>[p0, p1]);
+      }
+      cursor = dashEnd + dashGap;
+    }
+    return segments;
+  }
+
+  (Offset, Offset) _trimLineBetweenBounds({
+    required Rect fromBounds,
+    required Rect toBounds,
+    required double extraGap,
+  }) {
+    final fromCenter = fromBounds.center;
+    final toCenter = toBounds.center;
+    final dir = toCenter - fromCenter;
+    final len = dir.distance;
+    if (len <= 1e-6) {
+      return (fromCenter, toCenter);
+    }
+    final unit = Offset(dir.dx / len, dir.dy / len);
+    final start = _lineExitPoint(fromBounds, fromCenter, unit, extraGap);
+    final end = _lineExitPoint(toBounds, toCenter, Offset(-unit.dx, -unit.dy), extraGap);
+    return (start, end);
+  }
+
+  Offset _lineExitPoint(Rect bounds, Offset center, Offset direction, double extraGap) {
+    final dir = direction;
+    final candidates = <double>[];
+    if (dir.dx.abs() > 1e-6) {
+      candidates.add((bounds.left - center.dx) / dir.dx);
+      candidates.add((bounds.right - center.dx) / dir.dx);
+    }
+    if (dir.dy.abs() > 1e-6) {
+      candidates.add((bounds.top - center.dy) / dir.dy);
+      candidates.add((bounds.bottom - center.dy) / dir.dy);
+    }
+    double bestT = 0.0;
+    for (final t in candidates) {
+      if (t <= 0) continue;
+      final point = center + dir * t;
+      if (point.dx >= bounds.left - 1e-3 &&
+          point.dx <= bounds.right + 1e-3 &&
+          point.dy >= bounds.top - 1e-3 &&
+          point.dy <= bounds.bottom + 1e-3) {
+        if (bestT == 0.0 || t < bestT) {
+          bestT = t;
+        }
+      }
+    }
+    final edgePoint = center + dir * bestT;
+    return edgePoint + dir * extraGap;
+  }
+
+  String _nextTempObjectId(String prefix) {
+    _tempObjectCounter += 1;
+    return '${prefix}_temp_${_tempObjectCounter}';
+  }
+
+  Future<VectorBlueprint?> _loadVectorBlueprint(String fileName) async {
+    final cached = _vectorBlueprintCache[fileName];
+    if (cached != null) {
+      return cached;
+    }
+
+    final path = '$_vectorsFolder\\$fileName';
+    final file = File(path);
+    if (!file.existsSync()) {
+      return null;
+    }
+    try {
+      final raw = await file.readAsString();
+      final decoded = json.decode(raw);
+      if (decoded is! Map || decoded['strokes'] is! List) {
+        return null;
+      }
+      final format =
+          (decoded['vector_format'] as String?)?.toLowerCase() ?? 'polyline';
+      final strokesJson = decoded['strokes'] as List;
+      final poly = <StrokePolyline>[];
+      final cubics = <StrokeCubic>[];
+      final srcWidth = (decoded['width'] as num?)?.toDouble() ?? 1000.0;
+      final srcHeight = (decoded['height'] as num?)?.toDouble() ?? 1000.0;
+
+      if (format == 'bezier_cubic') {
+        for (int i = 0; i < strokesJson.length; i++) {
+          final s = strokesJson[i];
+          if (s is! Map || s['segments'] is! List) continue;
+          final color = _parseStrokeColor(s);
+          final segs = <CubicSegment>[];
+          for (final seg in s['segments'] as List) {
+            if (seg is List && seg.length >= 8) {
+              segs.add(
+                CubicSegment(
+                  p0: Offset((seg[0] as num).toDouble(), (seg[1] as num).toDouble()),
+                  c1: Offset((seg[2] as num).toDouble(), (seg[3] as num).toDouble()),
+                  c2: Offset((seg[4] as num).toDouble(), (seg[5] as num).toDouble()),
+                  p1: Offset((seg[6] as num).toDouble(), (seg[7] as num).toDouble()),
+                ),
+              );
+            }
+          }
+          if (segs.isNotEmpty) {
+            cubics.add(StrokeCubic(segs, color: color, sourceStrokeIndex: i));
+          }
+        }
+      } else {
+        for (int i = 0; i < strokesJson.length; i++) {
+          final s = strokesJson[i];
+          if (s is! Map || s['points'] is! List) continue;
+          final color = _parseStrokeColor(s);
+          final points = <Offset>[];
+          for (final p in s['points'] as List) {
+            if (p is List && p.length >= 2) {
+              points.add(Offset((p[0] as num).toDouble(), (p[1] as num).toDouble()));
+            }
+          }
+          if (points.length >= 2) {
+            poly.add(StrokePolyline(points, color: color, sourceStrokeIndex: i));
+          }
+        }
+      }
+
+      final sourceBounds = _computeRawBounds(poly, cubics);
+      final blueprint = VectorBlueprint(
+        fileName: fileName,
+        polylines: poly,
+        cubics: cubics,
+        srcWidth: srcWidth,
+        srcHeight: srcHeight,
+        sourceBounds: sourceBounds,
+      );
+      _vectorBlueprintCache[fileName] = blueprint;
+      return blueprint;
+    } catch (_) {
+      return null;
+    }
+  }
+
+  Future<List<DiagramLabelAnchor>> _loadDiagramLabelAnchors(String processedId) async {
+    final cached = _labelAnchorCacheByProcessedId[processedId];
+    if (cached != null) {
+      return cached;
+    }
+    final path = '$_processedImagesFolder\\$processedId.json';
+    final file = File(path);
+    if (!file.existsSync()) {
+      _labelAnchorCacheByProcessedId[processedId] = const <DiagramLabelAnchor>[];
+      return const <DiagramLabelAnchor>[];
+    }
+    try {
+      final raw = await file.readAsString();
+      final decoded = json.decode(raw);
+      if (decoded is! Map || decoded['words'] is! List) {
+        _labelAnchorCacheByProcessedId[processedId] = const <DiagramLabelAnchor>[];
+        return const <DiagramLabelAnchor>[];
+      }
+      final anchors = <DiagramLabelAnchor>[];
+      for (final entry in decoded['words'] as List) {
+        if (entry is! Map) continue;
+        final text = (entry['text'] ?? '').toString().trim();
+        if (text.isEmpty) continue;
+        Rect? anchorRect;
+        final bboxAnchor = entry['bbox_anchor'];
+        final bboxMask = entry['bbox_mask'];
+        if (bboxAnchor is List && bboxAnchor.length >= 4) {
+          anchorRect = Rect.fromLTRB(
+            (bboxAnchor[0] as num).toDouble(),
+            (bboxAnchor[1] as num).toDouble(),
+            (bboxAnchor[2] as num).toDouble(),
+            (bboxAnchor[3] as num).toDouble(),
+          );
+        } else if (bboxMask is List && bboxMask.length >= 4) {
+          anchorRect = Rect.fromLTRB(
+            (bboxMask[0] as num).toDouble(),
+            (bboxMask[1] as num).toDouble(),
+            (bboxMask[2] as num).toDouble(),
+            (bboxMask[3] as num).toDouble(),
+          );
+        }
+        if (anchorRect != null) {
+          anchors.add(DiagramLabelAnchor(
+            rawText: text,
+            normalizedText: _normalizeLookupKey(text),
+            sourceRect: anchorRect,
+          ));
+        }
+      }
+      _labelAnchorCacheByProcessedId[processedId] = anchors;
+      return anchors;
+    } catch (_) {
+      _labelAnchorCacheByProcessedId[processedId] = const <DiagramLabelAnchor>[];
+      return const <DiagramLabelAnchor>[];
+    }
+  }
+
+  Future<DiagramWriteTarget> _resolveDiagramWriteTarget({
+    required DiagramRuntimeState diagram,
+    required DiagramClusterRecord cluster,
+    required BoardObjectRecord diagramRecord,
+    required String text,
+  }) async {
+    final anchors = await _loadDiagramLabelAnchors(diagram.processedId);
+    final clusterNormalized = _normalizeLookupKey(cluster.label);
+    DiagramLabelAnchor? matched;
+    for (final anchor in anchors) {
+      if (anchor.normalizedText == clusterNormalized ||
+          anchor.normalizedText.contains(clusterNormalized) ||
+          clusterNormalized.contains(anchor.normalizedText)) {
+        matched = anchor;
+        break;
+      }
+    }
+
+    if (matched != null && diagramRecord.sourceBounds != null) {
+      final worldRect = _mapSourceRectToWorld(diagramRecord, matched.sourceRect);
+      return DiagramWriteTarget(
+        origin: Offset(worldRect.left, worldRect.center.dy),
+        letterSize: math.max(26.0, worldRect.height * 0.8),
+        preferredRect: worldRect,
+      );
+    }
+
+    final diagramBounds = _objectBounds(diagram.objectId) ??
+        Rect.fromCenter(center: diagramRecord.origin, width: 300, height: 220);
+    final yOffset = 40.0 + diagram.labelWriteCount * 78.0;
+    final fallbackRect = Rect.fromLTWH(
+      diagramBounds.right + 40.0,
+      diagramBounds.top + yOffset,
+      math.max(160.0, diagramBounds.width * 0.25),
+      62.0,
+    );
+    return DiagramWriteTarget(
+      origin: Offset(fallbackRect.left, fallbackRect.center.dy),
+      letterSize: fallbackRect.height * 0.75,
+      preferredRect: fallbackRect,
+    );
+  }
+
+  Rect _mapSourceRectToWorld(BoardObjectRecord record, Rect sourceRect) {
+    final worldTopLeft = _mapSourcePointToWorld(record, sourceRect.topLeft);
+    final worldBottomRight = _mapSourcePointToWorld(record, sourceRect.bottomRight);
+    return Rect.fromPoints(worldTopLeft, worldBottomRight);
+  }
+
+  Offset _mapSourcePointToWorld(BoardObjectRecord record, Offset sourcePoint) {
+    final sourceWidth = record.sourceWidth ?? 1000.0;
+    final sourceHeight = record.sourceHeight ?? 1000.0;
+    final sourceBounds = record.sourceBounds ?? Rect.fromLTWH(0, 0, sourceWidth, sourceHeight);
+    final srcMax = math.max(sourceWidth, sourceHeight);
+    final baseUpscale = srcMax > 0 ? _targetResolution / srcMax : 1.0;
+    final scale = record.scale <= 0 ? 1.0 : record.scale;
+    final upscale = baseUpscale * scale;
+    final centerScaled = Offset(
+      sourceBounds.center.dx * upscale,
+      sourceBounds.center.dy * upscale,
+    );
+    final scaled = Offset(sourcePoint.dx * upscale, sourcePoint.dy * upscale);
+    return Offset(
+      scaled.dx - centerScaled.dx + record.origin.dx,
+      scaled.dy - centerScaled.dy + record.origin.dy,
+    );
+  }
   Future<void> _ensureFontMetricsLoaded() async {
     if (_fontLineHeightPx != null && _fontImageHeightPx != null) return;
     try {
@@ -236,8 +2456,6 @@ class _VectorViewerScreenState extends State<VectorViewerScreen>
       _fontImageHeightPx = _targetResolution;
     }
   }
-
-    // ========== BACKEND SYNC HELPERS ==========
 
   Future<void> _syncCreateImageOnBackend({
     required String fileName,
@@ -300,7 +2518,6 @@ class _VectorViewerScreenState extends State<VectorViewerScreen>
       body: body,
     );
 
-    // 404 is ok – already deleted backend-side
     if (resp.statusCode >= 400 && resp.statusCode != 404) {
       throw Exception('HTTP ${resp.statusCode}: ${resp.body}');
     }
@@ -326,42 +2543,45 @@ class _VectorViewerScreenState extends State<VectorViewerScreen>
         return;
       }
 
-      final List objs = decoded['objects'] as List;
+      final objs = decoded['objects'] as List;
 
-      for (final o in objs) {
+      for (int index = 0; index < objs.length; index++) {
+        final o = objs[index];
         if (o is! Map) continue;
         final name = (o['name'] ?? '').toString();
         final kind = (o['kind'] ?? '').toString();
-        final double x = (o['pos_x'] as num?)?.toDouble() ?? 0.0;
-        final double y = (o['pos_y'] as num?)?.toDouble() ?? 0.0;
-        final double scale =
-            (o['scale'] as num?)?.toDouble() ?? 1.0;
+        final x = (o['pos_x'] as num?)?.toDouble() ?? 0.0;
+        final y = (o['pos_y'] as num?)?.toDouble() ?? 0.0;
+        final scale =
+            (o['scale'] as num?)?.toDouble() ?? _defaultImageObjectScale;
 
         if (kind == 'image') {
-          // pure local draw, no backend call
           await _addObjectFromJsonInternal(
             fileName: name,
             origin: Offset(x, y),
             objectScale: scale,
+            boardObjectId: _stemWithoutJson(name),
+            logicalName: _stemWithoutJson(name),
+            aliases: <String>{name, _stemWithoutJson(name)},
           );
         } else if (kind == 'text') {
-          final double letterSize =
+          final letterSize =
               (o['letter_size'] as num?)?.toDouble() ?? _textBaseFontSizeRef;
-          final double letterGap =
+          final letterGap =
               (o['letter_gap'] as num?)?.toDouble() ?? _textLetterGapPx;
-
-          // use stored gap for this text batch
           _textLetterGapPx = letterGap;
           await _writeTextPromptLocal(
             prompt: name,
             origin: Offset(x, y),
             letterSize: letterSize,
-            strokeSlowdown: 1
-                      );
+            strokeSlowdown: 1.0,
+            boardObjectId: 'backend_text_$index',
+            logicalName: name,
+            aliases: <String>{name},
+          );
         }
       }
 
-      // After initial load, flatten any remaining anim strokes into static
       if (mounted) {
         _controller.stop();
         setState(() {
@@ -380,14 +2600,10 @@ class _VectorViewerScreenState extends State<VectorViewerScreen>
     }
   }
 
-
-  // ------------------- LOADING & BUILDING (IMAGES) -------------------
-
   Color _parseStrokeColor(dynamic strokeJson) {
     if (strokeJson is! Map) return Colors.black;
 
-    // Prefer explicit RGB arrays
-    dynamic rgb = strokeJson['color_rgb'] ??
+    final rgb = strokeJson['color_rgb'] ??
         strokeJson['colour_rgb'] ??
         strokeJson['rgb'] ??
         strokeJson['color'] ??
@@ -398,23 +2614,20 @@ class _VectorViewerScreenState extends State<VectorViewerScreen>
       double g = (rgb[1] as num).toDouble();
       double b = (rgb[2] as num).toDouble();
 
-      // Allow 0..1 floats too
       if (r <= 1.0 && g <= 1.0 && b <= 1.0) {
         r *= 255.0;
         g *= 255.0;
         b *= 255.0;
       }
 
-      int ri = r.round().clamp(0, 255);
-      int gi = g.round().clamp(0, 255);
-      int bi = b.round().clamp(0, 255);
+      final int ri = r.round().clamp(0, 255).toInt();
+      final int gi = g.round().clamp(0, 255).toInt();
+      final int bi = b.round().clamp(0, 255).toInt();
       return Color.fromARGB(255, ri, gi, bi);
     }
 
-    // Hex fallback: "#RRGGBB" / "RRGGBB"
-    final hex = strokeJson['color_hex'] ??
-        strokeJson['colour_hex'] ??
-        strokeJson['hex'];
+    final hex =
+        strokeJson['color_hex'] ?? strokeJson['colour_hex'] ?? strokeJson['hex'];
     if (hex is String && hex.isNotEmpty) {
       var s = hex.trim();
       if (s.startsWith('#')) s = s.substring(1);
@@ -424,7 +2637,6 @@ class _VectorViewerScreenState extends State<VectorViewerScreen>
       }
     }
 
-    // Int fallback: 0xAARRGGBB or 0xRRGGBB
     final ci = strokeJson['color_int'] ?? strokeJson['colour_int'];
     if (ci is int) {
       if ((ci & 0xFF000000) == 0) return Color(0xFF000000 | ci);
@@ -433,7 +2645,6 @@ class _VectorViewerScreenState extends State<VectorViewerScreen>
 
     return Colors.black;
   }
-
 
   Future<void> _loadAndRender() async {
     final fileName = _fileNameController.text.trim();
@@ -446,29 +2657,39 @@ class _VectorViewerScreenState extends State<VectorViewerScreen>
 
     final x = double.tryParse(_posXController.text.trim()) ?? 0.0;
     final y = double.tryParse(_posYController.text.trim()) ?? 0.0;
-    final scale = double.tryParse(_scaleController.text.trim()) ?? 1.0;
+    final scale =
+        double.tryParse(_scaleController.text.trim()) ??
+        _defaultImageObjectScale;
 
-    await _addObjectFromJson(
+    await _whiteboardActions.drawImage(
       fileName: fileName,
       origin: Offset(x, y),
       objectScale: scale,
+      boardObjectId: _stemWithoutJson(fileName),
+      logicalName: _stemWithoutJson(fileName),
+      aliases: <String>{fileName, _stemWithoutJson(fileName)},
     );
   }
 
-    // Public entry: UI + external callers
   Future<void> _addObjectFromJson({
     required String fileName,
     required Offset origin,
     required double objectScale,
+    String? boardObjectId,
+    String? logicalName,
+    String? processedId,
+    Set<String>? aliases,
   }) async {
-    // Local drawing first (existing behavior)
     await _addObjectFromJsonInternal(
       fileName: fileName,
       origin: origin,
       objectScale: objectScale,
+      boardObjectId: boardObjectId,
+      logicalName: logicalName,
+      processedId: processedId,
+      aliases: aliases,
     );
 
-    // Fire-and-forget backend sync
     if (_backendEnabled) {
       () async {
         try {
@@ -487,11 +2708,14 @@ class _VectorViewerScreenState extends State<VectorViewerScreen>
     }
   }
 
-  // Internal: your previous local logic moved here, unchanged
   Future<void> _addObjectFromJsonInternal({
     required String fileName,
     required Offset origin,
     required double objectScale,
+    String? boardObjectId,
+    String? logicalName,
+    String? processedId,
+    Set<String>? aliases,
   }) async {
     final path = '$_vectorsFolder\\$fileName';
     setState(() => _status = 'Loading $fileName…');
@@ -512,7 +2736,7 @@ class _VectorViewerScreenState extends State<VectorViewerScreen>
 
       final format =
           (decoded['vector_format'] as String?)?.toLowerCase() ?? 'polyline';
-      final List strokesJson = decoded['strokes'] as List;
+      final strokesJson = decoded['strokes'] as List;
 
       final poly = <StrokePolyline>[];
       final cubics = <StrokeCubic>[];
@@ -522,41 +2746,67 @@ class _VectorViewerScreenState extends State<VectorViewerScreen>
       _srcWidth = srcWidth;
       _srcHeight = srcHeight;
 
-     if (format == 'bezier_cubic') {
-      for (final s in strokesJson) {
-        if (s is! Map || s['segments'] is! List) continue;
+      if (format == 'bezier_cubic') {
+        for (int i = 0; i < strokesJson.length; i++) {
+          final s = strokesJson[i];
+          if (s is! Map || s['segments'] is! List) continue;
 
-        final color = _parseStrokeColor(s);
-
-        final List segsJson = s['segments'] as List;
-        final segs = <CubicSegment>[];
-        for (final seg in segsJson) {
-          if (seg is List && seg.length >= 8) {
-            final p0 = Offset((seg[0] as num).toDouble(), (seg[1] as num).toDouble());
-            final c1 = Offset((seg[2] as num).toDouble(), (seg[3] as num).toDouble());
-            final c2 = Offset((seg[4] as num).toDouble(), (seg[5] as num).toDouble());
-            final p1 = Offset((seg[6] as num).toDouble(), (seg[7] as num).toDouble());
-            segs.add(CubicSegment(p0: p0, c1: c1, c2: c2, p1: p1));
+          final color = _parseStrokeColor(s);
+          final segsJson = s['segments'] as List;
+          final segs = <CubicSegment>[];
+          for (final seg in segsJson) {
+            if (seg is List && seg.length >= 8) {
+              final p0 = Offset(
+                (seg[0] as num).toDouble(),
+                (seg[1] as num).toDouble(),
+              );
+              final c1 = Offset(
+                (seg[2] as num).toDouble(),
+                (seg[3] as num).toDouble(),
+              );
+              final c2 = Offset(
+                (seg[4] as num).toDouble(),
+                (seg[5] as num).toDouble(),
+              );
+              final p1 = Offset(
+                (seg[6] as num).toDouble(),
+                (seg[7] as num).toDouble(),
+              );
+              segs.add(CubicSegment(p0: p0, c1: c1, c2: c2, p1: p1));
+            }
+          }
+          if (segs.isNotEmpty) {
+            cubics.add(StrokeCubic(
+              segs,
+              color: color,
+              sourceStrokeIndex: i,
+            ));
           }
         }
-        if (segs.isNotEmpty) cubics.add(StrokeCubic(segs, color: color));
-      }
-    } else {
-      for (final s in strokesJson) {
-        if (s is! Map || s['points'] is! List) continue;
+      } else {
+        for (int i = 0; i < strokesJson.length; i++) {
+          final s = strokesJson[i];
+          if (s is! Map || s['points'] is! List) continue;
 
-        final color = _parseStrokeColor(s);
-
-        final List pts = s['points'] as List;
-        final points = <Offset>[];
-        for (final p in pts) {
-          if (p is List && p.length >= 2) {
-            points.add(Offset((p[0] as num).toDouble(), (p[1] as num).toDouble()));
+          final color = _parseStrokeColor(s);
+          final pts = s['points'] as List;
+          final points = <Offset>[];
+          for (final p in pts) {
+            if (p is List && p.length >= 2) {
+              points.add(
+                Offset((p[0] as num).toDouble(), (p[1] as num).toDouble()),
+              );
+            }
+          }
+          if (points.length >= 2) {
+            poly.add(StrokePolyline(
+              points,
+              color: color,
+              sourceStrokeIndex: i,
+            ));
           }
         }
-        if (points.length >= 2) poly.add(StrokePolyline(points, color: color));
       }
-    }
 
       _polyStrokes = poly;
       _cubicStrokes = cubics;
@@ -572,8 +2822,28 @@ class _VectorViewerScreenState extends State<VectorViewerScreen>
         _srcHeight = useHeight;
       }
 
+      final objectId = (boardObjectId?.trim().isNotEmpty == true)
+          ? boardObjectId!.trim()
+          : (processedId?.trim().isNotEmpty == true)
+              ? processedId!.trim()
+              : _stemWithoutJson(fileName);
+
+      final primaryName = (logicalName?.trim().isNotEmpty == true)
+          ? logicalName!.trim()
+          : _stemWithoutJson(fileName);
+
+      final aliasSet = <String>{
+        primaryName,
+        fileName,
+        _stemWithoutJson(fileName),
+        if ((processedId ?? '').trim().isNotEmpty) processedId!.trim(),
+        ...?aliases,
+      };
+
+      await _deleteObject(id: objectId, silentIfMissing: true, animate: false);
+
       final newStrokes = _buildDrawableStrokesForObject(
-        jsonName: fileName,
+        jsonName: objectId,
         origin: origin,
         objectScale: objectScale,
         polylines: poly,
@@ -584,6 +2854,20 @@ class _VectorViewerScreenState extends State<VectorViewerScreen>
         basePenWidth: _basePenWidthPx,
       );
 
+      final record = BoardObjectRecord(
+        objectId: objectId,
+        kind: BoardObjectKind.image,
+        displayName: primaryName,
+        origin: origin,
+        scale: objectScale,
+        fileName: fileName,
+        processedId: processedId,
+        aliases: aliasSet,
+        sourceWidth: useWidth,
+        sourceHeight: useHeight,
+        sourceBounds: _computeRawBounds(poly, cubics),
+      );
+
       setState(() {
         if (_animStrokes.isNotEmpty) {
           _controller.stop();
@@ -592,44 +2876,37 @@ class _VectorViewerScreenState extends State<VectorViewerScreen>
           _animValue = 0.0;
         }
 
-        _animIsText = false; // this batch is not text
-
+        _animIsText = false;
         _animStrokes = newStrokes;
         _drawableStrokes = [..._staticStrokes, ..._animStrokes];
-
-        if (!_drawnJsonNames.contains(fileName)) {
-          _drawnJsonNames.add(fileName);
-        }
-        _selectedEraseName ??= fileName;
+        _registerObject(record);
 
         final polyPts = poly.fold<int>(0, (s, e) => s + e.points.length);
         final cubicSegs = cubics.fold<int>(0, (s, e) => s + e.segments.length);
         _status =
-            'Added $fileName\nFormat: $format | strokes: poly=${poly.length}, cubic=${cubics.length}, pts=$polyPts, segs=$cubicSegs\nTotal drawable strokes: ${_drawableStrokes.length}';
+            'Added $primaryName\nFormat: $format | strokes: poly=${poly.length}, cubic=${cubics.length}, pts=$polyPts, segs=$cubicSegs\nTotal drawable strokes: ${_drawableStrokes.length}';
       });
+
+      if ((processedId ?? '').trim().isNotEmpty) {
+        await _loadDiagramStateIfPresent(
+          objectId: objectId,
+          diagramName: primaryName,
+          processedId: processedId!.trim(),
+        );
+      }
 
       _recomputeTimingForAnimStrokes();
     } catch (e, st) {
       setState(() => _status = 'Error loading $fileName: $e');
-      // ignore: avoid_print
       print(st);
     }
   }
 
-
-  // ------------------- GLYPH LOADING (TEXT) -------------------
-
-  /// Find the whiteboard_backend folder starting from Directory.current
-  /// and walking upwards. Then append [subdir].
   static String _resolveBackendSubdir(String subdir) {
-    // Start where the process is running (for Windows desktop:
-    // build/windows/x64/runner/Debug by default).
     var dir = Directory.current;
 
-    // Walk up at most 10 levels to be safe.
     for (int i = 0; i < 10; i++) {
-      final candidate =
-          Directory('${dir.path}\\whiteboard_backend');
+      final candidate = Directory('${dir.path}\\whiteboard_backend');
       if (candidate.existsSync()) {
         if (subdir.isEmpty) return candidate.path;
         return '${candidate.path}\\$subdir';
@@ -637,17 +2914,13 @@ class _VectorViewerScreenState extends State<VectorViewerScreen>
 
       final parent = dir.parent;
       if (parent.path == dir.path) {
-        // Reached filesystem root; stop.
         break;
       }
       dir = parent;
     }
 
-    // Fallback: just assume current dir has whiteboard_backend next to it.
-    // This will fail loudly if it's wrong.
     return '${Directory.current.path}\\whiteboard_backend\\$subdir';
   }
-
 
   Future<GlyphData?> _getGlyphForCode(int codeUnit) async {
     if (_glyphCache.containsKey(codeUnit)) {
@@ -668,7 +2941,7 @@ class _VectorViewerScreenState extends State<VectorViewerScreen>
         return null;
       }
 
-      final List strokesJson = decoded['strokes'] as List;
+      final strokesJson = decoded['strokes'] as List;
       final format =
           (decoded['vector_format'] as String?)?.toLowerCase() ?? 'bezier_cubic';
 
@@ -677,22 +2950,35 @@ class _VectorViewerScreenState extends State<VectorViewerScreen>
       if (format == 'bezier_cubic') {
         for (final s in strokesJson) {
           if (s is! Map || s['segments'] is! List) continue;
-          final List segsJson = s['segments'] as List;
+          final segsJson = s['segments'] as List;
           final segs = <CubicSegment>[];
           for (final seg in segsJson) {
             if (seg is List && seg.length >= 8) {
               final p0 = Offset(
-                  (seg[0] as num).toDouble(), (seg[1] as num).toDouble());
+                (seg[0] as num).toDouble(),
+                (seg[1] as num).toDouble(),
+              );
               final c1 = Offset(
-                  (seg[2] as num).toDouble(), (seg[3] as num).toDouble());
+                (seg[2] as num).toDouble(),
+                (seg[3] as num).toDouble(),
+              );
               final c2 = Offset(
-                  (seg[4] as num).toDouble(), (seg[5] as num).toDouble());
+                (seg[4] as num).toDouble(),
+                (seg[5] as num).toDouble(),
+              );
               final p1 = Offset(
-                  (seg[6] as num).toDouble(), (seg[7] as num).toDouble());
+                (seg[6] as num).toDouble(),
+                (seg[7] as num).toDouble(),
+              );
               segs.add(CubicSegment(p0: p0, c1: c1, c2: c2, p1: p1));
             }
           }
-          if (segs.isNotEmpty) cubics.add(StrokeCubic(segs));
+          if (segs.isNotEmpty) {
+            cubics.add(StrokeCubic(
+              segs,
+              sourceStrokeIndex: -1,
+            ));
+          }
         }
       }
 
@@ -707,30 +2993,29 @@ class _VectorViewerScreenState extends State<VectorViewerScreen>
     }
   }
 
-  // ------------------- TIMING RECOMPUTE -------------------
-
   void _recomputeTimingForAnimStrokes() {
     if (_animStrokes.isEmpty) return;
 
     if (_animIsText) {
-      // TEXT: constant per-stroke time, no waits between strokes.
       for (final s in _animStrokes) {
         final curvature = s.curvatureMetricDeg;
-        final curvNorm = (curvature / 70.0).clamp(0.0, 1.0);
+        final double curvNorm = (curvature / 70.0).clamp(0.0, 1.0).toDouble();
         final base = _textStrokeBaseTimeSec * _textStrokeSlowdown;
         final extra = base * _textStrokeCurveExtraFrac * curvNorm;
         s.drawTimeSec = base + extra;
-        s.travelTimeBeforeSec = 0.0; // no travel/pause between strokes
+        s.travelTimeBeforeSec = 0.0;
         s.timeWeight = s.drawTimeSec;
+        s.animationStartSec = 0.0;
+        s.animationEndSec = s.drawTimeSec;
+        s.animationWorkerIndex = 0;
       }
     } else {
-      // NORMAL OBJECT: original length/curvature based timing.
       for (final s in _animStrokes) {
         final length = s.lengthPx;
         final curvature = s.curvatureMetricDeg;
 
         final lengthK = length / 1000.0;
-        final curvNorm = (curvature / 70.0).clamp(0.0, 1.0);
+        final double curvNorm = (curvature / 70.0).clamp(0.0, 1.0).toDouble();
 
         final rawTime = _minStrokeTimeSec +
             lengthK * _lengthTimePerKPxSec +
@@ -738,6 +3023,9 @@ class _VectorViewerScreenState extends State<VectorViewerScreen>
 
         s.drawTimeSec =
             rawTime.clamp(_minStrokeTimeSec, _maxStrokeTimeSec).toDouble();
+        s.animationStartSec = 0.0;
+        s.animationEndSec = s.drawTimeSec;
+        s.animationWorkerIndex = 0;
       }
 
       DrawableStroke? prev;
@@ -750,28 +3038,43 @@ class _VectorViewerScreenState extends State<VectorViewerScreen>
           final dist = (firstP - lastP).distance;
           final distK = dist / 1000.0;
 
-          final rawTravel =
-              _baseTravelTimeSec + distK * _travelTimePerKPxSec;
+          final rawTravel = _baseTravelTimeSec + distK * _travelTimePerKPxSec;
 
-          travel = rawTravel
-              .clamp(_minTravelTimeSec, _maxTravelTimeSec)
-              .toDouble();
-        } else {
-          travel = 0.0;
+          travel =
+              rawTravel.clamp(_minTravelTimeSec, _maxTravelTimeSec).toDouble();
         }
 
         s.travelTimeBeforeSec = travel;
         s.timeWeight = s.travelTimeBeforeSec + s.drawTimeSec;
-
         prev = s;
       }
     }
 
-    final totalSeconds =
+    final totalNominalSeconds =
         _animStrokes.fold<double>(0.0, (sum, d) => sum + d.timeWeight);
+    final workerCount = _determineAnimationWorkerCount(
+      strokes: _animStrokes,
+      totalNominalSeconds: totalNominalSeconds,
+    );
+    final scheduledDurationSec = _scheduleAnimationAcrossWorkers(
+      _animStrokes,
+      workerCount: workerCount,
+      maxDurationSec: _forceMaxObjectAnimationDuration
+          ? _forcedMaxObjectAnimationDurationSec
+          : null,
+    );
+    _activeAnimationWorkerCount = workerCount;
+    _activeAnimationDurationSec = scheduledDurationSec;
 
-    final animSeconds =
-        (totalSeconds > 0) ? (totalSeconds / _globalSpeedMultiplier) : 0.0;
+    final animSeconds = (scheduledDurationSec > 0)
+        ? (scheduledDurationSec / _globalSpeedMultiplier)
+        : 0.0;
+
+    final pending = _animationCompletionCompleter;
+    if (pending != null && !pending.isCompleted) {
+      pending.complete();
+    }
+    _animationCompletionCompleter = Completer<void>();
 
     if (animSeconds <= 0.0) {
       _controller.stop();
@@ -781,6 +3084,11 @@ class _VectorViewerScreenState extends State<VectorViewerScreen>
         _status =
             'Total strokes: ${_drawableStrokes.length} | nothing to animate';
       });
+      final completer = _animationCompletionCompleter;
+      _animationCompletionCompleter = null;
+      if (completer != null && !completer.isCompleted) {
+        completer.complete();
+      }
       return;
     }
 
@@ -797,8 +3105,84 @@ class _VectorViewerScreenState extends State<VectorViewerScreen>
       _stepStrokeCount = 0;
       _drawableStrokes = [..._staticStrokes, ..._animStrokes];
       _status =
-          'Total strokes: ${_drawableStrokes.length} | anim=${ms}ms (new object)';
+          'Total strokes: ${_drawableStrokes.length} | anim=${ms}ms | workers=$_activeAnimationWorkerCount';
     });
+  }
+
+  int _determineAnimationWorkerCount({
+    required List<DrawableStroke> strokes,
+    required double totalNominalSeconds,
+  }) {
+    if (strokes.isEmpty || !_enableParallelStrokeWorkers) {
+      return 1;
+    }
+
+    int workerCount = 1;
+    if (_forceMaxObjectAnimationDuration &&
+        _forcedMaxObjectAnimationDurationSec > 0) {
+      workerCount = math.max(
+        1,
+        (totalNominalSeconds / _forcedMaxObjectAnimationDurationSec).ceil(),
+      );
+    }
+
+    workerCount = workerCount.clamp(1, _maxParallelStrokeWorkers).toInt();
+    workerCount = math.min(workerCount, strokes.length);
+    return workerCount;
+  }
+
+  double _scheduleAnimationAcrossWorkers(
+    List<DrawableStroke> strokes, {
+    required int workerCount,
+    double? maxDurationSec,
+  }) {
+    if (strokes.isEmpty) {
+      return 0.0;
+    }
+
+    final safeWorkerCount = math.max(1, math.min(workerCount, strokes.length));
+    final workerAvailableAt = List<double>.filled(safeWorkerCount, 0.0);
+    double makespan = 0.0;
+
+    for (final stroke in strokes) {
+      int selectedWorker = 0;
+      double earliestAvailable = workerAvailableAt[0];
+      for (int i = 1; i < workerAvailableAt.length; i++) {
+        if (workerAvailableAt[i] < earliestAvailable) {
+          earliestAvailable = workerAvailableAt[i];
+          selectedWorker = i;
+        }
+      }
+
+      final start = earliestAvailable;
+      final end = start + stroke.drawTimeSec;
+      stroke.travelTimeBeforeSec = 0.0;
+      stroke.timeWeight = stroke.drawTimeSec;
+      stroke.animationStartSec = start;
+      stroke.animationEndSec = end;
+      stroke.animationWorkerIndex = selectedWorker;
+      workerAvailableAt[selectedWorker] = end;
+      if (end > makespan) {
+        makespan = end;
+      }
+    }
+
+    final cap = maxDurationSec;
+    if (cap != null && cap > 0.0 && makespan > cap) {
+      final scale = cap / makespan;
+      makespan = 0.0;
+      for (final stroke in strokes) {
+        stroke.drawTimeSec *= scale;
+        stroke.timeWeight = stroke.drawTimeSec;
+        stroke.animationStartSec *= scale;
+        stroke.animationEndSec *= scale;
+        if (stroke.animationEndSec > makespan) {
+          makespan = stroke.animationEndSec;
+        }
+      }
+    }
+
+    return makespan;
   }
 
   void _rebuildDrawableFromCurrentStrokes() {
@@ -833,59 +3217,7 @@ class _VectorViewerScreenState extends State<VectorViewerScreen>
     });
   }
 
-   void _eraseObjectByName(String name) {
-    if (name.isEmpty) return;
-    if (_drawableStrokes.isEmpty) return;
-
-    setState(() {
-      _staticStrokes =
-          _staticStrokes.where((s) => s.jsonName != name).toList();
-      _animStrokes = _animStrokes.where((s) => s.jsonName != name).toList();
-
-      _drawableStrokes = [..._staticStrokes, ..._animStrokes];
-
-      _drawnJsonNames.remove(name);
-
-      if (_drawnJsonNames.isEmpty) {
-        _selectedEraseName = null;
-      } else if (_selectedEraseName == name) {
-        _selectedEraseName = _drawnJsonNames.last;
-      }
-
-      _status = 'Erased $name. Remaining strokes: ${_drawableStrokes.length}';
-    });
-
-    if (_animStrokes.isEmpty) {
-      _controller.stop();
-      setState(() {
-        _animValue = 0.0;
-        _stepMode = false;
-        _stepStrokeCount = 0;
-        if (_drawableStrokes.isEmpty) {
-          _status = 'Board empty.';
-        }
-      });
-    }
-
-    // Backend delete (fire-and-forget)
-    if (_backendEnabled) {
-      () async {
-        try {
-          await _syncDeleteOnBackend(name);
-        } catch (e) {
-          if (!mounted) return;
-          setState(() {
-            _status += '\n[Backend delete failed: $e]';
-          });
-        }
-      }();
-    }
-  }
-
-
-  // ------------------- TEXT WRITING -------------------
-
-    Future<void> _writeTextFromUi() async {
+  Future<void> _writeTextFromUi() async {
     final prompt = _textPromptController.text;
     if (prompt.isEmpty) {
       setState(() {
@@ -899,34 +3231,48 @@ class _VectorViewerScreenState extends State<VectorViewerScreen>
     final size =
         double.tryParse(_textSizeController.text.trim()) ?? _textBaseFontSizeRef;
 
-    // NEW: update gap factor from UI
     final gapParsed =
-     double.tryParse(_textGapController.text.trim()) ?? _textLetterGapPx;
+        double.tryParse(_textGapController.text.trim()) ?? _textLetterGapPx;
     _textLetterGapPx = math.max(0.0, gapParsed);
 
-    await _writeTextPrompt(
+    await _whiteboardActions.writeText(
       prompt: prompt,
       origin: Offset(x, y),
       letterSize: size,
+      boardObjectId: prompt,
+      logicalName: prompt,
+      aliases: <String>{prompt},
     );
   }
 
-
-   // Public entry: UI and others
   Future<void> _writeTextPrompt({
     required String prompt,
     required Offset origin,
     required double letterSize,
     double? strokeSlowdown,
+    String? boardObjectId,
+    String? logicalName,
+    String? attachedToObjectId,
+    Set<String>? aliases,
+    bool isTemporary = false,
+    String? ownerDiagramObjectId,
+    bool syncWithBackend = true,
   }) async {
     await _writeTextPromptLocal(
       prompt: prompt,
       origin: origin,
       letterSize: letterSize,
       strokeSlowdown: strokeSlowdown,
+      boardObjectId: boardObjectId,
+      logicalName: logicalName,
+      attachedToObjectId: attachedToObjectId,
+      aliases: aliases,
+      isTemporary: isTemporary,
+      ownerDiagramObjectId: ownerDiagramObjectId,
+      syncWithBackend: syncWithBackend,
     );
 
-    if (_backendEnabled) {
+    if (_backendEnabled && syncWithBackend) {
       () async {
         try {
           await _syncCreateTextOnBackend(
@@ -945,12 +3291,18 @@ class _VectorViewerScreenState extends State<VectorViewerScreen>
     }
   }
 
-  // Internal: your previous local draw logic moved here
   Future<void> _writeTextPromptLocal({
     required String prompt,
     required Offset origin,
     required double letterSize,
     double? strokeSlowdown,
+    String? boardObjectId,
+    String? logicalName,
+    String? attachedToObjectId,
+    Set<String>? aliases,
+    bool isTemporary = false,
+    String? ownerDiagramObjectId,
+    bool syncWithBackend = true,
   }) async {
     if (prompt.isEmpty) {
       setState(() {
@@ -962,16 +3314,16 @@ class _VectorViewerScreenState extends State<VectorViewerScreen>
     if (letterSize <= 0) {
       letterSize = _textBaseFontSizeRef;
     }
-    final effectiveStrokeSlowdown = (strokeSlowdown ?? _defaultTextStrokeSlowdown)
-        .clamp(0.1, 100.0)
-        .toDouble();
+    final effectiveStrokeSlowdown =
+        (strokeSlowdown ?? _defaultTextStrokeSlowdown)
+            .clamp(0.1, 100.0)
+            .toDouble();
 
     await _ensureFontMetricsLoaded();
     final lineHeight = _fontLineHeightPx ?? _targetResolution * 0.5;
     final imageHeight = _fontImageHeightPx ?? _targetResolution;
     final scale = letterSize / lineHeight;
 
-    // finalize any current animation into static
     if (_animStrokes.isNotEmpty) {
       _controller.stop();
       _staticStrokes = [..._staticStrokes, ..._animStrokes];
@@ -983,13 +3335,20 @@ class _VectorViewerScreenState extends State<VectorViewerScreen>
     final diagBoard =
         math.sqrt(_boardWidth * _boardWidth + _boardHeight * _boardHeight);
 
-    double cursorX = origin.dx;
-    final double baselineWorldY = origin.dy;
-    final double baselineGlyph = imageHeight / 2.0;
-    final double baselineGlyphScaled = baselineGlyph * scale;
+    final objectId =
+        (boardObjectId?.trim().isNotEmpty == true) ? boardObjectId!.trim() : prompt;
+    final displayName =
+        (logicalName?.trim().isNotEmpty == true) ? logicalName!.trim() : prompt;
 
-    final double letterGapPx = _textLetterGapPx;
-    const double spaceWidthFactor = 0.5;
+    await _deleteObject(id: objectId, silentIfMissing: true, animate: false);
+
+    double cursorX = origin.dx;
+    final baselineWorldY = origin.dy;
+    final baselineGlyph = imageHeight / 2.0;
+    final baselineGlyphScaled = baselineGlyph * scale;
+
+    final letterGapPx = _textLetterGapPx;
+    const spaceWidthFactor = 0.5;
 
     for (int i = 0; i < prompt.length; i++) {
       final ch = prompt[i];
@@ -1010,34 +3369,27 @@ class _VectorViewerScreenState extends State<VectorViewerScreen>
       final glyphWidth = math.max(gb.width, 1e-3);
       final glyphLeft = gb.left;
 
-      // X anchor: place leftmost stroke of glyph at cursorX
-      final double letterOffsetX = cursorX - glyphLeft * scale;
-
-      // Y anchor: baseline alignment
-      final double letterOffsetY =
-          baselineWorldY - baselineGlyphScaled;
+      final letterOffsetX = cursorX - glyphLeft * scale;
+      final letterOffsetY = baselineWorldY - baselineGlyphScaled;
 
       for (final stroke in glyph.cubics) {
         final ptsRaw = _sampleCubicStroke(stroke, upscale: scale);
         if (ptsRaw.length < 2) continue;
 
         final ptsPlaced = ptsRaw
-            .map(
-              (p) => Offset(
-                p.dx + letterOffsetX,
-                p.dy + letterOffsetY,
-              ),
-            )
+            .map((p) => Offset(p.dx + letterOffsetX, p.dy + letterOffsetY))
             .toList(growable: false);
 
         newStrokes.add(
           _makeDrawableFromPoints(
-            jsonName: prompt, // group id for erase = whole prompt
+            jsonName: objectId,
             objectOrigin: origin,
             objectScale: scale,
             pts: ptsPlaced,
             basePenWidth: _basePenWidthPx,
             diag: diagBoard,
+            sourceStrokeIndex: -1,
+            strokeWidthMultiplier: _textStrokeWidthMultiplierForScale(scale),
           ),
         );
       }
@@ -1059,10 +3411,26 @@ class _VectorViewerScreenState extends State<VectorViewerScreen>
       _animStrokes = newStrokes;
       _drawableStrokes = [..._staticStrokes, ..._animStrokes];
 
-      if (!_drawnJsonNames.contains(prompt)) {
-        _drawnJsonNames.add(prompt);
-      }
-      _selectedEraseName ??= prompt;
+      _registerObject(
+        BoardObjectRecord(
+          objectId: objectId,
+          kind: BoardObjectKind.text,
+          displayName: displayName,
+          origin: origin,
+          scale: scale,
+          fileName: null,
+          processedId: null,
+          aliases: <String>{
+            displayName,
+            prompt,
+            ...?aliases,
+          },
+          linkedToObjectId: attachedToObjectId,
+          ownerDiagramObjectId: ownerDiagramObjectId,
+          isTemporary: isTemporary,
+          syncWithBackend: syncWithBackend,
+        ),
+      );
 
       _status =
           'Writing text "$prompt" | strokes=${newStrokes.length}, letters=${prompt.length}';
@@ -1071,15 +3439,11 @@ class _VectorViewerScreenState extends State<VectorViewerScreen>
     _recomputeTimingForAnimStrokes();
   }
 
-
-  // ------------------- UI -------------------
-
   @override
   Widget build(BuildContext context) {
     return Scaffold(
       body: Row(
         children: [
-          // LEFT: drawing surface
           Expanded(
             flex: 3,
             child: Container(
@@ -1094,16 +3458,38 @@ class _VectorViewerScreenState extends State<VectorViewerScreen>
                   stepStrokeCount: _stepStrokeCount,
                   boardWidth: _boardWidth,
                   boardHeight: _boardHeight,
-
                   speedStartPct: _strokeSpeedStartPct,
                   speedEndPct: _strokeSpeedEndPct,
                   speedPeakMult: _strokeSpeedPeakMult,
                   speedPeakTime: _strokeSpeedPeakTime,
+                  diagramStatesByObjectId: Map<String, DiagramRuntimeState>.from(
+                    _diagramStatesByObjectId,
+                  ),
+                  highlightedClusterRefs: Set<String>.from(
+                    _highlightedClusterRefs,
+                  ),
+                  diagramLabelsByClusterRef:
+                      Map<String, DiagramPlacedLabel>.from(
+                    _diagramLabelsByClusterRef,
+                  ),
+                  diagramConnections:
+                      List<DiagramConnectionRecord>.from(_diagramConnections),
+                  zoomedClusterRef: _zoomedClusterRef,
+                  objectSaturationByObjectId:
+                      Map<String, double>.from(_objectSaturationById),
+                  diagramNonFocusSaturationByObjectId:
+                      Map<String, double>.from(_diagramNonFocusSaturationByObjectId),
+                  activeHighlightRefsByDiagramId: _activeHighlightRefsByDiagramId.map(
+                    (key, value) => MapEntry(key, Set<String>.from(value)),
+                  ),
+                  zoomedDiagramObjectId: _zoomedDiagramObjectId,
+                  boardZoomScale: _boardZoomScale,
+                  boardZoomWorldCenter: _boardZoomWorldCenter,
+                  animationDurationSec: _activeAnimationDurationSec,
                 ),
               ),
             ),
           ),
-          // RIGHT: control panel
           Container(
             width: 340,
             color: const Color(0xFF111111),
@@ -1153,8 +3539,6 @@ class _VectorViewerScreenState extends State<VectorViewerScreen>
                     'Legacy JSON path:\nwhiteboard_backend\\StrokeVectors\\edges_0_skeleton.json',
                     style: TextStyle(color: Colors.white38, fontSize: 11),
                   ),
-
-                  // -------- JSON / PLACEMENT UI --------
                   const SizedBox(height: 16),
                   const Divider(color: Colors.white24),
                   const SizedBox(height: 8),
@@ -1175,10 +3559,9 @@ class _VectorViewerScreenState extends State<VectorViewerScreen>
                   const SizedBox(height: 4),
                   TextField(
                     controller: _fileNameController,
-                    style:
-                        const TextStyle(color: Colors.white, fontSize: 12),
+                    style: const TextStyle(color: Colors.white, fontSize: 12),
                     decoration: const InputDecoration(
-                      labelText: 'File name (e.g. edges_0_skeleton.json)',
+                      labelText: 'File name (e.g. processed_4.json)',
                       labelStyle:
                           TextStyle(color: Colors.white54, fontSize: 11),
                       filled: true,
@@ -1196,21 +3579,28 @@ class _VectorViewerScreenState extends State<VectorViewerScreen>
                         child: TextField(
                           controller: _posXController,
                           style: const TextStyle(
-                              color: Colors.white, fontSize: 12),
+                            color: Colors.white,
+                            fontSize: 12,
+                          ),
                           decoration: const InputDecoration(
                             labelText: 'X',
                             labelStyle: TextStyle(
-                                color: Colors.white54, fontSize: 11),
+                              color: Colors.white54,
+                              fontSize: 11,
+                            ),
                             filled: true,
                             fillColor: Color(0xFF222222),
                             border: OutlineInputBorder(),
                             isDense: true,
                             contentPadding: EdgeInsets.symmetric(
-                                horizontal: 8, vertical: 6),
+                              horizontal: 8,
+                              vertical: 6,
+                            ),
                           ),
-                          keyboardType:
-                              const TextInputType.numberWithOptions(
-                                  decimal: true, signed: true),
+                          keyboardType: const TextInputType.numberWithOptions(
+                            decimal: true,
+                            signed: true,
+                          ),
                         ),
                       ),
                       const SizedBox(width: 8),
@@ -1218,21 +3608,28 @@ class _VectorViewerScreenState extends State<VectorViewerScreen>
                         child: TextField(
                           controller: _posYController,
                           style: const TextStyle(
-                              color: Colors.white, fontSize: 12),
+                            color: Colors.white,
+                            fontSize: 12,
+                          ),
                           decoration: const InputDecoration(
                             labelText: 'Y',
                             labelStyle: TextStyle(
-                                color: Colors.white54, fontSize: 11),
+                              color: Colors.white54,
+                              fontSize: 11,
+                            ),
                             filled: true,
                             fillColor: Color(0xFF222222),
                             border: OutlineInputBorder(),
                             isDense: true,
                             contentPadding: EdgeInsets.symmetric(
-                                horizontal: 8, vertical: 6),
+                              horizontal: 8,
+                              vertical: 6,
+                            ),
                           ),
-                          keyboardType:
-                              const TextInputType.numberWithOptions(
-                                  decimal: true, signed: true),
+                          keyboardType: const TextInputType.numberWithOptions(
+                            decimal: true,
+                            signed: true,
+                          ),
                         ),
                       ),
                     ],
@@ -1240,8 +3637,7 @@ class _VectorViewerScreenState extends State<VectorViewerScreen>
                   const SizedBox(height: 4),
                   TextField(
                     controller: _scaleController,
-                    style:
-                        const TextStyle(color: Colors.white, fontSize: 12),
+                    style: const TextStyle(color: Colors.white, fontSize: 12),
                     decoration: const InputDecoration(
                       labelText: 'Scale (1.0 = default 2k size)',
                       labelStyle:
@@ -1254,10 +3650,10 @@ class _VectorViewerScreenState extends State<VectorViewerScreen>
                           EdgeInsets.symmetric(horizontal: 8, vertical: 6),
                     ),
                     keyboardType: const TextInputType.numberWithOptions(
-                        decimal: true, signed: false),
+                      decimal: true,
+                      signed: false,
+                    ),
                   ),
-
-                  // -------- TEXT WRITING UI --------
                   const SizedBox(height: 16),
                   const Divider(color: Colors.white24),
                   const SizedBox(height: 8),
@@ -1277,8 +3673,7 @@ class _VectorViewerScreenState extends State<VectorViewerScreen>
                   const SizedBox(height: 4),
                   TextField(
                     controller: _textPromptController,
-                    style:
-                        const TextStyle(color: Colors.white, fontSize: 12),
+                    style: const TextStyle(color: Colors.white, fontSize: 12),
                     decoration: const InputDecoration(
                       labelText: 'Text to write',
                       labelStyle:
@@ -1298,21 +3693,28 @@ class _VectorViewerScreenState extends State<VectorViewerScreen>
                         child: TextField(
                           controller: _textXController,
                           style: const TextStyle(
-                              color: Colors.white, fontSize: 12),
+                            color: Colors.white,
+                            fontSize: 12,
+                          ),
                           decoration: const InputDecoration(
                             labelText: 'Text X (baseline)',
                             labelStyle: TextStyle(
-                                color: Colors.white54, fontSize: 11),
+                              color: Colors.white54,
+                              fontSize: 11,
+                            ),
                             filled: true,
                             fillColor: Color(0xFF222222),
                             border: OutlineInputBorder(),
                             isDense: true,
                             contentPadding: EdgeInsets.symmetric(
-                                horizontal: 8, vertical: 6),
+                              horizontal: 8,
+                              vertical: 6,
+                            ),
                           ),
-                          keyboardType:
-                              const TextInputType.numberWithOptions(
-                                  decimal: true, signed: true),
+                          keyboardType: const TextInputType.numberWithOptions(
+                            decimal: true,
+                            signed: true,
+                          ),
                         ),
                       ),
                       const SizedBox(width: 8),
@@ -1320,30 +3722,36 @@ class _VectorViewerScreenState extends State<VectorViewerScreen>
                         child: TextField(
                           controller: _textYController,
                           style: const TextStyle(
-                              color: Colors.white, fontSize: 12),
+                            color: Colors.white,
+                            fontSize: 12,
+                          ),
                           decoration: const InputDecoration(
                             labelText: 'Text Y (baseline)',
                             labelStyle: TextStyle(
-                                color: Colors.white54, fontSize: 11),
+                              color: Colors.white54,
+                              fontSize: 11,
+                            ),
                             filled: true,
                             fillColor: Color(0xFF222222),
                             border: OutlineInputBorder(),
                             isDense: true,
                             contentPadding: EdgeInsets.symmetric(
-                                horizontal: 8, vertical: 6),
+                              horizontal: 8,
+                              vertical: 6,
+                            ),
                           ),
-                          keyboardType:
-                              const TextInputType.numberWithOptions(
-                                  decimal: true, signed: true),
+                          keyboardType: const TextInputType.numberWithOptions(
+                            decimal: true,
+                            signed: true,
+                          ),
                         ),
                       ),
                     ],
                   ),
                   const SizedBox(height: 4),
-                                    TextField(
+                  TextField(
                     controller: _textSizeController,
-                    style:
-                        const TextStyle(color: Colors.white, fontSize: 12),
+                    style: const TextStyle(color: Colors.white, fontSize: 12),
                     decoration: const InputDecoration(
                       labelText: 'Letter size (px on board)',
                       labelStyle:
@@ -1356,16 +3764,18 @@ class _VectorViewerScreenState extends State<VectorViewerScreen>
                           EdgeInsets.symmetric(horizontal: 8, vertical: 6),
                     ),
                     keyboardType: const TextInputType.numberWithOptions(
-                        decimal: true, signed: false),
+                      decimal: true,
+                      signed: false,
+                    ),
                   ),
                   const SizedBox(height: 4),
-                  // NEW: letter gap factor
                   TextField(
                     controller: _textGapController,
                     style: const TextStyle(color: Colors.white, fontSize: 12),
                     decoration: const InputDecoration(
                       labelText: 'Letter gap (px)',
-                      labelStyle: TextStyle(color: Colors.white54, fontSize: 11),
+                      labelStyle:
+                          TextStyle(color: Colors.white54, fontSize: 11),
                       filled: true,
                       fillColor: Color(0xFF222222),
                       border: OutlineInputBorder(),
@@ -1374,20 +3784,18 @@ class _VectorViewerScreenState extends State<VectorViewerScreen>
                           EdgeInsets.symmetric(horizontal: 8, vertical: 6),
                     ),
                     keyboardType: const TextInputType.numberWithOptions(
-                        decimal: true, signed: false),
+                      decimal: true,
+                      signed: false,
+                    ),
                   ),
-
                   const SizedBox(height: 4),
                   ElevatedButton(
                     onPressed: _writeTextFromUi,
                     child: const Text('Write text'),
                   ),
-
                   const SizedBox(height: 16),
                   const Divider(color: Colors.white24),
                   const SizedBox(height: 8),
-
-                  // --------------- GLOBAL SPEED ---------------
                   const Text(
                     'Global speed',
                     style: TextStyle(
@@ -1419,12 +3827,9 @@ class _VectorViewerScreenState extends State<VectorViewerScreen>
                       }
                     },
                   ),
-
                   const SizedBox(height: 16),
                   const Divider(color: Colors.white24),
                   const SizedBox(height: 8),
-
-                  // --------------- STROKE TIMING ---------------
                   const Text(
                     'Stroke timing (per stroke)',
                     style: TextStyle(
@@ -1523,12 +3928,9 @@ class _VectorViewerScreenState extends State<VectorViewerScreen>
                       }
                     },
                   ),
-
                   const SizedBox(height: 16),
                   const Divider(color: Colors.white24),
                   const SizedBox(height: 8),
-
-                  // --------------- CURVATURE PROFILE ---------------
                   const Text(
                     'Curvature profile (within stroke)',
                     style: TextStyle(
@@ -1582,17 +3984,9 @@ class _VectorViewerScreenState extends State<VectorViewerScreen>
                       }
                     },
                   ),
-
                   const SizedBox(height: 16),
                   const Divider(color: Colors.white24),
                   const SizedBox(height: 8),
-
-                  //SPEED FLUCTUATE
-                                    const SizedBox(height: 16),
-                  const Divider(color: Colors.white24),
-                  const SizedBox(height: 8),
-
-                  // --------------- WITHIN-STROKE SPEED CURVE ---------------
                   const Text(
                     'Within-stroke speed curve',
                     style: TextStyle(
@@ -1602,10 +3996,10 @@ class _VectorViewerScreenState extends State<VectorViewerScreen>
                     ),
                   ),
                   const SizedBox(height: 4),
-
                   Text(
                     'Start ease: ${(_strokeSpeedStartPct * 100).toStringAsFixed(0)}%',
-                    style: const TextStyle(color: Colors.white70, fontSize: 11),
+                    style:
+                        const TextStyle(color: Colors.white70, fontSize: 11),
                   ),
                   Slider(
                     value: _strokeSpeedStartPct,
@@ -1624,10 +4018,10 @@ class _VectorViewerScreenState extends State<VectorViewerScreen>
                       }
                     },
                   ),
-
                   Text(
                     'End ease: ${(_strokeSpeedEndPct * 100).toStringAsFixed(0)}%',
-                    style: const TextStyle(color: Colors.white70, fontSize: 11),
+                    style:
+                        const TextStyle(color: Colors.white70, fontSize: 11),
                   ),
                   Slider(
                     value: _strokeSpeedEndPct,
@@ -1646,10 +4040,10 @@ class _VectorViewerScreenState extends State<VectorViewerScreen>
                       }
                     },
                   ),
-
                   Text(
                     'Peak speed: ${_strokeSpeedPeakMult.toStringAsFixed(2)}x',
-                    style: const TextStyle(color: Colors.white70, fontSize: 11),
+                    style:
+                        const TextStyle(color: Colors.white70, fontSize: 11),
                   ),
                   Slider(
                     value: _strokeSpeedPeakMult,
@@ -1668,10 +4062,10 @@ class _VectorViewerScreenState extends State<VectorViewerScreen>
                       }
                     },
                   ),
-
                   Text(
                     'Peak time: ${_strokeSpeedPeakTime.toStringAsFixed(2)}',
-                    style: const TextStyle(color: Colors.white70, fontSize: 11),
+                    style:
+                        const TextStyle(color: Colors.white70, fontSize: 11),
                   ),
                   Slider(
                     value: _strokeSpeedPeakTime,
@@ -1690,8 +4084,6 @@ class _VectorViewerScreenState extends State<VectorViewerScreen>
                       }
                     },
                   ),
-
-                  // --------------- TRAVEL TIMING ---------------
                   const Text(
                     'Travel between strokes (non-text)',
                     style: TextStyle(
@@ -1789,8 +4181,6 @@ class _VectorViewerScreenState extends State<VectorViewerScreen>
                       }
                     },
                   ),
-
-                  // --------------- ERASE UI ---------------
                   const SizedBox(height: 16),
                   const Divider(color: Colors.white24),
                   const SizedBox(height: 8),
@@ -1806,8 +4196,7 @@ class _VectorViewerScreenState extends State<VectorViewerScreen>
                   if (_drawnJsonNames.isEmpty)
                     const Text(
                       'No objects drawn yet.',
-                      style:
-                          TextStyle(color: Colors.white54, fontSize: 11),
+                      style: TextStyle(color: Colors.white54, fontSize: 11),
                     )
                   else ...[
                     DropdownButton<String>(
@@ -1820,7 +4209,9 @@ class _VectorViewerScreenState extends State<VectorViewerScreen>
                               child: Text(
                                 name,
                                 style: const TextStyle(
-                                    color: Colors.white, fontSize: 12),
+                                  color: Colors.white,
+                                  fontSize: 12,
+                                ),
                               ),
                             ),
                           )
@@ -1835,7 +4226,9 @@ class _VectorViewerScreenState extends State<VectorViewerScreen>
                     ElevatedButton(
                       onPressed: _selectedEraseName == null
                           ? null
-                          : () => _eraseObjectByName(_selectedEraseName!),
+                          : () => _whiteboardActions.deleteImage(
+                                name: _selectedEraseName!,
+                              ),
                       child: const Text('Erase selected'),
                     ),
                   ],
@@ -1848,10 +4241,10 @@ class _VectorViewerScreenState extends State<VectorViewerScreen>
     );
   }
 
-  // ------------------- GEOMETRY HELPERS -------------------
-
   Rect _computeRawBounds(
-      List<StrokePolyline> polys, List<StrokeCubic> cubics) {
+    List<StrokePolyline> polys,
+    List<StrokeCubic> cubics,
+  ) {
     double minX = double.infinity, minY = double.infinity;
     double maxX = -double.infinity, maxY = -double.infinity;
 
@@ -1933,8 +4326,6 @@ class _VectorViewerScreenState extends State<VectorViewerScreen>
     return out;
   }
 
-  // ---------- BUILD DRAWABLE STROKES FOR ONE OBJECT (IMAGES) ----------
-
   List<DrawableStroke> _buildDrawableStrokesForObject({
     required String jsonName,
     required Offset origin,
@@ -1963,10 +4354,7 @@ class _VectorViewerScreenState extends State<VectorViewerScreen>
       srcBounds.left + srcBounds.width / 2.0,
       srcBounds.top + srcBounds.height / 2.0,
     );
-    final centerScaled = Offset(
-      srcCenter.dx * upscale,
-      srcCenter.dy * upscale,
-    );
+    final centerScaled = Offset(srcCenter.dx * upscale, srcCenter.dy * upscale);
 
     for (final s in polylines) {
       final pts = s.points
@@ -1989,6 +4377,7 @@ class _VectorViewerScreenState extends State<VectorViewerScreen>
         basePenWidth: basePenWidth,
         diag: diagSafe,
         strokeColor: s.color,
+        sourceStrokeIndex: s.sourceStrokeIndex,
       ));
     }
 
@@ -2011,6 +4400,7 @@ class _VectorViewerScreenState extends State<VectorViewerScreen>
         basePenWidth: basePenWidth,
         diag: diagSafe,
         strokeColor: c.color,
+        sourceStrokeIndex: c.sourceStrokeIndex,
       ));
     }
 
@@ -2024,11 +4414,13 @@ class _VectorViewerScreenState extends State<VectorViewerScreen>
     required List<Offset> pts,
     required double basePenWidth,
     required double diag,
+    required int sourceStrokeIndex,
     Color? strokeColor,
+    double strokeWidthMultiplier = 1.0,
   }) {
     final scale = objectScale <= 0 ? 1.0 : objectScale;
 
-    final clampedScale = scale.clamp(0.1, 3.0);
+    final double clampedScale = scale.clamp(0.1, 3.0).toDouble();
     double scaleFactor;
     if (clampedScale <= 1.0) {
       scaleFactor = clampedScale;
@@ -2052,7 +4444,7 @@ class _VectorViewerScreenState extends State<VectorViewerScreen>
     double cost = 0.0;
 
     double prevSharpNorm = 0.0;
-    final double angleScale =
+    final angleScale =
         _curvatureAngleScale.abs() < 1e-3 ? 1.0 : _curvatureAngleScale;
 
     for (int i = 1; i < n; i++) {
@@ -2071,29 +4463,21 @@ class _VectorViewerScreenState extends State<VectorViewerScreen>
         final vPrev = workPts[i - 1] - workPts[i - 2];
         final lenPrev = vPrev.distance;
         if (lenPrev >= 1e-6) {
-          final dot =
-              (vPrev.dx * v.dx + vPrev.dy * v.dy) / (lenPrev * segLen);
+          final dot = (vPrev.dx * v.dx + vPrev.dy * v.dy) / (lenPrev * segLen);
           final clamped = dot.clamp(-1.0, 1.0);
           angDeg = math.acos(clamped) * 180.0 / math.pi;
         }
       }
 
-      double sharpNorm = (angDeg / angleScale).clamp(0.0, 1.5);
-
+      final double sharpNorm = (angDeg / angleScale).clamp(0.0, 1.5).toDouble();
       final smoothedSharp = 0.7 * prevSharpNorm + 0.3 * sharpNorm;
       prevSharpNorm = smoothedSharp;
-
       final slowFactor = 1.0 + _curvatureProfileFactor * smoothedSharp;
-
       final segCost = segLen * slowFactor;
 
       cost += segCost;
       cumGeom[i] = length;
       cumCost[i] = cost;
-    }
-
-    if (length < 0.0) {
-      length = 0.0;
     }
 
     double drawCostTotal;
@@ -2116,24 +4500,22 @@ class _VectorViewerScreenState extends State<VectorViewerScreen>
 
     double amp = 0.0;
     if (length > 0.02 * diag) {
-      final lenNorm = (length / diag).clamp(0.0, 1.0);
-      final curvNorm = (curvature / 70.0).clamp(0.0, 1.0);
+      final double lenNorm = (length / diag).clamp(0.0, 1.0).toDouble();
+      final double curvNorm = (curvature / 70.0).clamp(0.0, 1.0).toDouble();
       final baseAmp = basePenWidth * 0.9;
       amp = baseAmp *
           (0.5 + 0.8 * math.pow(lenNorm, 0.7)) *
           (0.6 + 0.4 * (1.0 - curvNorm));
-      amp = amp.clamp(0.5, basePenWidth * 2.0);
+      amp = amp.clamp(0.5, basePenWidth * 2.0).toDouble();
     }
 
     final displayPts = amp > 0.0 ? _applyWobble(workPts, amp) : workPts;
 
     final lengthK = length / 1000.0;
-    final curvNormGlobal = (curvature / 70.0).clamp(0.0, 1.0);
-
+    final double curvNormGlobal = (curvature / 70.0).clamp(0.0, 1.0).toDouble();
     final rawTime = _minStrokeTimeSec +
         lengthK * _lengthTimePerKPxSec +
         curvNormGlobal * _curvatureExtraMaxSec;
-
     final drawTimeSec =
         rawTime.clamp(_minStrokeTimeSec, _maxStrokeTimeSec).toDouble();
 
@@ -2141,7 +4523,6 @@ class _VectorViewerScreenState extends State<VectorViewerScreen>
       jsonName: jsonName,
       objectOrigin: objectOrigin,
       objectScale: objectScale,
-      color: strokeColor ?? Colors.black,
       points: displayPts,
       originalPoints: workPts,
       lengthPx: length,
@@ -2152,8 +4533,18 @@ class _VectorViewerScreenState extends State<VectorViewerScreen>
       cumDrawCost: cumCost,
       drawCostTotal: drawCostTotal,
       drawTimeSec: drawTimeSec,
+      color: strokeColor ?? Colors.black,
+      sourceStrokeIndex: sourceStrokeIndex,
+      strokeWidthMultiplier: strokeWidthMultiplier,
     );
+  }
 
+  double _textStrokeWidthMultiplierForScale(double scale) {
+    final safeScale = scale <= 0 ? 1.0 : scale;
+    final distanceFromDefault = (safeScale - 1.0).abs();
+    return (1.0 / (1.0 + 0.55 * distanceFromDefault))
+        .clamp(0.45, 1.0)
+        .toDouble();
   }
 
   Offset _centroid(List<Offset> pts) {
@@ -2209,11 +4600,9 @@ class _VectorViewerScreenState extends State<VectorViewerScreen>
 
       final t = i / (n - 1);
       final fade = math.sin(t * math.pi);
-
       final waveFast = math.sin(t * 5.0 * math.pi);
       final waveSlow = math.sin(t * 2.0 * math.pi);
       final combined = 0.6 * waveFast + 0.4 * waveSlow;
-
       final w = combined * amp * fade;
 
       final dx = nx * w;
@@ -2239,7 +4628,7 @@ class _VectorViewerScreenState extends State<VectorViewerScreen>
   }
 
   List<Offset> _sampleCubicStroke(StrokeCubic s, {required double upscale}) {
-    const int stepsPerSegment = 18;
+    const stepsPerSegment = 18;
     final pts = <Offset>[];
     bool first = true;
 
@@ -2274,26 +4663,36 @@ class _VectorViewerScreenState extends State<VectorViewerScreen>
   }
 }
 
-/* ---------- Raw data types ---------- */
-
 class StrokePolyline {
   final List<Offset> points;
   final Color color;
-  const StrokePolyline(this.points, {this.color = Colors.black});
+  final int sourceStrokeIndex;
+
+  const StrokePolyline(
+    this.points, {
+    this.color = Colors.black,
+    this.sourceStrokeIndex = -1,
+  });
 }
 
 class StrokeCubic {
   final List<CubicSegment> segments;
   final Color color;
-  const StrokeCubic(this.segments, {this.color = Colors.black});
-}
+  final int sourceStrokeIndex;
 
+  const StrokeCubic(
+    this.segments, {
+    this.color = Colors.black,
+    this.sourceStrokeIndex = -1,
+  });
+}
 
 class CubicSegment {
   final Offset p0;
   final Offset c1;
   final Offset c2;
   final Offset p1;
+
   const CubicSegment({
     required this.p0,
     required this.c1,
@@ -2305,36 +4704,35 @@ class CubicSegment {
 class GlyphData {
   final List<StrokeCubic> cubics;
   final Rect bounds;
+
   const GlyphData({
     required this.cubics,
     required this.bounds,
   });
 }
 
-/* ---------- Drawable stroke ---------- */
-
 class DrawableStroke {
-  // origin + identity for erase / grouping
   final String jsonName;
   final Offset objectOrigin;
   final double objectScale;
-
-  final List<Offset> points; // upscaled + wobble + placed
-  final List<Offset> originalPoints; // pre-wobble (downsampled, with placement)
+  final List<Offset> points;
+  final List<Offset> originalPoints;
   final double lengthPx;
   final Offset centroid;
   final Rect bounds;
   final double curvatureMetricDeg;
   final Color color;
-
-
+  final int sourceStrokeIndex;
   final List<double> cumGeomLen;
   final List<double> cumDrawCost;
   final double drawCostTotal;
-
-  double drawTimeSec; // how long we draw this stroke
-  double travelTimeBeforeSec; // pause/travel before this stroke starts
-  double timeWeight; // travel + draw; used by global animator
+  double drawTimeSec;
+  double travelTimeBeforeSec;
+  double timeWeight;
+  double animationStartSec;
+  double animationEndSec;
+  int animationWorkerIndex;
+  double strokeWidthMultiplier;
 
   int groupId = -1;
   int groupSize = 1;
@@ -2355,30 +4753,337 @@ class DrawableStroke {
     required this.drawCostTotal,
     required this.drawTimeSec,
     required this.color,
+    required this.sourceStrokeIndex,
     this.travelTimeBeforeSec = 0.0,
     this.timeWeight = 0.0,
+    this.animationStartSec = 0.0,
+    this.animationEndSec = 0.0,
+    this.animationWorkerIndex = 0,
+    this.strokeWidthMultiplier = 1.0,
   });
+
+  DrawableStroke copyWith({
+    String? jsonName,
+    Offset? objectOrigin,
+    double? objectScale,
+    List<Offset>? points,
+    List<Offset>? originalPoints,
+    double? lengthPx,
+    Offset? centroid,
+    Rect? bounds,
+    double? curvatureMetricDeg,
+    Color? color,
+    int? sourceStrokeIndex,
+    List<double>? cumGeomLen,
+    List<double>? cumDrawCost,
+    double? drawCostTotal,
+    double? drawTimeSec,
+    double? travelTimeBeforeSec,
+    double? timeWeight,
+    double? animationStartSec,
+    double? animationEndSec,
+    int? animationWorkerIndex,
+    double? strokeWidthMultiplier,
+  }) {
+    return DrawableStroke(
+      jsonName: jsonName ?? this.jsonName,
+      objectOrigin: objectOrigin ?? this.objectOrigin,
+      objectScale: objectScale ?? this.objectScale,
+      points: points ?? this.points,
+      originalPoints: originalPoints ?? this.originalPoints,
+      lengthPx: lengthPx ?? this.lengthPx,
+      centroid: centroid ?? this.centroid,
+      bounds: bounds ?? this.bounds,
+      curvatureMetricDeg: curvatureMetricDeg ?? this.curvatureMetricDeg,
+      cumGeomLen: cumGeomLen ?? this.cumGeomLen,
+      cumDrawCost: cumDrawCost ?? this.cumDrawCost,
+      drawCostTotal: drawCostTotal ?? this.drawCostTotal,
+      drawTimeSec: drawTimeSec ?? this.drawTimeSec,
+      color: color ?? this.color,
+      sourceStrokeIndex: sourceStrokeIndex ?? this.sourceStrokeIndex,
+      travelTimeBeforeSec: travelTimeBeforeSec ?? this.travelTimeBeforeSec,
+      timeWeight: timeWeight ?? this.timeWeight,
+      animationStartSec: animationStartSec ?? this.animationStartSec,
+      animationEndSec: animationEndSec ?? this.animationEndSec,
+      animationWorkerIndex: animationWorkerIndex ?? this.animationWorkerIndex,
+      strokeWidthMultiplier:
+          strokeWidthMultiplier ?? this.strokeWidthMultiplier,
+    )
+      ..groupId = groupId
+      ..groupSize = groupSize
+      ..importanceScore = importanceScore;
+  }
 }
 
-/* ---------- Painter ---------- */
+enum BoardObjectKind { image, text }
+
+class BoardObjectRecord {
+  BoardObjectRecord({
+    required this.objectId,
+    required this.kind,
+    required this.displayName,
+    required this.origin,
+    required this.scale,
+    required this.fileName,
+    required this.processedId,
+    required Set<String> aliases,
+    this.linkedToObjectId,
+    this.ownerDiagramObjectId,
+    this.isTemporary = false,
+    this.syncWithBackend = true,
+    this.sourceWidth,
+    this.sourceHeight,
+    this.sourceBounds,
+  }) : aliases = aliases.toSet();
+
+  final String objectId;
+  final BoardObjectKind kind;
+  final String displayName;
+  Offset origin;
+  double scale;
+  final String? fileName;
+  final String? processedId;
+  final Set<String> aliases;
+  String? linkedToObjectId;
+  final String? ownerDiagramObjectId;
+  final bool isTemporary;
+  final bool syncWithBackend;
+  final double? sourceWidth;
+  final double? sourceHeight;
+  final Rect? sourceBounds;
+
+  String get backendDeleteName => fileName ?? displayName;
+}
+
+class DiagramClusterTarget {
+  DiagramClusterTarget({
+    required this.diagramName,
+    required this.clusterName,
+  });
+
+  final String diagramName;
+  final String clusterName;
+
+  static DiagramClusterTarget? tryParse(String raw) {
+    final marker = raw.indexOf(' : ');
+    if (marker < 0) {
+      return null;
+    }
+    final diagramName = raw.substring(0, marker).trim();
+    final clusterName = raw.substring(marker + 3).trim();
+    if (diagramName.isEmpty || clusterName.isEmpty) {
+      return null;
+    }
+    return DiagramClusterTarget(
+      diagramName: diagramName,
+      clusterName: clusterName,
+    );
+  }
+}
+
+class DiagramClusterRecord {
+  DiagramClusterRecord({
+    required this.clusterRef,
+    required this.diagramName,
+    required this.label,
+    required this.normalizedLabel,
+    required Set<int> strokeIndexes,
+    this.targetKey,
+  }) : strokeIndexes = strokeIndexes.toSet();
+
+  final String clusterRef;
+  final String diagramName;
+  final String label;
+  final String normalizedLabel;
+  final Set<int> strokeIndexes;
+  final String? targetKey;
+
+  bool isHighlighted = false;
+  bool isZoomed = false;
+  bool wasExplicitlyDrawn = false;
+  String? lastWrittenLabel;
+}
+
+class DiagramRuntimeState {
+  DiagramRuntimeState({
+    required this.objectId,
+    required this.diagramName,
+    required this.processedId,
+  });
+
+  final String objectId;
+  final String diagramName;
+  final String processedId;
+  final Map<String, DiagramClusterRecord> clustersByCanonicalRef = {};
+  final Map<String, DiagramClusterRecord> _clustersByExactLabel = {};
+  final Map<String, DiagramClusterRecord> _clustersByNormalizedLabel = {};
+  final Set<int> drawnStrokeIndexes = <int>{};
+  int labelWriteCount = 0;
+
+  void addCluster(DiagramClusterRecord cluster) {
+    clustersByCanonicalRef[cluster.clusterRef] = cluster;
+    _clustersByExactLabel[cluster.label] = cluster;
+    _clustersByNormalizedLabel[cluster.normalizedLabel] = cluster;
+  }
+
+  DiagramClusterRecord? resolveCluster(String actionLabel) {
+    final exact = _clustersByExactLabel[actionLabel];
+    if (exact != null) {
+      return exact;
+    }
+
+    final normalized = actionLabel
+        .trim()
+        .toLowerCase()
+        .replaceAll(RegExp(r'\s+'), ' ')
+        .replaceAll(RegExp(r'[^a-z0-9 ]'), '');
+    final normalizedHit = _clustersByNormalizedLabel[normalized];
+    if (normalizedHit != null) {
+      return normalizedHit;
+    }
+
+    for (final entry in _clustersByNormalizedLabel.entries) {
+      if (normalized.contains(entry.key) || entry.key.contains(normalized)) {
+        return entry.value;
+      }
+    }
+
+    return null;
+  }
+}
+
+class ResolvedDiagramCluster {
+  const ResolvedDiagramCluster({
+    required this.diagram,
+    required this.cluster,
+  });
+
+  final DiagramRuntimeState diagram;
+  final DiagramClusterRecord cluster;
+}
+
+class DiagramPlacedLabel {
+  const DiagramPlacedLabel({
+    required this.objectId,
+    required this.clusterRef,
+    required this.text,
+  });
+
+  final String objectId;
+  final String clusterRef;
+  final String text;
+}
+
+class DiagramConnectionRecord {
+  const DiagramConnectionRecord({
+    required this.connectionKey,
+    required this.fromObjectId,
+    required this.fromClusterRef,
+    required this.toObjectId,
+    required this.toClusterRef,
+  });
+
+  final String connectionKey;
+  final String fromObjectId;
+  final String fromClusterRef;
+  final String toObjectId;
+  final String toClusterRef;
+}
+
+class ActiveLessonAction {
+  const ActiveLessonAction({
+    required this.globalActionIndex,
+    required this.type,
+    this.diagramObjectId,
+    this.primaryClusterRef,
+    this.secondaryDiagramObjectId,
+    this.secondaryClusterRef,
+    this.tempObjectId,
+    required this.affectedDiagramObjectIds,
+  });
+
+  final int globalActionIndex;
+  final String type;
+  final String? diagramObjectId;
+  final String? primaryClusterRef;
+  final String? secondaryDiagramObjectId;
+  final String? secondaryClusterRef;
+  final String? tempObjectId;
+  final Set<String> affectedDiagramObjectIds;
+
+  bool get isDiagramAction =>
+      type == 'highlight_cluster' ||
+      type == 'zoom_cluster' ||
+      type == 'connect_cluster_to_cluster';
+}
+
+class VectorBlueprint {
+  const VectorBlueprint({
+    required this.fileName,
+    required this.polylines,
+    required this.cubics,
+    required this.srcWidth,
+    required this.srcHeight,
+    required this.sourceBounds,
+  });
+
+  final String fileName;
+  final List<StrokePolyline> polylines;
+  final List<StrokeCubic> cubics;
+  final double srcWidth;
+  final double srcHeight;
+  final Rect sourceBounds;
+}
+
+class DiagramLabelAnchor {
+  const DiagramLabelAnchor({
+    required this.rawText,
+    required this.normalizedText,
+    required this.sourceRect,
+  });
+
+  final String rawText;
+  final String normalizedText;
+  final Rect sourceRect;
+}
+
+class DiagramWriteTarget {
+  const DiagramWriteTarget({
+    required this.origin,
+    required this.letterSize,
+    required this.preferredRect,
+  });
+
+  final Offset origin;
+  final double letterSize;
+  final Rect preferredRect;
+}
 
 class WhiteboardPainter extends CustomPainter {
   final List<DrawableStroke> staticStrokes;
   final List<DrawableStroke> animStrokes;
   final double animationT;
   final double basePenWidth;
-
   final bool stepMode;
   final int stepStrokeCount;
-
   final double speedStartPct;
   final double speedEndPct;
   final double speedPeakMult;
   final double speedPeakTime;
-
-  // Virtual board size – used to keep 0,0 stable.
   final double boardWidth;
   final double boardHeight;
+  final Map<String, DiagramRuntimeState> diagramStatesByObjectId;
+  final Set<String> highlightedClusterRefs;
+  final Map<String, DiagramPlacedLabel> diagramLabelsByClusterRef;
+  final List<DiagramConnectionRecord> diagramConnections;
+  final String? zoomedClusterRef;
+  final Map<String, double> objectSaturationByObjectId;
+  final Map<String, double> diagramNonFocusSaturationByObjectId;
+  final Map<String, Set<String>> activeHighlightRefsByDiagramId;
+  final String? zoomedDiagramObjectId;
+  final double boardZoomScale;
+  final Offset boardZoomWorldCenter;
+  final double animationDurationSec;
 
   const WhiteboardPainter({
     required this.staticStrokes,
@@ -2389,11 +5094,22 @@ class WhiteboardPainter extends CustomPainter {
     required this.stepStrokeCount,
     required this.boardWidth,
     required this.boardHeight,
-
     required this.speedStartPct,
     required this.speedEndPct,
     required this.speedPeakMult,
     required this.speedPeakTime,
+    required this.diagramStatesByObjectId,
+    required this.highlightedClusterRefs,
+    required this.diagramLabelsByClusterRef,
+    required this.diagramConnections,
+    required this.zoomedClusterRef,
+    required this.objectSaturationByObjectId,
+    required this.diagramNonFocusSaturationByObjectId,
+    required this.activeHighlightRefsByDiagramId,
+    required this.zoomedDiagramObjectId,
+    required this.boardZoomScale,
+    required this.boardZoomWorldCenter,
+    required this.animationDurationSec,
   });
 
   @override
@@ -2407,17 +5123,18 @@ class WhiteboardPainter extends CustomPainter {
 
     final bounds = _computeBounds(allStrokes);
     final scale = _computeUniformScale(bounds, size, padding: 80);
-    final tx =
-        (size.width - bounds.width * scale) / 2 - bounds.left * scale;
-    final ty =
-        (size.height - bounds.height * scale) / 2 - bounds.top * scale;
+    final tx = (size.width - bounds.width * scale) / 2 - bounds.left * scale;
+    final ty = (size.height - bounds.height * scale) / 2 - bounds.top * scale;
 
     canvas.save();
     canvas.translate(tx, ty);
     canvas.scale(scale);
+    canvas.translate(boardZoomWorldCenter.dx, boardZoomWorldCenter.dy);
+    canvas.scale(boardZoomScale);
+    canvas.translate(-boardZoomWorldCenter.dx, -boardZoomWorldCenter.dy);
 
     if (stepMode) {
-      final count = stepStrokeCount.clamp(0, allStrokes.length);
+      final int count = stepStrokeCount.clamp(0, allStrokes.length).toInt();
       for (int i = 0; i < count; i++) {
         _drawStroke(canvas, allStrokes[i], 1.0, scale);
       }
@@ -2427,43 +5144,38 @@ class WhiteboardPainter extends CustomPainter {
       }
 
       if (animStrokes.isNotEmpty) {
-        final totalWeight =
-            animStrokes.fold<double>(0.0, (s, d) => s + d.timeWeight);
-        final clampedT = animationT.clamp(0.0, 1.0);
-        final target = totalWeight > 0 ? totalWeight * clampedT : 0.0;
+        final double clampedT = animationT.clamp(0.0, 1.0).toDouble();
+        final totalDuration = animationDurationSec > 0
+            ? animationDurationSec
+            : animStrokes.fold<double>(
+                0.0,
+                (maxSoFar, stroke) =>
+                    math.max(maxSoFar, stroke.animationEndSec),
+              );
+        final target = totalDuration > 0 ? totalDuration * clampedT : 0.0;
 
-        double acc = 0.0;
         for (final stroke in animStrokes) {
-          final travel = stroke.travelTimeBeforeSec;
           final draw = stroke.drawTimeSec;
-          if (draw <= 0.0 && travel <= 0.0) {
+          final start = stroke.animationStartSec;
+          final end = stroke.animationEndSec;
+          if (draw <= 0.0 || end <= start) {
             continue;
           }
 
-          final strokeStart = acc;
-          final travelEnd = strokeStart + travel;
-          final strokeEnd = travelEnd + draw;
-          acc = strokeEnd;
-
-          if (target >= strokeEnd) {
+          if (target >= end) {
             _drawStroke(canvas, stroke, 1.0, scale);
             continue;
           }
 
-          if (target <= strokeStart) {
-            break;
+          if (target <= start) {
+            continue;
           }
 
-          if (target < travelEnd) {
-            break;
-          }
-
-          final local = (target - travelEnd) / draw;
-          final phase = local.clamp(0.0, 1.0);
+          final local = (target - start) / draw;
+          final double phase = local.clamp(0.0, 1.0).toDouble();
           if (phase > 0.0) {
             _drawStroke(canvas, stroke, phase, scale);
           }
-          break;
         }
       }
     }
@@ -2472,12 +5184,16 @@ class WhiteboardPainter extends CustomPainter {
   }
 
   void _drawStroke(
-      Canvas canvas, DrawableStroke stroke, double phase, double viewScale) {
+    Canvas canvas,
+    DrawableStroke stroke,
+    double phase,
+    double viewScale,
+  ) {
     final pts = stroke.points;
     if (pts.length < 2) return;
 
-    const double drawFrac = 0.8;
-    final local = phase.clamp(0.0, 1.0);
+    const drawFrac = 0.8;
+    final double local = phase.clamp(0.0, 1.0).toDouble();
     if (local <= 0.0) return;
 
     double drawPhase;
@@ -2511,121 +5227,134 @@ class WhiteboardPainter extends CustomPainter {
       path.lineTo(pts[i].dx, pts[i].dy);
     }
 
-    final penW = (basePenWidth / viewScale).clamp(0.5, 10.0);
+    final double penW = ((basePenWidth * stroke.strokeWidthMultiplier) /
+            viewScale)
+        .clamp(0.35, 10.0)
+        .toDouble();
 
     final paintLine = Paint()
-    ..color = stroke.color
-    ..style = PaintingStyle.stroke
-    ..strokeCap = StrokeCap.round
-    ..strokeJoin = StrokeJoin.round
-    ..strokeWidth = penW;
-
+      ..color = _effectiveStrokeColor(stroke)
+      ..style = PaintingStyle.stroke
+      ..strokeCap = StrokeCap.round
+      ..strokeJoin = StrokeJoin.round
+      ..strokeWidth = penW;
 
     canvas.drawPath(path, paintLine);
   }
 
-  // Maps linear time t=[0..1] to a warped progress=[0..1]
-  // Each segment uses "smootherstep" for smooth accel/decel,
-  double _warpStrokePhase(double t) {
-    t = t.clamp(0.0, 1.0);
+  Color _effectiveStrokeColor(DrawableStroke stroke) {
+    double saturation = objectSaturationByObjectId[stroke.jsonName] ?? 1.0;
+    final diagram = diagramStatesByObjectId[stroke.jsonName];
+    if (diagram != null) {
+      final activeHighlights = activeHighlightRefsByDiagramId[diagram.objectId] ?? const <String>{};
+      if (activeHighlights.isNotEmpty) {
+        final isFocused = activeHighlights.any((clusterRef) {
+          final cluster = diagram.clustersByCanonicalRef[clusterRef];
+          if (cluster == null) {
+            return false;
+          }
+          return cluster.strokeIndexes.contains(stroke.sourceStrokeIndex);
+        });
+        if (!isFocused) {
+          saturation *= diagramNonFocusSaturationByObjectId[diagram.objectId] ?? 0.5;
+        }
+      } else if (zoomedDiagramObjectId == diagram.objectId && zoomedClusterRef != null) {
+        final zoomCluster = diagram.clustersByCanonicalRef[zoomedClusterRef!];
+        final isFocused = zoomCluster?.strokeIndexes.contains(stroke.sourceStrokeIndex) ?? false;
+        if (!isFocused) {
+          saturation *= diagramNonFocusSaturationByObjectId[diagram.objectId] ?? 0.0;
+        }
+      }
+    }
+    return _applySaturation(stroke.color, saturation.clamp(0.0, 1.0).toDouble());
+  }
 
-    double start = speedStartPct.clamp(0.0, 0.49);
-    double end = speedEndPct.clamp(0.0, 0.49);
+  Color _applySaturation(Color color, double factor) {
+    final hsl = HSLColor.fromColor(color);
+    return hsl.withSaturation((hsl.saturation * factor).clamp(0.0, 1.0)).toColor();
+  }
+
+  double _warpStrokePhase(double t) {
+    t = t.clamp(0.0, 1.0).toDouble();
+
+    final double start = speedStartPct.clamp(0.0, 0.49).toDouble();
+    final double end = speedEndPct.clamp(0.0, 0.49).toDouble();
 
     final t1 = start;
     final t3 = (1.0 - end);
 
-    // If user settings are invalid (overlap), fallback linear
     if (t3 <= t1 + 1e-4) return t;
 
-    // Clamp peak time between (t1..t3)
-    double t2 = speedPeakTime.clamp(0.0, 1.0);
-    t2 = t2.clamp(t1 + 1e-4, t3 - 1e-4);
+    double t2 = speedPeakTime.clamp(0.0, 1.0).toDouble();
+    t2 = t2.clamp(t1 + 1e-4, t3 - 1e-4).toDouble();
 
-    final peak = speedPeakMult.clamp(1.0, 10.0);
+    final double peak = speedPeakMult.clamp(1.0, 10.0).toDouble();
 
-    // Segment definition: [a,b] with values vA->vB
-    double segFull(double vA, double vB, double L) {
-      if (L <= 0.0) return 0.0;
-      // integral over smootherstep interpolation = L*(vA+vB)/2
-      return L * (vA + vB) * 0.5;
+    double segFull(double vA, double vB, double l) {
+      if (l <= 0.0) return 0.0;
+      return l * (vA + vB) * 0.5;
     }
 
     double smoothInt(double x) {
-      // ∫ smootherstep(x) dx from 0..x
-      // smootherstep = 6x^5 -15x^4 +10x^3
-      // integral = x^6 -3x^5 +2.5x^4
       final x2 = x * x;
-      final x3 = x2 * x;
       final x4 = x2 * x2;
       final x5 = x4 * x;
       final x6 = x5 * x;
       return (x6 - 3.0 * x5 + 2.5 * x4);
     }
 
-    double segPartial(double vA, double vB, double L, double x) {
-      // x in [0..1], integrate interpolation from 0..x:
-      // v(x) = vA + (vB-vA)*smootherstep(x)
-      // ∫ v = L * [vA*x + (vB-vA)*smoothInt(x)]
-      if (L <= 0.0) return 0.0;
-      x = x.clamp(0.0, 1.0);
-      return L * (vA * x + (vB - vA) * smoothInt(x));
+    double segPartial(double vA, double vB, double l, double x) {
+      if (l <= 0.0) return 0.0;
+      x = x.clamp(0.0, 1.0).toDouble();
+      return l * (vA * x + (vB - vA) * smoothInt(x));
     }
 
-    // Segment lengths
-    final L01 = t1;          // [0..t1]     0 -> 1
-    final L12 = t2 - t1;     // [t1..t2]    1 -> peak
-    final L23 = t3 - t2;     // [t2..t3]    peak -> 1
-    final L34 = 1.0 - t3;    // [t3..1]     1 -> 0
+    final l01 = t1;
+    final l12 = t2 - t1;
+    final l23 = t3 - t2;
+    final l34 = 1.0 - t3;
 
-    // Total integral over whole stroke time
-    final total =
-        segFull(0.0, 1.0, L01) +
-        segFull(1.0, peak, L12) +
-        segFull(peak, 1.0, L23) +
-        segFull(1.0, 0.0, L34);
+    final total = segFull(0.0, 1.0, l01) +
+        segFull(1.0, peak, l12) +
+        segFull(peak, 1.0, l23) +
+        segFull(1.0, 0.0, l34);
 
     if (total <= 1e-9) return t;
 
     double acc = 0.0;
 
-    // Segment [0..t1]
-    if (t < t1 && L01 > 0.0) {
-      final x = t / L01;
-      acc += segPartial(0.0, 1.0, L01, x);
-      return (acc / total).clamp(0.0, 1.0);
+    if (t < t1 && l01 > 0.0) {
+      final x = t / l01;
+      acc += segPartial(0.0, 1.0, l01, x);
+      return (acc / total).clamp(0.0, 1.0).toDouble();
     } else {
-      acc += segFull(0.0, 1.0, L01);
+      acc += segFull(0.0, 1.0, l01);
     }
 
-    // Segment [t1..t2]
-    if (t < t2 && L12 > 0.0) {
-      final x = (t - t1) / L12;
-      acc += segPartial(1.0, peak, L12, x);
-      return (acc / total).clamp(0.0, 1.0);
+    if (t < t2 && l12 > 0.0) {
+      final x = (t - t1) / l12;
+      acc += segPartial(1.0, peak, l12, x);
+      return (acc / total).clamp(0.0, 1.0).toDouble();
     } else {
-      acc += segFull(1.0, peak, L12);
+      acc += segFull(1.0, peak, l12);
     }
 
-    // Segment [t2..t3]
-    if (t < t3 && L23 > 0.0) {
-      final x = (t - t2) / L23;
-      acc += segPartial(peak, 1.0, L23, x);
-      return (acc / total).clamp(0.0, 1.0);
+    if (t < t3 && l23 > 0.0) {
+      final x = (t - t2) / l23;
+      acc += segPartial(peak, 1.0, l23, x);
+      return (acc / total).clamp(0.0, 1.0).toDouble();
     } else {
-      acc += segFull(peak, 1.0, L23);
+      acc += segFull(peak, 1.0, l23);
     }
 
-    // Segment [t3..1]
-    if (t < 1.0 && L34 > 0.0) {
-      final x = (t - t3) / L34;
-      acc += segPartial(1.0, 0.0, L34, x);
-      return (acc / total).clamp(0.0, 1.0);
+    if (t < 1.0 && l34 > 0.0) {
+      final x = (t - t3) / l34;
+      acc += segPartial(1.0, 0.0, l34, x);
+      return (acc / total).clamp(0.0, 1.0).toDouble();
     }
 
     return 1.0;
   }
-
 
   int _findIndexForCost(List<double> cumCost, double target) {
     final last = cumCost.length - 1;
@@ -2647,14 +5376,181 @@ class WhiteboardPainter extends CustomPainter {
     return ans;
   }
 
+  Iterable<DrawableStroke> _clusterStrokes(
+    List<DrawableStroke> allStrokes,
+    DiagramRuntimeState diagram,
+    DiagramClusterRecord cluster,
+  ) {
+    return allStrokes.where(
+      (stroke) =>
+          stroke.jsonName == diagram.objectId &&
+          cluster.strokeIndexes.contains(stroke.sourceStrokeIndex),
+    );
+  }
+
+  Rect? _clusterBounds(
+    List<DrawableStroke> allStrokes,
+    DiagramRuntimeState diagram,
+    DiagramClusterRecord cluster,
+  ) {
+    final strokes = _clusterStrokes(allStrokes, diagram, cluster).toList();
+    if (strokes.isEmpty) {
+      return null;
+    }
+
+    Rect bounds = strokes.first.bounds;
+    for (int i = 1; i < strokes.length; i++) {
+      bounds = bounds.expandToInclude(strokes[i].bounds);
+    }
+    return bounds;
+  }
+
+  Offset? _clusterCenter(
+    List<DrawableStroke> allStrokes,
+    DiagramRuntimeState diagram,
+    DiagramClusterRecord cluster,
+  ) {
+    final bounds = _clusterBounds(allStrokes, diagram, cluster);
+    if (bounds == null) {
+      return null;
+    }
+    return Offset(bounds.center.dx, bounds.center.dy);
+  }
+
+  void _drawHighlightedClusters(
+    Canvas canvas,
+    List<DrawableStroke> allStrokes,
+    double viewScale,
+  ) {
+    for (final clusterRef in highlightedClusterRefs) {
+      for (final diagram in diagramStatesByObjectId.values) {
+        final cluster = diagram.clustersByCanonicalRef[clusterRef];
+        if (cluster == null) {
+          continue;
+        }
+
+        final double penW = (basePenWidth * 2.2 / viewScale).clamp(0.8, 16.0).toDouble();
+        final overlay = Paint()
+          ..color = const Color(0xFFFFC107)
+          ..style = PaintingStyle.stroke
+          ..strokeCap = StrokeCap.round
+          ..strokeJoin = StrokeJoin.round
+          ..strokeWidth = penW;
+
+        for (final stroke in _clusterStrokes(allStrokes, diagram, cluster)) {
+          final pts = stroke.points;
+          if (pts.length < 2) {
+            continue;
+          }
+
+          final path = Path()..moveTo(pts.first.dx, pts.first.dy);
+          for (int i = 1; i < pts.length; i++) {
+            path.lineTo(pts[i].dx, pts[i].dy);
+          }
+          canvas.drawPath(path, overlay);
+        }
+      }
+    }
+
+    if (zoomedClusterRef != null) {
+      for (final diagram in diagramStatesByObjectId.values) {
+        final cluster = diagram.clustersByCanonicalRef[zoomedClusterRef!];
+        if (cluster == null) {
+          continue;
+        }
+        final bounds = _clusterBounds(allStrokes, diagram, cluster);
+        if (bounds == null) {
+          continue;
+        }
+        final zoomPaint = Paint()
+          ..color = const Color(0xFF7E57C2)
+          ..style = PaintingStyle.stroke
+          ..strokeWidth = (basePenWidth * 1.4 / viewScale).clamp(0.8, 12.0).toDouble();
+        canvas.drawRect(bounds.inflate(20.0), zoomPaint);
+      }
+    }
+  }
+
+  void _drawDiagramLabels(
+    Canvas canvas,
+    List<DrawableStroke> allStrokes,
+    double viewScale,
+  ) {
+    for (final entry in diagramLabelsByClusterRef.entries) {
+      final label = entry.value;
+      for (final diagram in diagramStatesByObjectId.values) {
+        final cluster = diagram.clustersByCanonicalRef[entry.key];
+        if (cluster == null) {
+          continue;
+        }
+
+        final anchor = _clusterBounds(allStrokes, diagram, cluster);
+        if (anchor == null) {
+          continue;
+        }
+
+        final textPainter = TextPainter(
+          text: TextSpan(
+            text: label.text,
+            style: TextStyle(
+              color: const Color(0xFF1976D2),
+              fontSize: 54.0 / viewScale,
+              fontWeight: FontWeight.w600,
+            ),
+          ),
+          textDirection: TextDirection.ltr,
+        )..layout();
+
+        final offset = Offset(
+          anchor.right + (28.0 / viewScale),
+          anchor.top - (textPainter.height / 2),
+        );
+        textPainter.paint(canvas, offset);
+      }
+    }
+  }
+
+  void _drawDiagramConnections(
+    Canvas canvas,
+    List<DrawableStroke> allStrokes,
+    double viewScale,
+  ) {
+    final paint = Paint()
+      ..color = const Color(0xFF26A69A)
+      ..style = PaintingStyle.stroke
+      ..strokeWidth = (basePenWidth * 1.3 / viewScale).clamp(0.7, 10.0).toDouble();
+
+    for (final connection in diagramConnections) {
+      final fromDiagram = diagramStatesByObjectId[connection.fromObjectId];
+      final toDiagram = diagramStatesByObjectId[connection.toObjectId];
+      if (fromDiagram == null || toDiagram == null) {
+        continue;
+      }
+
+      final fromCluster =
+          fromDiagram.clustersByCanonicalRef[connection.fromClusterRef];
+      final toCluster = toDiagram.clustersByCanonicalRef[connection.toClusterRef];
+      if (fromCluster == null || toCluster == null) {
+        continue;
+      }
+
+      final from = _clusterCenter(allStrokes, fromDiagram, fromCluster);
+      final to = _clusterCenter(allStrokes, toDiagram, toCluster);
+      if (from == null || to == null) {
+        continue;
+      }
+
+      canvas.drawLine(from, to, paint);
+    }
+  }
+
   Rect _computeBounds(List<DrawableStroke> strokes) {
-    final double halfW = boardWidth / 2.0;
-    final double halfH = boardHeight / 2.0;
+    final halfW = boardWidth / 2.0;
+    final halfH = boardHeight / 2.0;
     return Rect.fromLTWH(-halfW, -halfH, boardWidth, boardHeight);
   }
 
-  double _computeUniformScale(Rect bounds, Size size,
-      {double padding = 10}) {
+  double _computeUniformScale(Rect bounds, Size size, {double padding = 10}) {
     final sx = (size.width - 2 * padding) / bounds.width;
     final sy = (size.height - 2 * padding) / bounds.height;
     final v = math.min(sx, sy);
@@ -2664,17 +5560,5 @@ class WhiteboardPainter extends CustomPainter {
   }
 
   @override
-  bool shouldRepaint(covariant WhiteboardPainter old) =>
-      old.staticStrokes != staticStrokes ||
-      old.animStrokes != animStrokes ||
-      old.animationT != animationT ||
-      old.basePenWidth != basePenWidth ||
-      old.stepMode != stepMode ||
-      old.stepStrokeCount != stepStrokeCount ||
-      old.boardWidth != boardWidth ||
-      old.boardHeight != boardHeight ||
-      old.speedStartPct != speedStartPct ||
-      old.speedEndPct != speedEndPct ||
-      old.speedPeakMult != speedPeakMult ||
-      old.speedPeakTime != speedPeakTime;
+  bool shouldRepaint(covariant WhiteboardPainter oldDelegate) => true;
 }

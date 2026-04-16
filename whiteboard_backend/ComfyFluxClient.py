@@ -355,12 +355,251 @@ def _write_metadata(
                 "base_context": prompt,
                 "topic": topic,
                 "source": "comfy_flux2_klein_4b_fp8",
+                "source_kind": "generated",
+                "source_name": "comfy_flux2_klein_4b_fp8",
                 "prompt_id": prompt_id,
                 "final_score": 1.0,
                 "contexts": [],
             }
 
         meta_path.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
+
+
+def _json_vector(vec: Any) -> Optional[List[float]]:
+    if not isinstance(vec, list) or not vec:
+        return None
+    out: List[float] = []
+    for x in vec:
+        if not isinstance(x, (int, float)):
+            return None
+        out.append(float(x))
+    return out or None
+
+
+def _resolve_hot_minilm_bundle(minilm_bundle: Any = None) -> Any:
+    if minilm_bundle is not None:
+        return minilm_bundle
+    try:
+        from shared_models import get_minilm
+        return get_minilm()
+    except Exception:
+        return None
+
+
+def _resolve_hot_siglip_bundle(siglip_bundle: Any = None) -> Any:
+    if siglip_bundle is not None:
+        return siglip_bundle
+    try:
+        from shared_models import get_siglip
+        return get_siglip()
+    except Exception:
+        return None
+
+
+def _embed_prompts_minilm(texts: List[str], minilm_bundle: Any) -> Optional[List[List[float]]]:
+    if not texts:
+        return []
+    if minilm_bundle is None:
+        return None
+
+    try:
+        if getattr(minilm_bundle, "use_sentence_transformers", False) and hasattr(minilm_bundle.model, "encode"):
+            vecs = minilm_bundle.model.encode(texts, normalize_embeddings=True)
+            return vecs.tolist() if hasattr(vecs, "tolist") else [list(map(float, v)) for v in vecs]
+    except Exception:
+        return None
+
+    try:
+        import torch
+
+        tok = getattr(minilm_bundle, "tokenizer", None)
+        mdl = getattr(minilm_bundle, "model", None)
+        dev = getattr(minilm_bundle, "device", None)
+        if tok is None or mdl is None:
+            return None
+
+        device = dev
+        if not isinstance(device, torch.device):
+            device = torch.device(str(device) if device else ("cuda" if torch.cuda.is_available() else "cpu"))
+
+        with torch.inference_mode():
+            batch = tok(texts, return_tensors="pt", padding=True, truncation=True)
+            batch = {k: v.to(device) for k, v in batch.items()}
+            out = mdl(**batch).last_hidden_state
+            mask = batch["attention_mask"].unsqueeze(-1).expand(out.size()).float()
+            summed = (out * mask).sum(dim=1)
+            denom = mask.sum(dim=1).clamp(min=1e-9)
+            pooled = summed / denom
+            pooled = torch.nn.functional.normalize(pooled, p=2, dim=-1)
+            return pooled.detach().cpu().tolist()
+    except Exception:
+        return None
+
+
+def _embed_image_paths_siglip(paths: List[str], siglip_bundle: Any) -> Optional[List[Optional[List[float]]]]:
+    if not paths:
+        return []
+    if siglip_bundle is None:
+        return None
+
+    try:
+        import torch
+        from PIL import Image
+
+        proc = getattr(siglip_bundle, "processor", None)
+        mdl = getattr(siglip_bundle, "model", None)
+        dev = getattr(siglip_bundle, "device", None)
+        if proc is None or mdl is None or not hasattr(mdl, "get_image_features"):
+            return None
+
+        valid_pils: List[Any] = []
+        valid_idx: List[int] = []
+        out: List[Optional[List[float]]] = [None] * len(paths)
+        for i, p in enumerate(paths):
+            try:
+                with Image.open(p) as im:
+                    valid_pils.append(im.convert("RGB"))
+                valid_idx.append(i)
+            except Exception:
+                continue
+
+        if not valid_pils:
+            return out
+
+        device = dev
+        if not isinstance(device, torch.device):
+            device = torch.device(str(device) if device else ("cuda" if torch.cuda.is_available() else "cpu"))
+
+        with torch.inference_mode():
+            inputs = proc(images=valid_pils, return_tensors="pt", padding=True)
+            try:
+                inputs = inputs.to(device)
+            except Exception:
+                inputs = {k: v.to(device) for k, v in inputs.items()}
+            feats = mdl.get_image_features(**inputs)
+            feats = torch.nn.functional.normalize(feats, p=2, dim=-1)
+            vecs = feats.detach().cpu().tolist()
+
+        for idx, vec in zip(valid_idx, vecs):
+            out[idx] = _json_vector(vec)
+        return out
+    except Exception:
+        return None
+
+
+def enrich_generation_metadata(
+    generated_map: Dict[str, Dict[str, Any]],
+    *,
+    siglip_bundle: Any = None,
+    minilm_bundle: Any = None,
+    meta_path: Optional[str | Path] = None,
+) -> Dict[str, Any]:
+    mp = Path(meta_path or META_PATH)
+    mp.parent.mkdir(parents=True, exist_ok=True)
+
+    payload: Dict[str, Any] = {}
+    if mp.is_file():
+        try:
+            payload = json.loads(mp.read_text(encoding="utf-8")) or {}
+        except Exception:
+            payload = {}
+    if not isinstance(payload, dict):
+        payload = {}
+
+    prompt_rows: List[Tuple[str, Dict[str, Any], List[str]]] = []
+    all_paths: List[str] = []
+    for prompt, info in (generated_map or {}).items():
+        if not isinstance(info, dict):
+            continue
+        saved_paths = [str(x) for x in (info.get("saved_paths") or []) if str(x).strip()]
+        if not saved_paths:
+            continue
+        pp = str(prompt or "").strip()
+        if not pp:
+            continue
+        prompt_rows.append((pp, info, saved_paths))
+        all_paths.extend(saved_paths)
+
+    prompts = [row[0] for row in prompt_rows]
+    minilm_bundle = _resolve_hot_minilm_bundle(minilm_bundle)
+    siglip_bundle = _resolve_hot_siglip_bundle(siglip_bundle)
+
+    prompt_vecs_raw = _embed_prompts_minilm(prompts, minilm_bundle)
+    prompt_vecs_by_prompt: Dict[str, List[float]] = {}
+    if isinstance(prompt_vecs_raw, list):
+        for prompt, vec in zip(prompts, prompt_vecs_raw):
+            jv = _json_vector(vec)
+            if jv is not None:
+                prompt_vecs_by_prompt[prompt] = jv
+
+    clip_vecs_raw = _embed_image_paths_siglip(all_paths, siglip_bundle)
+    clip_vecs_by_path: Dict[str, List[float]] = {}
+    if isinstance(clip_vecs_raw, list):
+        for path, vec in zip(all_paths, clip_vecs_raw):
+            if vec is not None:
+                clip_vecs_by_path[path] = vec
+
+    prompt_count = 0
+    clip_count = 0
+    context_count = 0
+
+    with _META_LOCK:
+        for prompt, info, saved_paths in prompt_rows:
+            prompt_vec = prompt_vecs_by_prompt.get(prompt)
+            topic = str(info.get("topic") or "").strip()
+            prompt_id = str(info.get("prompt_id") or "").strip()
+
+            for p in saved_paths:
+                entry = payload.get(p)
+                if not isinstance(entry, dict):
+                    entry = {}
+
+                entry["base_context"] = str(entry.get("base_context") or prompt).strip() or prompt
+                if topic:
+                    entry["topic"] = topic
+                if prompt_id:
+                    entry["prompt_id"] = prompt_id
+                entry["source"] = str(entry.get("source") or "comfy_flux2_klein_4b_fp8").strip() or "comfy_flux2_klein_4b_fp8"
+                entry["source_kind"] = str(entry.get("source_kind") or "generated").strip() or "generated"
+                entry["source_name"] = str(entry.get("source_name") or "comfy_flux2_klein_4b_fp8").strip() or "comfy_flux2_klein_4b_fp8"
+                entry["final_score"] = float(entry.get("final_score") or 1.0)
+
+                if prompt_vec is not None:
+                    entry["prompt_embedding"] = prompt_vec
+                    entry["contexts"] = [
+                        {
+                            "source_kind": entry["source_kind"],
+                            "source_name": entry["source_name"],
+                            "ctx_text": prompt,
+                            "ctx_score": 1.0,
+                            "ctx_sem_score": 1.0,
+                            "ctx_confidence": 1.0,
+                            "ctx_embedding": prompt_vec,
+                        }
+                    ]
+                    prompt_count += 1
+                    context_count += 1
+
+                clip_vec = clip_vecs_by_path.get(p)
+                if clip_vec is not None:
+                    entry["clip_embedding"] = clip_vec
+                    clip_count += 1
+
+                payload[p] = entry
+
+        mp.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
+
+    return {
+        "ok": True,
+        "meta_path": str(mp),
+        "prompts": len(prompt_rows),
+        "images": len(all_paths),
+        "prompt_embeddings": int(prompt_count),
+        "clip_embeddings": int(clip_count),
+        "context_embeddings": int(context_count),
+        "siglip_available": bool(siglip_bundle is not None),
+        "minilm_available": bool(minilm_bundle is not None),
+    }
 
 
 def generate_many(
@@ -457,7 +696,12 @@ def free_all_models(
     last_err: Optional[Exception] = None
     for payload in payloads:
         try:
-            return _http_json("POST", f"{comfy_url}/free", payload, timeout=120)
+            data = _http_json("POST", f"{comfy_url}/free", payload, timeout=120)
+            if isinstance(data, dict):
+                err = data.get("error")
+                if isinstance(err, str) and err.strip():
+                    raise RuntimeError(f"ComfyUI /free returned error: {err.strip()}")
+            return data
         except Exception as e:
             last_err = e
             continue

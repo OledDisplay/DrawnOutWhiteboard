@@ -13,11 +13,11 @@ PLUS:
        - Pinecone fetch first (called directly here with shared workers)
        - Unload SigLIP workers before Comfy/Flux generation
        - If misses:
-           - After Flux/Comfy completes, free Comfy models via API, then load full SigLIP and Qwen
+           - After Flux/Comfy completes, free Comfy models via API, then load full SigLIP
            - Wait for mechanical research + SigLIP reload, then run final rerank
-           - Start ImagePipeline background run using workers
-           - Wait selection_done (selection + refine) -> attach image ids + refined labels
-           - THEN (new) run Qwen ACTION PLANNING per image+silence with a whiteboard simulator
+           - For diagrams, do external SigLIP rule ranking + OCR verification against C2 canonical parts
+           - Start ImagePipeline background run using the accepted processed ids
+           - THEN run Qwen ACTION PLANNING per image+silence with a whiteboard simulator
            - Finally wait colours_done (pipeline finished)
 
 Requires:
@@ -32,6 +32,7 @@ import json
 import os
 import re
 import hashlib
+import difflib
 import threading
 import time
 from concurrent.futures import ThreadPoolExecutor, as_completed
@@ -110,13 +111,14 @@ def _run_efficientsam3_bboxes(
     out_dir: Optional[str] = None,
 ) -> Dict[str, Any]:
     """
-    Builds {processed_id: refined_labels(list[str])} for visual diagram images only (diagram=1),
-    runs EfficientSAM3 to get bboxes per label, returns map.
+    Builds {processed_id: [diagram_component_prompt]} for visual diagram images only (diagram=1),
+    runs EfficientSAM3 over every cluster render for that processed image,
+    and returns keep/drop decisions for each render.
     """
     from shared_models import get_efficientsam3, sam_lock
-    from EfficientSAM3Clusters import EfficientSAM3Bundle, compute_label_bboxes_for_processed_images
+    from EfficientSAM3Clusters import EfficientSAM3Bundle, prune_cluster_renders_for_processed_images
 
-    pid_to_labels: Dict[str, List[str]] = {}
+    pid_to_prompts: Dict[str, List[str]] = {}
 
     for name, a in assets_by_name.items():
         modes_raw = (diagram_modes_by_name or {}).get(str(name or "").strip(), [])
@@ -132,35 +134,22 @@ def _run_efficientsam3_bboxes(
         pid = str(a.processed_ids[0] or "").strip()
         if not pid:
             continue
-        if not a.refined_labels_file:
+        base_prompt = str(a.prompt or name or "").strip()
+        if not base_prompt and a.refined_labels_file:
+            try:
+                data = json.loads(Path(a.refined_labels_file).read_text(encoding="utf-8"))
+                if isinstance(data, dict):
+                    base_prompt = str(data.get("base_context", "") or "").strip()
+            except Exception:
+                base_prompt = ""
+        if not base_prompt:
             continue
 
-        # your refined file format in ImagePipeline: dict with "objects": list[str] AND "refined_labels": list[str]
-        try:
-            data = json.loads(Path(a.refined_labels_file).read_text(encoding="utf-8"))
-        except Exception:
-            continue
+        component_prompt = f"{base_prompt} component, real feauture"
+        pid_to_prompts[pid] = [component_prompt]
 
-        labels = []
-        seen = set()
-        if isinstance(data, dict):
-            # prefer "objects" (your new semantic name), fall back to refined_labels
-            raw = data.get("objects")
-            if not isinstance(raw, list):
-                raw = data.get("refined_labels")
-            if isinstance(raw, list):
-                for s in raw:
-                    ss = str(s or "").strip()
-                    key = ss.lower()
-                    if ss and key not in seen:
-                        seen.add(key)
-                        labels.append(ss)
-
-        if labels:
-            pid_to_labels[pid] = labels
-
-    if not pid_to_labels:
-        return {"ok": True, "note": "no_diagram_refined_labels"}
+    if not pid_to_prompts:
+        return {"ok": True, "note": "no_diagram_component_prompts"}
 
     sam = get_efficientsam3()
     if sam is None:
@@ -171,15 +160,14 @@ def _run_efficientsam3_bboxes(
     # write into PipelineOutputs by default (same place ImagePipeline uses)
     save_path = None
     if out_dir:
-        save_path = str(Path(out_dir) / "efficientsam3_label_bboxes.json")
+        save_path = str(Path(out_dir) / "efficientsam3_render_filter.json")
     else:
-        save_path = str(Path("PipelineOutputs") / "efficientsam3_label_bboxes.json")
+        save_path = str(Path("PipelineOutputs") / "efficientsam3_render_filter.json")
 
     with sam_lock():
-        bbox_map = compute_label_bboxes_for_processed_images(
+        bbox_map = prune_cluster_renders_for_processed_images(
             bundle=bundle,
-            processed_id_to_labels=pid_to_labels,
-            processed_images_roots=None,
+            processed_id_to_labels=pid_to_prompts,
             top_k=3,
             min_score=0.0,
             save_json_path=save_path,
@@ -214,14 +202,12 @@ MAX_DIAGRAMS_PER_CHAPTER = 2
 SPACE_PLANNER_BATCH_SIZE = max(1, int(os.getenv("QWEN_SPACE_BATCH_SIZE", "8") or 4))
 ACTION_PLANNER_BATCH_SIZE = max(1, int(os.getenv("QWEN_ACTION_BATCH_SIZE", "8") or 4))
 SPACE_PLANNER_MAX_NEW_TOKENS = max(64, int(os.getenv("QWEN_SPACE_MAX_NEW_TOKENS", "320") or 320))
-VISUAL_PLANNER_MAX_NEW_TOKENS = max(64, int(os.getenv("QWEN_VISUAL_MAX_NEW_TOKENS", "220") or 220))
+VISUAL_PLANNER_MAX_NEW_TOKENS = max(256, int(os.getenv("QWEN_VISUAL_MAX_NEW_TOKENS", "1400") or 1400))
 QWEN_RELOAD_TIMEOUT_SEC = max(10.0, float(os.getenv("QWEN_RELOAD_TIMEOUT_SEC", "180") or 180))
 INTER_CHUNK_SILENCE_SEC = 3.0
 DELETE_SILENCE_WORD_WAIT = max(1, int(os.getenv("DELETE_SILENCE_WORD_WAIT", "1") or 1))
 ACTION_PLANNER_DEBUG_JSON_FILE = os.getenv("QWEN_ACTION_DEBUG_JSON", "qwen_action_planner_debug.json").strip() or "qwen_action_planner_debug.json"
 FULL_IMAGE_FLOW_DEBUG_JSON_FILE = os.getenv("TIMELINE_IMAGE_FLOW_DEBUG_JSON", "timeline_full_image_flow_debug.json").strip() or "timeline_full_image_flow_debug.json"
-SAM_CLUSTER_MATCH_MIN_IOU = max(0.0, float(os.getenv("SAM_CLUSTER_MATCH_MIN_IOU", "0.02") or 0.02))
-SAM_CLUSTER_MATCH_MAX_CENTER_DIST = max(0.0, float(os.getenv("SAM_CLUSTER_MATCH_MAX_CENTER_DIST", "0.24") or 0.24))
 
 
 TIMELINE_PLAN_SCHEMA: Dict[str, Any] = {
@@ -554,17 +540,30 @@ def build_flat_speech_and_ranges(
 
 def prompt_logical_timeline(topic: str) -> Tuple[List[Dict[str, str]], Dict[str, Any]]:
     developer = (
-        "You are a lesson-planning engine. Produce a full logical lesson timeline for the topic.\n\n"
-        "Output MUST follow the provided JSON schema exactly.\n"
-        "Do not output markdown, prose, or code fences.\n\n"
-        "Timeline quality requirements:\n"
-        "- Split lesson into multiple chapters with clear progression.\n"
-        "- Each step must be explicit and actionable.\n"
-        "- Include real teaching content, not headings only.\n"
-        "- Use pace values thoughtfully: slow, medium, or fast.\n"
-        "- Keep step keys local per chapter (e.g., 1, 2, 2.a, 2.b).\n"
-        "- Keep keys unique inside each chapter.\n"
-        f"- Target up to {CHAPTER_CAP} chapters unless topic demands fewer.\n"
+        "You are a lesson-planning engine. You must output a FULL logical lesson timeline "
+        "for the given topic.\n\n"
+        "Definition of 'logical timeline': every small logical step throughout a systematic lecture, "
+        "including: introduction, framing what will be explored, transitions, pacing notes, "
+        "examples, logical assosiations and flow through the lesson.\n\n"
+        "The idea is to be going going through in a non assuming, baby step way with students\n"
+        "Basic knowledge in the topic can be taken for granted, but new concepts have to be explain fully from the ground up\n"
+        "The logic of things should not be stated - it should be followed and explained, building from zero\n"
+        "Analyse every micro part and hook of a thing - quirks of why it works a certain way\n"
+        "Link to stuff mentioned previously - relate everything to everything, so that good conclusions can be made\n"
+        "Recap at the end of the lesson.\n\n"
+        "You MUST split the lesson into multiple chapters (separate logical parts). "
+        "Chapters MUST be separated by a line that contains ONLY this character:\n"
+        "|\n\n"
+        "Inside each chapter:\n"
+        "- Start with: CHAPTER: <short title>\n"
+        "- Then provide numbered steps: 1., 2., 3., ...\n"
+        "- Each step must be explicit and actionable (like a robot could follow it).\n"
+        "- Include the content 'meat' (what is actually taught), not just headings.\n"
+        "- Include pacing hints in-line like: (pace: slow) / (pace: medium) / (pace: fast)\n\n"
+        "Try to not have too many chapters (3-6 is good), but do cover the topic fully.\n"
+        "Each chapter should be a concrete seperated part of the lesson.\n\n"
+        f"Current chapter cap : {CHAPTER_CAP}"
+        "Do NOT output markdown code fences.\n"
     )
     user = f"Topic: {topic}\nGenerate the full logical timeline now."
     input_items = [{"role": "developer", "content": developer}, {"role": "user", "content": user}]
@@ -593,18 +592,20 @@ def prompt_teacher_speech(
         "Requirements:\n"
         "- Explain extensively and in-depth. Cover every nuance mentioned in the timeline.\n"
         "- Keep it natural like a teacher talking to students.\n"
-        "- Smooth transitions.\n"
-        "- Include occasional short rhetorical questions or checks for understanding.\n\n"
+        "- Have Smooth transitions between topics.\n"
+        "- At 1 - 2 points throughout have short rhetorical questions, fun refferences, and interaction with the students to lighten up the lesson.\n\n"
         "Pause markers:\n"
         "- Insert pauses using EXACTLY this format: >3.0 where 3.0 is a float seconds value, and \">\" is your special char.\n"
-        "- Place pause markers between sentences/paragraphs, not inside words.\n"
-        "- Use them at chapter sections, after dense explanations, or before a key idea.\n"
-        "- Typical values: 1.0 to 3.0.\n\n"
+        "- Place pause markers between sentences/ large paragraphs, not inside words.\n"
+        "- Use them at chapter sections, after dense explanations, or before a key idea - not too much, not too little.\n"
+        "- Typical values: 0.5 to 1.5.\n\n"
+        "- For pauses it has really got to be a \"micro pause\" - around 0.5, implicit pauses should be saved and rarer"
         "STRUCTURE RULES:\n"
         "- The speech is ONE continuous chapter narration for the whole chunk.\n"
         "- You must also split it mechanically by step keys for formatting only.\n"
         "- These step chunks are not standalone mini speeches; they are slices of one continuous narration.\n"
         "- Keep every provided step key exactly once in step_speech.\n\n"
+        "- Explain EXTENSIVELY"
         f"word cap : {MAX_WORDS_PER_CHAPTER}"
         "Hard rules:\n"
         "- Output JSON only, following the provided schema.\n"
@@ -682,6 +683,7 @@ def prompt_image_requests(speech_text: str) -> Tuple[List[Dict[str, str]], Dict[
         "- Digram choice should be made looking at the whole lesson - if we are \"talking\" of real stuff through do not use schematics" 
         "- Visual diagrams are physical/literal meaning.\n"
         "- Schematic diagrams are conceptual/data meaning inferred from structure (only maths, chem, electro / schemotechnics, so on).\n\n"
+        "- Any diagram that isnt comprised of just types of lines IS DIAGRAM = 1"
         "Sync behavior:\n"
         "- You must sync each image to the narration via word indices.\n"
         "- Indices are ZERO-BASED word positions after splitting the entire narration by whitespace.\n"
@@ -695,7 +697,8 @@ def prompt_image_requests(speech_text: str) -> Tuple[List[Dict[str, str]], Dict[
         "- PUT NOTHING ELSE BUT THE TEXT TO PRINT IN THE CONTENT FIELD"
         "stops being relevant, so try persist solid ranges\n\n"
         "DIAGRAM CONSOLIDATION / PARTS RULES:\n"
-        "- If multiple related concepts can be explained using one shared diagram, prefer ONE diagram over many separate visuals.\n"
+        "- If multiple related concepts can be explained using one object - one diagram, prefer that with requested items, instead of seperate non diagram photos.\n"
+        "- You can CAN NOT make shared diagrams \"for 2 objects\" - if comparing 2 things they still gotta be seperated"
         "- When diagram=1, you must populate 'diagram_required_objects' with the exact parts/sub-objects that will be referenced or interacted with.\n"
         "- When diagram=2, you must also populate 'diagram_required_objects' with the exact conceptual parts/labels expected in the schematic.\n"
         "- If diagram=0, set 'diagram_required_objects' to [].\n"
@@ -739,6 +742,7 @@ def prompt_image_requests(speech_text: str) -> Tuple[List[Dict[str, str]], Dict[
         "- Output must follow the provided JSON schema exactly.\n"
         "Keep requested images as concrete things, easily got with img generation / search engines.\n"
         "Have different objects all around -> do not request the same thing in different places -> if it's used for a while JUST GIVE A BIG RANGE FOR IT\n"
+        "You are drawing on a board - you draw one by one so each little thing is requested as its own separate query"
         "\n\n"
     )
 
@@ -1649,7 +1653,7 @@ def split_entries_by_deletion_silence(entries: List[Dict[str, Any]]) -> List[Dic
         if t != "silence":
             cur.append(e)
             continue
-        if not bool(e.get("delete_all", False)):
+        if not bool(e.get("delete_all", False) or e.get("chunk_boundary_silence", False)):
             continue
         out.append({"visual_entries": list(cur), "deletion_silence": e})
         cur = []
@@ -1829,6 +1833,36 @@ def _name_is_protected_by_diagram_keepalive(
     return False
 
 
+def _manual_shift_targets_for_silence(
+    *,
+    blocked_names: List[str],
+    silence_start_word_index: int,
+    move_specs: List[Dict[str, Any]],
+) -> List[str]:
+    blocked_lut = {str(nm or "").strip().casefold() for nm in (blocked_names or []) if str(nm or "").strip()}
+    if not blocked_lut:
+        return []
+
+    s = int(silence_start_word_index)
+    out: List[str] = []
+    seen = set()
+    for spec in (move_specs or []):
+        if not isinstance(spec, dict):
+            continue
+        primary_name = str(spec.get("primary_name", "") or "").strip()
+        if not primary_name:
+            continue
+        lk = primary_name.casefold()
+        if lk not in blocked_lut or lk in seen:
+            continue
+        range_end = int(spec.get("range_end", spec.get("range_start", 0)) or 0)
+        if s >= range_end:
+            continue
+        seen.add(lk)
+        out.append(primary_name)
+    return out
+
+
 def _chunk_list(items: List[Any], size: int) -> List[List[Any]]:
     size = max(1, int(size))
     out: List[List[Any]] = []
@@ -1924,6 +1958,31 @@ def _build_manual_deletion_actions_for_silence(
         seen.add(lk)
         names.append(nm)
 
+    active_rows_raw = silence_job.get("active_objects") if isinstance(silence_job.get("active_objects"), list) else []
+    target_names_lc = {nm.lower(): nm for nm in names}
+    selected_rows: List[Dict[str, str]] = []
+    selected_seen = set()
+    for row in active_rows_raw:
+        if not isinstance(row, dict):
+            continue
+        nm = str(row.get("name", "") or "").strip()
+        if not nm or nm.lower() not in target_names_lc:
+            continue
+        pid = str(row.get("processed_id", "") or "").strip()
+        dedupe_key = f"id:{pid.lower()}" if pid else f"name:{nm.lower()}"
+        if dedupe_key in selected_seen:
+            continue
+        selected_seen.add(dedupe_key)
+        selected_rows.append(
+            {
+                "name": nm,
+                "processed_id": pid,
+            }
+        )
+
+    if not selected_rows:
+        selected_rows = [{"name": nm, "processed_id": ""} for nm in names]
+
     s = int(silence_job.get("start_word_index", 0) or 0)
     e = int(silence_job.get("end_word_index", s) or s)
     if e < s:
@@ -1932,14 +1991,23 @@ def _build_manual_deletion_actions_for_silence(
     step = max(1, int(wait_words))
 
     out: List[Dict[str, Any]] = []
-    for i, nm in enumerate(names):
+    for i, row in enumerate(selected_rows):
         off = min(span, i * step)
-        one = {
-            "type": "delete_by_name",
-            "target": nm,
-            "source": "manual_deletion_silence",
-            "sync_local": {"start_word_offset": int(off), "end_word_offset": int(off)},
-        }
+        pid = str(row.get("processed_id", "") or "").strip()
+        if pid:
+            one = {
+                "type": "delete_by_id",
+                "image_id": pid,
+                "source": "manual_deletion_silence",
+                "sync_local": {"start_word_offset": int(off), "end_word_offset": int(off)},
+            }
+        else:
+            one = {
+                "type": "delete_by_name",
+                "target": str(row.get("name", "") or "").strip(),
+                "source": "manual_deletion_silence",
+                "sync_local": {"start_word_offset": int(off), "end_word_offset": int(off)},
+            }
         out.append(
             convert_local_sync_to_absolute(
                 one,
@@ -1974,6 +2042,8 @@ _VISUAL_ACTION_ALIAS_STATIC: Dict[str, str] = {
     "zoom_cluster": "zoom_cluster",
     "unzoom_cluster": "unzoom_cluster",
     "write_label": "write_label",
+    "connect_cluster_to_cluster": "connect_cluster_to_cluster",
+    "connect_clusters": "connect_cluster_to_cluster",
 }
 
 _DIAGRAM_ACTION_TYPES_STATIC = {
@@ -1982,6 +2052,7 @@ _DIAGRAM_ACTION_TYPES_STATIC = {
     "zoom_cluster",
     "unzoom_cluster",
     "write_label",
+    "connect_cluster_to_cluster",
 }
 
 
@@ -1997,6 +2068,21 @@ def _safe_float(v: Any, default: float = 0.0) -> float:
         return float(v)
     except Exception:
         return float(default)
+
+
+def _normalize_diagram_cluster_ref(value: Any, *, default_diagram_name: str = "") -> str:
+    raw = str(value or "").strip()
+    if not raw:
+        return ""
+    if ":" not in raw:
+        diagram_name = str(default_diagram_name or "").strip()
+        return f"{diagram_name} : {raw}" if diagram_name else raw
+    left, right = raw.split(":", 1)
+    diagram_name = str(left or "").strip() or str(default_diagram_name or "").strip()
+    cluster_name = str(right or "").strip()
+    if not diagram_name or not cluster_name:
+        return ""
+    return f"{diagram_name} : {cluster_name}"
 
 
 def _normalize_sync_local_for_req(sync: Any, *, req_start: int, req_end: int) -> Dict[str, int]:
@@ -2139,21 +2225,49 @@ def normalize_static_visual_action(
         if not image_id:
             return None
         out["image_id"] = image_id
+    elif t == "connect_cluster_to_cluster":
+        from_default = str(action.get("from_diagram_name", "") or action.get("diagram_name", "") or req_name).strip()
+        to_default = str(action.get("to_diagram_name", "") or action.get("other_diagram_name", "") or req_name).strip()
+        from_cluster = _normalize_diagram_cluster_ref(
+            action.get("from_cluster", "") or action.get("source_cluster", "") or action.get("cluster_name", "") or "",
+            default_diagram_name=from_default,
+        )
+        to_cluster = _normalize_diagram_cluster_ref(
+            action.get("to_cluster", "")
+            or action.get("target_cluster", "")
+            or action.get("other_cluster", "")
+            or action.get("other_cluster_name", "")
+            or "",
+            default_diagram_name=to_default,
+        )
+        if not from_cluster or not to_cluster:
+            return None
+        out["from_cluster"] = from_cluster
+        out["to_cluster"] = to_cluster
+        out["duration_sec"] = max(
+            0.1,
+            float(_safe_float(action.get("duration_sec", action.get("duration_in_sec", 2.0)), 2.0)),
+        )
     elif t in _DIAGRAM_ACTION_TYPES_STATIC:
         objects = req.get("objects_that_comprise_image") if isinstance(req.get("objects_that_comprise_image"), list) else []
         first_obj = str(objects[0] if objects else "").strip()
-        cname = str(
-            action.get("cluster_name", "")
+        raw_cname = str(
+            action.get("target", "")
+            or action.get("cluster_name", "")
             or action.get("cluster", "")
             or action.get("object", "")
             or action.get("name", "")
             or first_obj
         ).strip()
+        cname = _normalize_diagram_cluster_ref(
+            raw_cname,
+            default_diagram_name=req_name,
+        )
         if not cname:
             return None
         out["cluster_name"] = cname
         if t == "write_label":
-            out["text"] = str(action.get("text", "") or cname)
+            out["text"] = str(action.get("text", "") or raw_cname)
 
     out["sync_local"] = _normalize_sync_local_for_req(
         action.get("sync_local"),
@@ -3277,18 +3391,25 @@ class LessonTimeline:
         if not pid:
             return None
 
-        p1 = Path(self.processed_images_dir) / f"{pid}.png"
-        if p1.is_file():
-            return p1
-
-        p2 = Path("ProccessedImages") / f"{pid}.png"
-        if p2.is_file():
-            return p2
-
-        # fallback: also check in cwd
-        p3 = Path(f"{pid}.png")
-        if p3.is_file():
-            return p3
+        base = Path(__file__).resolve().parent
+        candidates = [
+            Path(self.processed_images_dir) / f"{pid}.png",
+            Path("ProcessedImages") / f"{pid}.png",
+            Path("ProccessedImages") / f"{pid}.png",
+            base / "ProcessedImages" / f"{pid}.png",
+            base / "ProccessedImages" / f"{pid}.png",
+            base / "PipelineOutputs" / "ProcessedImages" / f"{pid}.png",
+            base / "PipelineOutputs" / "ProccessedImages" / f"{pid}.png",
+            Path("PipelineOutputs") / "ProcessedImages" / f"{pid}.png",
+            Path("PipelineOutputs") / "ProccessedImages" / f"{pid}.png",
+            Path(f"{pid}.png"),
+        ]
+        for p in candidates:
+            try:
+                if p.is_file():
+                    return p
+            except Exception:
+                continue
 
         return None
 
@@ -3372,7 +3493,546 @@ class LessonTimeline:
 
         return out
 
-    
+    def _diagram_components_dir(self) -> Path:
+        return Path("PipelineOutputs") / "_diagram_components"
+
+    def _safe_diagram_component_slug(self, prompt: str) -> str:
+        text = re.sub(r"[^\w.-]+", "_", str(prompt or "").strip(), flags=re.UNICODE)
+        text = re.sub(r"_+", "_", text).strip("._")
+        if not text:
+            text = hashlib.sha1(str(prompt or "").encode("utf-8")).hexdigest()[:12]
+        return text[:96]
+
+    def _write_c2_component_artifact(
+        self,
+        *,
+        prompt: str,
+        diagram_mode: int,
+        requested_components: List[str],
+        report: Dict[str, Any],
+    ) -> Optional[str]:
+        prompt = str(prompt or "").strip()
+        if not prompt:
+            return None
+
+        visual_stage = report.get("visual_stage") if isinstance(report, dict) else {}
+        components_raw = visual_stage.get("components") if isinstance(visual_stage, dict) else []
+        if not isinstance(components_raw, list):
+            components_raw = []
+
+        compact_components: List[Dict[str, Any]] = []
+        object_names: List[str] = []
+        seen = set()
+
+        for row in components_raw:
+            if not isinstance(row, dict):
+                continue
+            label = str(row.get("label", "") or "").strip()
+            if not label:
+                component_obj = row.get("component")
+                if isinstance(component_obj, dict):
+                    label = str(component_obj.get("label", "") or "").strip()
+            if not label:
+                continue
+            key = label.casefold()
+            if key in seen:
+                continue
+            seen.add(key)
+            object_names.append(label)
+            compact_components.append(
+                {
+                    "name": label,
+                    "qid": str(row.get("qid", "") or "").strip(),
+                    "query": str(row.get("query", row.get("search_query", "")) or "").strip(),
+                    "wikipedia_visual_description": str(row.get("wikipedia_visual_description", "") or "").strip(),
+                    "refined_visual_description": str(row.get("refined_visual_description", "") or "").strip(),
+                    "canonical_candidate_id": str(row.get("canonical_candidate_id", "") or "").strip(),
+                    "canonical_candidate_local_path": str(row.get("canonical_candidate_local_path", "") or "").strip(),
+                    "canonical_candidate_score": float(row.get("canonical_candidate_score", 0.0) or 0.0),
+                    "error": str(row.get("error", "") or "").strip(),
+                }
+            )
+
+        for item in requested_components or []:
+            label = str(item or "").strip()
+            if not label:
+                continue
+            key = label.casefold()
+            if key in seen:
+                continue
+            seen.add(key)
+            object_names.append(label)
+            compact_components.append(
+                {
+                    "name": label,
+                    "qid": "",
+                    "query": label,
+                    "wikipedia_visual_description": "",
+                    "refined_visual_description": "",
+                    "error": "",
+                }
+            )
+
+        if not object_names:
+            return None
+
+        payload = {
+            "schema": "diagram_components_c2_v1",
+            "prompt": prompt,
+            "diagram_mode": int(diagram_mode or 0),
+            "requested_components": list(requested_components or []),
+            "objects": list(object_names),
+            "refined_labels": list(object_names),
+            "components": compact_components,
+            "c2_report": report if isinstance(report, dict) else {},
+        }
+        out_path = self._diagram_components_dir() / f"{self._safe_diagram_component_slug(prompt)}.json"
+        return self._write_json_file(out_path, payload)
+
+    def _apply_c2_diagram_components_to_assets(
+        self,
+        *,
+        assets: Dict[str, ImageAsset],
+        prompt_meta: Dict[str, Dict[str, Any]],
+        c2_reports_by_prompt: Dict[str, Dict[str, Any]],
+    ) -> Dict[str, Any]:
+        applied: Dict[str, Any] = {"artifacts_by_prompt": {}, "errors": {}}
+        for prompt, asset in (assets or {}).items():
+            if not _is_diagram_mode(asset.diagram):
+                continue
+            meta = prompt_meta.get(prompt) or {}
+            requested_components = meta.get("diagram_required_objects") or []
+            if not isinstance(requested_components, list):
+                requested_components = []
+            requested_components = [str(x).strip() for x in requested_components if str(x).strip()]
+            report = c2_reports_by_prompt.get(prompt) or {}
+            if not isinstance(report, dict):
+                report = {}
+            artifact_path = self._write_c2_component_artifact(
+                prompt=prompt,
+                diagram_mode=int(meta.get("diagram", asset.diagram) or asset.diagram or 0),
+                requested_components=requested_components,
+                report=report,
+            )
+            if not artifact_path:
+                applied["errors"][prompt] = str(
+                    ((report.get("visual_stage") or {}).get("error") if isinstance(report, dict) else "")
+                    or "no_c2_components"
+                )
+                continue
+            asset.refined_labels_file = artifact_path
+            asset.objects = self._load_objects_list_from_refined_file(artifact_path)
+            applied["artifacts_by_prompt"][prompt] = artifact_path
+        return applied
+
+    def _diagram_component_labels_from_c2_report(
+        self,
+        report: Optional[Dict[str, Any]],
+        *,
+        requested_components: Optional[List[str]] = None,
+    ) -> List[str]:
+        out: List[str] = []
+        seen = set()
+
+        def _push(value: Any) -> None:
+            s = str(value or "").strip()
+            if not s:
+                return
+            k = s.casefold()
+            if k in seen:
+                return
+            seen.add(k)
+            out.append(s)
+
+        if isinstance(report, dict):
+            visual_stage = report.get("visual_stage")
+            components = visual_stage.get("components") if isinstance(visual_stage, dict) else []
+            if isinstance(components, list):
+                for row in components:
+                    if not isinstance(row, dict):
+                        continue
+                    _push(row.get("label"))
+                    comp = row.get("component")
+                    if isinstance(comp, dict):
+                        _push(comp.get("label"))
+
+        for item in requested_components or []:
+            _push(item)
+
+        return out
+
+    def _norm_diagram_label_text(self, value: Any) -> str:
+        text = str(value or "").strip().lower()
+        text = re.sub(r"[^a-z0-9]+", " ", text)
+        text = re.sub(r"\s+", " ", text).strip()
+        return text
+
+    def _diagram_ocr_match_score(
+        self,
+        *,
+        canonical_labels: List[str],
+        ocr_labels: List[str],
+    ) -> Dict[str, Any]:
+        canon = [self._norm_diagram_label_text(x) for x in (canonical_labels or []) if self._norm_diagram_label_text(x)]
+        ocr = [self._norm_diagram_label_text(x) for x in (ocr_labels or []) if self._norm_diagram_label_text(x)]
+        if not canon or not ocr:
+            return {"score": 0.0, "matched_count": 0, "best_pairs": []}
+
+        pairs: List[Dict[str, Any]] = []
+        total = 0.0
+        matched = 0
+        for label in canon:
+            best_other = ""
+            best_score = 0.0
+            label_tokens = set(label.split())
+            for cand in ocr:
+                cand_tokens = set(cand.split())
+                seq = difflib.SequenceMatcher(None, label, cand).ratio()
+                overlap = 0.0
+                if label_tokens and cand_tokens:
+                    overlap = len(label_tokens & cand_tokens) / float(max(1, len(label_tokens | cand_tokens)))
+                contains = 1.0 if (label in cand or cand in label) else 0.0
+                score = max(seq, overlap, contains)
+                if score > best_score:
+                    best_score = score
+                    best_other = cand
+            total += best_score
+            if best_score >= 0.72:
+                matched += 1
+            pairs.append({"canonical": label, "ocr": best_other, "score": round(float(best_score), 4)})
+
+        final_score = total / float(max(1, len(canon)))
+        return {
+            "score": float(final_score),
+            "matched_count": int(matched),
+            "best_pairs": pairs,
+        }
+
+    def _cosine_similarity_lists(self, left: Any, right: Any) -> float:
+        if not isinstance(left, list) or not isinstance(right, list) or not left or not right:
+            return 0.0
+        try:
+            import numpy as np
+
+            lv = np.asarray(left, dtype=np.float32)
+            rv = np.asarray(right, dtype=np.float32)
+            if lv.size == 0 or rv.size == 0 or lv.shape != rv.shape:
+                return 0.0
+            lnorm = float(np.linalg.norm(lv))
+            rnorm = float(np.linalg.norm(rv))
+            if lnorm <= 0.0 or rnorm <= 0.0:
+                return 0.0
+            return float(np.dot(lv, rv) / (lnorm * rnorm))
+        except Exception:
+            return 0.0
+
+    def _siglip_embed_pil_images_with_bundle(self, *, siglip_bundle: Any, pil_images: List[Any]) -> List[List[float]]:
+        if siglip_bundle is None or not pil_images:
+            return []
+        try:
+            import torch
+
+            proc = getattr(siglip_bundle, "processor", None)
+            mdl = getattr(siglip_bundle, "model", None)
+            dev = getattr(siglip_bundle, "device", None)
+            if proc is None or mdl is None:
+                return []
+            device = dev if isinstance(dev, torch.device) else torch.device(str(dev) if dev else ("cuda" if torch.cuda.is_available() else "cpu"))
+            with torch.inference_mode():
+                inputs = proc(images=pil_images, return_tensors="pt", padding=True)
+                try:
+                    inputs = inputs.to(device)
+                except Exception:
+                    inputs = {k: v.to(device) for k, v in inputs.items()}
+                feats = mdl.get_image_features(**inputs)
+                feats = torch.nn.functional.normalize(feats, p=2, dim=-1)
+                return feats.detach().cpu().tolist()
+        except Exception:
+            return []
+
+    def _rank_c2_component_candidate_images(
+        self,
+        *,
+        c2_reports_by_prompt: Dict[str, Dict[str, Any]],
+        siglip_bundle: Any,
+    ) -> Dict[str, Any]:
+        import PineconeFetch
+        from PIL import Image
+
+        PineconeFetch.configure_hot_models(siglip_bundle=siglip_bundle, clear_siglip=False)
+        by_prompt: Dict[str, Any] = {}
+        errors: Dict[str, str] = {}
+
+        for prompt, report in (c2_reports_by_prompt or {}).items():
+            visual_stage = report.get("visual_stage") if isinstance(report, dict) else {}
+            components = visual_stage.get("components") if isinstance(visual_stage, dict) else []
+            if not isinstance(components, list):
+                continue
+
+            prompt_rows: List[Dict[str, Any]] = []
+            for row in components:
+                if not isinstance(row, dict):
+                    continue
+                component = row.get("component") if isinstance(row.get("component"), dict) else {}
+                label = str(row.get("label", "") or component.get("label", "") or "").strip()
+                refined_desc = str(row.get("refined_visual_description", "") or row.get("wikipedia_visual_description", "") or component.get("description", "") or label).strip()
+                candidates = row.get("image_candidates") if isinstance(row.get("image_candidates"), list) else []
+                component_dir = str(row.get("component_dir", "") or "").strip()
+                json_path = str(row.get("json_path", "") or "").strip()
+
+                ranked_candidates: List[Dict[str, Any]] = []
+                best_candidate: Optional[Dict[str, Any]] = None
+                if refined_desc and candidates:
+                    try:
+                        text_embedding = PineconeFetch.embed_siglip_text(refined_desc)
+                    except Exception:
+                        text_embedding = []
+
+                    pil_images: List[Any] = []
+                    pil_rows: List[Dict[str, Any]] = []
+                    for cand in candidates:
+                        if not isinstance(cand, dict):
+                            continue
+                        local_path = str(cand.get("local_path", "") or "").strip()
+                        if not local_path or not os.path.isfile(local_path):
+                            continue
+                        try:
+                            with Image.open(local_path) as im:
+                                pil_images.append(im.convert("RGB"))
+                            pil_rows.append(cand)
+                        except Exception:
+                            continue
+
+                    image_embeddings = self._siglip_embed_pil_images_with_bundle(
+                        siglip_bundle=siglip_bundle,
+                        pil_images=pil_images,
+                    )
+                    for cand, emb in zip(pil_rows, image_embeddings):
+                        scored = dict(cand)
+                        scored["siglip_refined_description_score"] = round(float(self._cosine_similarity_lists(text_embedding, emb)), 6)
+                        ranked_candidates.append(scored)
+                    ranked_candidates.sort(
+                        key=lambda item: float(item.get("siglip_refined_description_score", 0.0) or 0.0),
+                        reverse=True,
+                    )
+                    best_candidate = ranked_candidates[0] if ranked_candidates else None
+
+                canonical = {
+                    "mode": "siglip_refined_visual_description",
+                    "candidate_id": str((best_candidate or {}).get("id", "") or "").strip(),
+                    "local_path": str((best_candidate or {}).get("local_path", "") or "").strip(),
+                    "score": float((best_candidate or {}).get("siglip_refined_description_score", 0.0) or 0.0),
+                    "title": str((best_candidate or {}).get("title", "") or "").strip(),
+                    "source_kind": str((best_candidate or {}).get("source_kind", "") or "").strip(),
+                    "page_url": str((best_candidate or {}).get("page_url", "") or "").strip(),
+                    "image_url": str((best_candidate or {}).get("image_url", "") or "").strip(),
+                }
+
+                row["canonical_candidate"] = canonical
+                row["canonical_candidate_id"] = canonical["candidate_id"]
+                row["canonical_candidate_local_path"] = canonical["local_path"]
+                row["canonical_candidate_score"] = canonical["score"]
+
+                if json_path and os.path.isfile(json_path):
+                    try:
+                        payload = json.loads(Path(json_path).read_text(encoding="utf-8")) or {}
+                        payload["canonical_candidate"] = canonical
+                        payload["canonical_candidate_id"] = canonical["candidate_id"]
+                        payload["canonical_candidate_local_path"] = canonical["local_path"]
+                        payload["canonical_candidate_score"] = canonical["score"]
+                        self._write_json_file(Path(json_path), payload)
+                    except Exception as e:
+                        errors[f"{prompt}:{label or component_dir or json_path}"] = f"{type(e).__name__}: {e}"
+
+                prompt_rows.append(
+                    {
+                        "label": label,
+                        "component_dir": component_dir,
+                        "json_path": json_path,
+                        "candidate_count": len(candidates),
+                        "canonical_candidate": canonical,
+                        "ranked_candidates": [
+                            {
+                                "id": str(c.get("id", "") or "").strip(),
+                                "local_path": str(c.get("local_path", "") or "").strip(),
+                                "score": float(c.get("siglip_refined_description_score", 0.0) or 0.0),
+                            }
+                            for c in ranked_candidates
+                        ],
+                    }
+                )
+
+            by_prompt[prompt] = prompt_rows
+
+        return {"by_prompt": by_prompt, "errors": errors}
+
+    def _select_diagram_processed_ids_after_rerank(
+        self,
+        *,
+        prompt_meta: Dict[str, Dict[str, Any]],
+        diagram_prompts: List[str],
+        rerank_paths_by_prompt: Dict[str, List[str]],
+        c2_reports_by_prompt: Dict[str, Dict[str, Any]],
+        siglip_bundle: Any,
+    ) -> Dict[str, Any]:
+        import ImagePipeline
+        import ImageText
+        import PineconeFetch
+
+        meta_ctx_map = ImagePipeline.load_image_metadata_context_map()
+        PineconeFetch.configure_hot_models(siglip_bundle=siglip_bundle, clear_siglip=False)
+
+        selected_ids_by_prompt: Dict[str, List[str]] = {}
+        candidate_processed_ids_by_prompt: Dict[str, List[str]] = {}
+        clip_embeddings_by_processed_id: Dict[str, List[float]] = {}
+        siglip_rank_debug: Dict[str, Any] = {}
+        ocr_debug: Dict[str, Any] = {}
+
+        for prompt in diagram_prompts:
+            candidate_paths = [str(x) for x in (rerank_paths_by_prompt.get(prompt) or []) if str(x).strip()]
+            if not candidate_paths:
+                selected_ids_by_prompt[prompt] = []
+                continue
+
+            try:
+                import qwentest
+                rule_text = qwentest.build_diagram_siglip_rule_text(prompt)
+            except Exception:
+                rule_text = f"{prompt} diagram with one centered object and readable separated parts"
+
+            try:
+                rule_embedding = PineconeFetch.embed_siglip_text(rule_text)
+            except Exception:
+                rule_embedding = None
+
+            ranked_rows: List[Dict[str, Any]] = []
+            for path in candidate_paths:
+                meta_entry = ImagePipeline._resolve_meta_for_source(meta_ctx_map, path)
+                clip_embedding = meta_entry.get("clip_embedding") if isinstance(meta_entry, dict) else None
+                score = self._cosine_similarity_lists(rule_embedding, clip_embedding)
+                ranked_rows.append(
+                    {
+                        "source_path": path,
+                        "clip_embedding": clip_embedding if isinstance(clip_embedding, list) else [],
+                        "siglip_rule_score": float(score),
+                        "final_score": float((meta_entry or {}).get("final_score", 0.0) or 0.0) if isinstance(meta_entry, dict) else 0.0,
+                    }
+                )
+
+            ranked_rows.sort(
+                key=lambda row: (
+                    float(row.get("siglip_rule_score", 0.0) or 0.0),
+                    float(row.get("final_score", 0.0) or 0.0),
+                ),
+                reverse=True,
+            )
+            siglip_rank_debug[prompt] = {
+                "rule_text": rule_text,
+                "ranked_candidates": ranked_rows,
+            }
+
+            image_items = ImagePipeline.load_unique_images_once([row["source_path"] for row in ranked_rows])
+            for item in image_items:
+                item["base_context"] = prompt
+
+            processed_items: List[Dict[str, Any]] = []
+            path_map: Dict[str, str] = {}
+            if image_items:
+                try:
+                    processed_items, path_map = ImageText.process_images_in_memory(
+                        image_items=image_items,
+                        start_index=0,
+                        save_outputs=True,
+                        return_path_map=True,
+                    )
+                except Exception:
+                    processed_items, path_map = [], {}
+
+            candidate_processed_ids_by_prompt[prompt] = [
+                str(path_map.get(row.get("source_path", ""), "") or "").strip()
+                for row in ranked_rows
+                if str(path_map.get(row.get("source_path", ""), "") or "").strip()
+            ]
+            for row in ranked_rows:
+                pid = str(path_map.get(row.get("source_path", ""), "") or "").strip()
+                emb = row.get("clip_embedding")
+                if pid and isinstance(emb, list) and emb:
+                    clip_embeddings_by_processed_id[pid] = list(emb)
+
+            canonical_labels = self._diagram_component_labels_from_c2_report(
+                c2_reports_by_prompt.get(prompt),
+                requested_components=list((prompt_meta.get(prompt) or {}).get("diagram_required_objects") or []),
+            )
+
+            best_ocr: Optional[Dict[str, Any]] = None
+            for item in processed_items:
+                payload = item.get("payload_json") if isinstance(item.get("payload_json"), dict) else {}
+                words = payload.get("words") if isinstance(payload, dict) else []
+                ocr_labels: List[str] = []
+                if isinstance(words, list):
+                    seen_words = set()
+                    for row in words:
+                        if not isinstance(row, dict):
+                            continue
+                        txt = str(row.get("text", "") or "").strip()
+                        norm = self._norm_diagram_label_text(txt)
+                        if not norm or norm in seen_words:
+                            continue
+                        seen_words.add(norm)
+                        ocr_labels.append(txt)
+                score_obj = self._diagram_ocr_match_score(
+                    canonical_labels=canonical_labels,
+                    ocr_labels=ocr_labels,
+                )
+                row = {
+                    "processed_id": str(item.get("processed_id", "") or "").strip(),
+                    "source_path": str(item.get("source_path", "") or "").strip(),
+                    "ocr_labels": ocr_labels,
+                    "score": float(score_obj.get("score", 0.0) or 0.0),
+                    "matched_count": int(score_obj.get("matched_count", 0) or 0),
+                    "best_pairs": score_obj.get("best_pairs", []),
+                }
+                if best_ocr is None or (
+                    float(row["score"]) > float(best_ocr.get("score", 0.0))
+                    or (
+                        float(row["score"]) == float(best_ocr.get("score", 0.0))
+                        and int(row["matched_count"]) > int(best_ocr.get("matched_count", 0))
+                    )
+                ):
+                    best_ocr = row
+
+            chosen_processed_id = ""
+            decision = "siglip_fallback"
+            if best_ocr is not None and (
+                float(best_ocr.get("score", 0.0)) >= 0.68
+                or (
+                    float(best_ocr.get("score", 0.0)) >= 0.55
+                    and int(best_ocr.get("matched_count", 0)) >= 2
+                )
+            ):
+                chosen_processed_id = str(best_ocr.get("processed_id", "") or "").strip()
+                decision = "ocr_canonical_match"
+
+            if not chosen_processed_id and ranked_rows:
+                top_path = str(ranked_rows[0].get("source_path", "") or "").strip()
+                chosen_processed_id = str(path_map.get(top_path, "") or "").strip()
+
+            selected_ids_by_prompt[prompt] = [chosen_processed_id] if chosen_processed_id else []
+            ocr_debug[prompt] = {
+                "canonical_labels": canonical_labels,
+                "best_ocr_match": best_ocr,
+                "decision": decision,
+                "selected_processed_id": chosen_processed_id,
+            }
+
+        return {
+            "selected_ids_by_prompt": selected_ids_by_prompt,
+            "candidate_processed_ids_by_prompt": candidate_processed_ids_by_prompt,
+            "clip_embeddings_by_processed_id": clip_embeddings_by_processed_id,
+            "siglip_rank_debug": siglip_rank_debug,
+            "ocr_debug": ocr_debug,
+        }
+
 
 
     def _orchestrate_images_selection_only(
@@ -3387,7 +4047,8 @@ class LessonTimeline:
         (assets_by_prompt, debug_info, pipeline_handle_or_none)
 
         IMPORTANT:
-        - waits only for selection_done (selection + refine)
+        - diagram cutdown happens here via researcher rerank + SigLIP rule scoring + OCR verification
+        - ImagePipeline only receives the accepted processed ids for downstream processing
         - DOES NOT wait colours_done (so we can run Qwen actions immediately)
         """
         orch_t0 = time.perf_counter()
@@ -3407,9 +4068,6 @@ class LessonTimeline:
             init_minilm_hot,
             unload_siglip,
             unload_siglip_text,
-            init_qwen_hot,
-            get_qwen,
-            qwen_lock,
         )
 
         # Ensure Pinecone fetch is executed with explicit hot workers from shared_models.
@@ -3440,19 +4098,43 @@ class LessonTimeline:
 
             topic_val = str(lesson_topic or "").strip()
             diagram_val = 0
+            requested_components: List[str] = []
 
             if isinstance(v, dict):
                 vv_topic = str(v.get("topic") or v.get("subj") or v.get("subject") or "").strip()
                 if vv_topic:
                     topic_val = vv_topic
                 diagram_val = _normalize_diagram_mode(v.get("diagram", 0))
+                vv_req = v.get("diagram_required_objects")
+                if isinstance(vv_req, list):
+                    requested_components = [str(x).strip() for x in vv_req if str(x).strip()]
             else:
                 diagram_val = _normalize_diagram_mode(v or 0)
 
-            prompt_meta[p] = {"topic": topic_val, "diagram": diagram_val}
+            if not requested_components:
+                req_fallback = (diagram_required_objects_by_base_context or {}).get(p) or []
+                if isinstance(req_fallback, list):
+                    requested_components = [str(x).strip() for x in req_fallback if str(x).strip()]
+
+            prompt_meta[p] = {
+                "topic": topic_val,
+                "diagram": diagram_val,
+                "diagram_required_objects": requested_components,
+            }
 
         prompts = list(prompt_meta.keys())
         diagram_set = {p for p, m in prompt_meta.items() if _is_diagram_mode(m.get("diagram", 0))}
+        c2_bundle_rows: List[Dict[str, Any]] = []
+        for prompt in prompts:
+            meta = prompt_meta.get(prompt) or {}
+            if not _is_diagram_mode(meta.get("diagram", 0)):
+                continue
+            c2_bundle_rows.append(
+                {
+                    "prompt": prompt,
+                    "requested_components": list(meta.get("diagram_required_objects") or []),
+                }
+            )
         self._dbg(
             "Image prompt meta prepared",
             data={
@@ -3461,6 +4143,66 @@ class LessonTimeline:
                 "non_diagram_prompts": max(0, len(prompts) - len(diagram_set)),
             },
         )
+
+        c2_bundle_result: Dict[str, Any] = {"ok": True, "prompts": {}, "errors": {}, "count": 0}
+        c2_bundle_err: Optional[str] = None
+        c2_done_evt = threading.Event()
+        if not c2_bundle_rows:
+            c2_done_evt.set()
+
+        def _run_c2_bundle() -> None:
+            nonlocal c2_bundle_result, c2_bundle_err
+            local_worker = None
+            try:
+                import qwentest
+                from C2.Orchestrator import LocalWorkerClient, run_orchestrator_bundle
+
+                local_worker = qwentest.create_c2_local_worker()
+                c2_bundle_result = run_orchestrator_bundle(
+                    prompts=c2_bundle_rows,
+                    worker_client=LocalWorkerClient(local_worker),
+                    mode="normal",
+                    steps=4,
+                    limit=8,
+                    timeout=18,
+                    output_root=str(self._diagram_components_dir()),
+                    visual_component_batch_size=4,
+                    skip_visual_stage=False,
+                    max_workers=max(1, len(c2_bundle_rows)),
+                )
+            except Exception as e:
+                c2_bundle_err = repr(e)
+                c2_bundle_result = {"ok": False, "prompts": {}, "errors": {"bundle": c2_bundle_err}, "count": 0}
+            finally:
+                try:
+                    import qwentest
+                    qwentest.destroy_c2_local_worker(local_worker)
+                except Exception:
+                    pass
+                c2_done_evt.set()
+
+        def _rank_c2_candidates_with_siglip_if_available() -> Dict[str, Any]:
+            if not c2_bundle_rows:
+                return {"by_prompt": {}, "errors": {}, "skipped": "no_c2_bundle_rows"}
+            try:
+                if get_siglip() is None:
+                    with self._timed("models.load_siglip_for_c2_component_ranking", gpu_index=self.gpu_index, cpu_threads=self.cpu_threads):
+                        init_siglip_hot(
+                            gpu_index=self.gpu_index,
+                            cpu_threads=self.cpu_threads,
+                            warmup=True,
+                        )
+            except Exception as e:
+                return {"by_prompt": {}, "errors": {"siglip_load": repr(e)}}
+
+            if get_siglip() is None:
+                return {"by_prompt": {}, "errors": {"siglip_load": "siglip_not_loaded"}}
+
+            with self._timed("c2.rank_component_candidate_images"):
+                return self._rank_c2_component_candidate_images(
+                    c2_reports_by_prompt=(c2_bundle_result.get("prompts") or {}),
+                    siglip_bundle=get_siglip(),
+                )
 
         hits: Dict[str, List[str]] = {}
         misses: Dict[str, str] = {}
@@ -3567,25 +4309,51 @@ class LessonTimeline:
                 objects=None,
             )
 
+        c2_thread: Optional[threading.Thread] = None
+        if c2_bundle_rows:
+            c2_thread = threading.Thread(target=_run_c2_bundle, name="c2_diagram_bundle", daemon=False)
+            c2_thread.start()
+
         if not misses:
             debug["selection_done"] = True
             debug["colours_done"] = True
 
+            c2_done_evt.wait()
+            debug["c2_done"] = True
+            debug["c2_bundle"] = {
+                "ok": bool(c2_bundle_result.get("ok", True)),
+                "count": int(c2_bundle_result.get("count", 0) or 0),
+                "errors": c2_bundle_result.get("errors", {}),
+            }
+            if c2_bundle_err:
+                debug["pipeline_errors"]["c2_bundle"] = c2_bundle_err
+            c2_canonical = _rank_c2_candidates_with_siglip_if_available()
+            debug["c2_component_canonical_images"] = c2_canonical.get("by_prompt", {})
+            if c2_canonical.get("errors"):
+                debug["pipeline_errors"]["c2_component_canonical_images"] = c2_canonical.get("errors")
+
             for a in assets.values():
                 self._compute_bbox_px_for_asset(a)
-                if _is_diagram_mode(a.diagram):
-                    if not a.refined_labels_file and a.processed_ids:
-                        cand = self._find_refined_labels_file_for_pid(a.processed_ids[0])
-                        if cand:
-                            a.refined_labels_file = cand
-                    if a.refined_labels_file:
-                        a.objects = self._load_objects_list_from_refined_file(a.refined_labels_file)
+
+            c2_apply = self._apply_c2_diagram_components_to_assets(
+                assets=assets,
+                prompt_meta=prompt_meta,
+                c2_reports_by_prompt=(c2_bundle_result.get("prompts") or {}),
+            )
+            debug["c2_artifacts_by_prompt"] = c2_apply.get("artifacts_by_prompt", {})
+            if c2_apply.get("errors"):
+                debug["pipeline_errors"]["c2_apply"] = c2_apply.get("errors")
 
             debug["selected_ids_by_prompt"] = {
                 str(p): list(a.processed_ids)
                 for p, a in assets.items()
             }
             debug["diagram_rerank_processed_ids"] = {}
+            try:
+                with self._timed("models.unload_siglip_after_c2_component_ranking", gpu_index=self.gpu_index):
+                    unload_siglip()
+            except Exception as e:
+                debug["pipeline_errors"]["siglip_unload_after_c2_component_ranking"] = repr(e)
 
             self._dbg(
                 "Image orchestration done (pinecone-only)",
@@ -3595,25 +4363,67 @@ class LessonTimeline:
 
         diagram_misses = {p: misses[p] for p in misses.keys() if p in diagram_set}
         non_diagram_misses = {p: misses[p] for p in misses.keys() if p not in diagram_set}
+        disabled_non_diagram_misses = dict(non_diagram_misses)
+        non_diagram_misses = {}
 
         debug["diagram_misses"] = list(diagram_misses.keys())
-        debug["comfy_misses"] = list(non_diagram_misses.keys())
+        debug["comfy_misses"] = list(disabled_non_diagram_misses.keys())
+        debug["comfy_generation_disabled"] = True
         self._dbg(
             "Image misses split",
             data={
                 "diagram_misses": len(diagram_misses),
-                "comfy_misses": len(non_diagram_misses),
+                "comfy_misses": len(disabled_non_diagram_misses),
                 "diagram_miss_prompts_preview": list(diagram_misses.keys())[:5],
             },
         )
 
-        qwen_err: Optional[str] = None
+        if not diagram_misses:
+            debug["selection_done"] = True
+            debug["colours_done"] = True
+            c2_done_evt.wait()
+            debug["c2_done"] = True
+            debug["c2_bundle"] = {
+                "ok": bool(c2_bundle_result.get("ok", True)),
+                "count": int(c2_bundle_result.get("count", 0) or 0),
+                "errors": c2_bundle_result.get("errors", {}),
+            }
+            if c2_bundle_err:
+                debug["pipeline_errors"]["c2_bundle"] = c2_bundle_err
+            c2_canonical = _rank_c2_candidates_with_siglip_if_available()
+            debug["c2_component_canonical_images"] = c2_canonical.get("by_prompt", {})
+            if c2_canonical.get("errors"):
+                debug["pipeline_errors"]["c2_component_canonical_images"] = c2_canonical.get("errors")
+            for a in assets.values():
+                self._compute_bbox_px_for_asset(a)
+            c2_apply = self._apply_c2_diagram_components_to_assets(
+                assets=assets,
+                prompt_meta=prompt_meta,
+                c2_reports_by_prompt=(c2_bundle_result.get("prompts") or {}),
+            )
+            debug["c2_artifacts_by_prompt"] = c2_apply.get("artifacts_by_prompt", {})
+            if c2_apply.get("errors"):
+                debug["pipeline_errors"]["c2_apply"] = c2_apply.get("errors")
+            debug["selected_ids_by_prompt"] = {
+                str(p): list(a.processed_ids)
+                for p, a in assets.items()
+            }
+            debug["diagram_rerank_processed_ids"] = {}
+            try:
+                with self._timed("models.unload_siglip_after_c2_component_ranking", gpu_index=self.gpu_index):
+                    unload_siglip()
+            except Exception as e:
+                debug["pipeline_errors"]["siglip_unload_after_c2_component_ranking"] = repr(e)
+            return assets, debug, None
+
         research_err: Optional[str] = None
         rerank_err: Optional[str] = None
         comfy_err: Optional[str] = None
         comfy_free_err: Optional[str] = None
         siglip_reload_err: Optional[str] = None
+        comfy_embed_err: Optional[str] = None
         comfy_generated: Dict[str, Any] = {}
+        comfy_embed_summary: Optional[Dict[str, Any]] = None
         rerank_out: Dict[str, List[str]] = {}
         research_done_evt = threading.Event()
         comfy_done_evt = threading.Event()
@@ -3707,7 +4517,7 @@ class LessonTimeline:
                 comfy_done_evt.set()
 
         def _prepare_models_after_flux():
-            nonlocal siglip_reload_err, qwen_err, comfy_free_err
+            nonlocal siglip_reload_err, comfy_free_err
             research_done_evt.wait()
             comfy_done_evt.wait()
 
@@ -3777,6 +4587,19 @@ class LessonTimeline:
             debug["pipeline_errors"]["comfy_free_after_flux"] = comfy_free_err
         if siglip_reload_err:
             debug["pipeline_errors"]["siglip_reload_after_comfy"] = siglip_reload_err
+        if comfy_generated:
+            try:
+                with self._timed("comfy.embed_generated_metadata", gpu_index=self.gpu_index, cpu_threads=self.cpu_threads):
+                    comfy_embed_summary = ComfyFluxClient.enrich_generation_metadata(
+                        comfy_generated,
+                        siglip_bundle=get_siglip(),
+                        minilm_bundle=get_minilm(),
+                        meta_path=Path(comfy_capture_root) / "image_metadata_context.json",
+                    )
+                debug["comfy_embedding_enrichment"] = comfy_embed_summary
+            except Exception as e:
+                comfy_embed_err = repr(e)
+                debug["pipeline_errors"]["comfy_embedding_enrichment"] = comfy_embed_err
 
         # Strict ordering: only after BOTH mechanical research + siglip-reload are done,
         # execute final researcher rerank.
@@ -3818,88 +4641,101 @@ class LessonTimeline:
             debug["pipeline_errors"]["research_finalize_rerank"] = rerank_err
         if rerank_out:
             debug["diagram_rerank_counts"] = {k: len(v) for k, v in rerank_out.items()}
-            debug["diagram_rerank_processed_ids"] = {
+            debug["diagram_rerank_paths_by_prompt"] = {
                 str(k): [str(x) for x in (v or []) if str(x)]
                 for k, v in rerank_out.items()
                 if isinstance(k, str)
             }
-        elif "diagram_rerank_processed_ids" not in debug:
+        elif "diagram_rerank_paths_by_prompt" not in debug:
+            debug["diagram_rerank_paths_by_prompt"] = {}
+
+        c2_done_evt.wait()
+        debug["c2_done"] = True
+        debug["c2_bundle"] = {
+            "ok": bool(c2_bundle_result.get("ok", True)),
+            "count": int(c2_bundle_result.get("count", 0) or 0),
+            "errors": c2_bundle_result.get("errors", {}),
+        }
+        if c2_bundle_err:
+            debug["pipeline_errors"]["c2_bundle"] = c2_bundle_err
+
+        c2_canonical = _rank_c2_candidates_with_siglip_if_available()
+        debug["c2_component_canonical_images"] = c2_canonical.get("by_prompt", {})
+        if c2_canonical.get("errors"):
+            debug["pipeline_errors"]["c2_component_canonical_images"] = c2_canonical.get("errors")
+
+        selected_processed_ids_map: Dict[str, List[str]] = {}
+        diagram_clip_embeddings_by_processed_id: Dict[str, List[float]] = {}
+        if diagram_misses and not rerank_err and get_siglip() is not None:
+            with self._timed("diagram.select_after_rerank"):
+                selection_out = self._select_diagram_processed_ids_after_rerank(
+                    prompt_meta=prompt_meta,
+                    diagram_prompts=list(diagram_misses.keys()),
+                    rerank_paths_by_prompt=rerank_out,
+                    c2_reports_by_prompt=(c2_bundle_result.get("prompts") or {}),
+                    siglip_bundle=get_siglip(),
+                )
+            selected_processed_ids_map = {
+                str(k): [str(x) for x in (v or []) if str(x).strip()]
+                for k, v in (selection_out.get("selected_ids_by_prompt") or {}).items()
+                if isinstance(k, str)
+            }
+            debug["diagram_rerank_processed_ids"] = {
+                str(k): [str(x) for x in (v or []) if str(x).strip()]
+                for k, v in (selection_out.get("candidate_processed_ids_by_prompt") or {}).items()
+                if isinstance(k, str)
+            }
+            diagram_clip_embeddings_by_processed_id = {
+                str(k): list(v)
+                for k, v in (selection_out.get("clip_embeddings_by_processed_id") or {}).items()
+                if isinstance(k, str) and isinstance(v, list) and v
+            }
+            debug["diagram_siglip_rule_ranking"] = selection_out.get("siglip_rank_debug") or {}
+            debug["diagram_ocr_selection"] = selection_out.get("ocr_debug") or {}
+        else:
             debug["diagram_rerank_processed_ids"] = {}
 
-        # Enforce strict memory sequencing:
-        # 1) finish SigLIP-based rerank
-        # 2) unload heavy SigLIP
-        # 3) load Qwen
-        # 4) start ImagePipeline
+        for prompt, ids in selected_processed_ids_map.items():
+            if prompt in assets and ids:
+                assets[prompt].processed_ids = list(ids)
+
+        accepted_processed_ids_by_base_context: Dict[str, List[str]] = {}
+        for prompt, asset in assets.items():
+            ids = [str(x) for x in (asset.processed_ids or []) if str(x).strip()]
+            if ids:
+                accepted_processed_ids_by_base_context[prompt] = ids
+
+        pipeline_siglip_bundle = get_siglip()
         siglip_unload_before_pipeline_err: Optional[str] = None
         try:
-            with self._timed("models.unload_siglip_before_pipeline_qwen", gpu_index=self.gpu_index):
+            with self._timed("models.unload_siglip_before_pipeline", gpu_index=self.gpu_index):
                 unload_siglip()
         except Exception as e:
             siglip_unload_before_pipeline_err = repr(e)
         if siglip_unload_before_pipeline_err:
-            debug["pipeline_errors"]["siglip_unload_before_pipeline_qwen"] = siglip_unload_before_pipeline_err
-
-        evict_dbg = self._evict_imagepipeline_hot_qwen_if_any()
-        if not bool(evict_dbg.get("ok", True)):
-            debug["pipeline_errors"]["imagepipeline_hot_qwen_evict_before_pipeline_qwen"] = str(evict_dbg.get("err", "unknown"))
-        self._dbg("CUDA owner snapshot before pipeline-qwen-load", data=self._cuda_owner_snapshot())
-        try:
-            with self._timed("models.load_qwen_for_pipeline_after_rerank", gpu_index=self.gpu_index, cpu_threads=self.cpu_threads):
-                init_qwen_hot(
-                    gpu_index=self.gpu_index,
-                    cpu_threads=self.cpu_threads,
-                    warmup=True,
-                )
-        except Exception as e:
-            qwen_err = repr(e)
-        self._dbg("CUDA owner snapshot after pipeline-qwen-load", data=self._cuda_owner_snapshot())
-
-        qb = get_qwen()
-        if qb is None:
-            debug["pipeline_warnings"] = debug.get("pipeline_warnings") or {}
-            debug["pipeline_warnings"]["qwen_unavailable_for_pipeline_start"] = qwen_err or "qwen_bundle_none"
+            debug["pipeline_errors"]["siglip_unload_before_pipeline"] = siglip_unload_before_pipeline_err
 
         workers = ImagePipeline.PipelineWorkers(
-            qwen_model=(qb.model if qb is not None else None),
-            qwen_processor=(qb.processor if qb is not None else None),
-            qwen_device=(qb.device if qb is not None else None),
-            qwen_lock=qwen_lock(),
-            siglip_bundle=get_siglip(),
+            siglip_bundle=pipeline_siglip_bundle,
             minilm_bundle=get_minilm(),
+            precomputed_clip_embeddings_by_processed_id=diagram_clip_embeddings_by_processed_id,
         )
 
-        handle = None
-        if diagram_misses:
-            # Strict routing: only diagram requests go through ImagePipeline.
-            handle = ImagePipeline.start_pipeline_background(
-                workers=workers,
-                model_id=(qb.model_id if qb is not None else "Qwen/Qwen3-VL-2B-Instruct"),
-                gpu_index=self.gpu_index,
-                allowed_base_contexts=list(diagram_misses.keys()),
-                diagram_base_contexts=list(diagram_misses.keys()),
-                diagram_mode_by_base_context={
-                    p: _normalize_diagram_mode((prompt_meta.get(p) or {}).get("diagram", 0))
-                    for p in diagram_misses.keys()
-                },
-                diagram_required_objects_by_base_context=(diagram_required_objects_by_base_context or {}),
-            )
-            debug["pipeline_started"] = True
-
-            with self._timed("image_pipeline.wait_selection_done"):
-                handle.selection_done.wait()
-            self._dbg("Image pipeline selection_done", data={"cuda_mem": self._cuda_mem_snapshot()})
-            debug["selection_done"] = True
-
-            by_ctx = getattr(handle, "selected_ids_by_base_context", {}) or {}
-            for p in diagram_misses.keys():
-                picked = by_ctx.get(p, []) or []
-                if picked:
-                    assets[p].processed_ids = [str(x) for x in picked if str(x)]
-        else:
-            self._dbg("Skipping ImagePipeline for diagram parsing", data={"reason": "no_diagram_misses"})
-            debug["selection_done"] = True
-            debug["colours_done"] = True
+        handle = ImagePipeline.start_pipeline_background(
+            workers=workers,
+            model_id="",
+            gpu_index=self.gpu_index,
+            allowed_base_contexts=list(accepted_processed_ids_by_base_context.keys()),
+            diagram_base_contexts=list(diagram_misses.keys()),
+            diagram_mode_by_base_context={
+                p: _normalize_diagram_mode((prompt_meta.get(p) or {}).get("diagram", 0))
+                for p in accepted_processed_ids_by_base_context.keys()
+            },
+            diagram_required_objects_by_base_context=(diagram_required_objects_by_base_context or {}),
+            accepted_processed_ids_by_base_context=accepted_processed_ids_by_base_context,
+        )
+        debug["pipeline_started"] = True
+        debug["selection_done"] = True
 
         debug["selected_ids_by_prompt"] = {
             str(p): list(a.processed_ids)
@@ -3909,32 +4745,17 @@ class LessonTimeline:
         refined_dir = getattr(handle, "refined_labels_dir", None)
         if refined_dir is not None:
             debug["refined_labels_dir"] = str(refined_dir)
-        # Attach refined label artifacts for ALL selected diagram assets, including Pinecone hits.
-        for p, a in assets.items():
-            if not _is_diagram_mode(a.diagram):
-                continue
-            if not a.processed_ids:
-                continue
-            pid = str(a.processed_ids[0] or "").strip()
-            if not pid:
-                continue
-            if a.refined_labels_file and os.path.isfile(str(a.refined_labels_file)):
-                continue
-
-            cand: Optional[str] = None
-            if refined_dir is not None:
-                cand_path = os.path.join(str(refined_dir), f"{pid}.json")
-                if os.path.isfile(cand_path):
-                    cand = cand_path
-            if not cand:
-                cand = self._find_refined_labels_file_for_pid(pid)
-            if cand:
-                a.refined_labels_file = cand
-
         for a in assets.values():
             self._compute_bbox_px_for_asset(a)
-            if _is_diagram_mode(a.diagram) and a.refined_labels_file:
-                a.objects = self._load_objects_list_from_refined_file(a.refined_labels_file)
+
+        c2_apply = self._apply_c2_diagram_components_to_assets(
+            assets=assets,
+            prompt_meta=prompt_meta,
+            c2_reports_by_prompt=(c2_bundle_result.get("prompts") or {}),
+        )
+        debug["c2_artifacts_by_prompt"] = c2_apply.get("artifacts_by_prompt", {})
+        if c2_apply.get("errors"):
+            debug["pipeline_errors"]["c2_apply"] = c2_apply.get("errors")
 
         self._dbg(
             "Image orchestration done",
@@ -3985,36 +4806,19 @@ class LessonTimeline:
         chapters_out: List[Dict[str, Any]],
         assets_by_name: Dict[str, ImageAsset],
     ) -> Dict[str, Any]:
-        from shared_models import get_qwen, qwen_lock, init_qwen_hot
         import qwentest
 
-        evict_dbg = self._evict_imagepipeline_hot_qwen_if_any()
-        if bool(evict_dbg.get("evicted", False)):
-            self._dbg("Evicted ImagePipeline hot Qwen before action planning", data=evict_dbg)
-        elif not bool(evict_dbg.get("ok", True)):
-            self._dbg("ImagePipeline hot Qwen evict check failed before action planning", data=evict_dbg)
-
-        qb = get_qwen()
-        if qb is None:
-            self._dbg(
-                "Qwen not loaded for action planning; attempting lazy load",
-                data={"gpu_index": self.gpu_index, "cpu_threads": self.cpu_threads},
-            )
-            self._dbg("CUDA owner snapshot before action-planner qwen-load", data=self._cuda_owner_snapshot())
-            try:
-                with self._timed("models.load_qwen_for_action_planning", gpu_index=self.gpu_index, cpu_threads=self.cpu_threads):
-                    init_qwen_hot(
-                        gpu_index=self.gpu_index,
-                        cpu_threads=self.cpu_threads,
-                        warmup=True,
-                    )
-            except Exception as e:
-                return {"enabled": False, "error": f"qwen_load_failed: {type(e).__name__}: {e}"}
-            self._dbg("CUDA owner snapshot after action-planner qwen-load", data=self._cuda_owner_snapshot())
-            qb = get_qwen()
-            if qb is None:
-                return {"enabled": False, "error": "qwen_not_loaded"}
-            self._dbg("CUDA trim after action-planner qwen-load", data=self._cuda_trim_allocator(reason="after_action_qwen_load", reset_peak=True))
+        planner_bundle = None
+        self._dbg("CUDA owner snapshot before action-planner text-qwen-load", data=self._cuda_owner_snapshot())
+        try:
+            with self._timed("models.load_qwen_text_for_action_planning", gpu_index=self.gpu_index, cpu_threads=self.cpu_threads):
+                planner_bundle = qwentest.create_action_planner_text_bundle()
+        except Exception as e:
+            return {"enabled": False, "error": f"qwen_text_action_planner_load_failed: {type(e).__name__}: {e}"}
+        if not isinstance(planner_bundle, dict):
+            return {"enabled": False, "error": "qwen_text_action_planner_not_loaded"}
+        self._dbg("CUDA owner snapshot after action-planner text-qwen-load", data=self._cuda_owner_snapshot())
+        self._dbg("CUDA trim after action-planner text-qwen-load", data=self._cuda_trim_allocator(reason="after_action_text_qwen_load", reset_peak=True))
 
         with self._timed("qwen.build_chunk_sync_maps", chapters=len(chapters_out or [])):
             chunk_sync_maps = self._build_chunk_sync_maps(
@@ -4030,6 +4834,8 @@ class LessonTimeline:
                 "action_batch_size": int(ACTION_PLANNER_BATCH_SIZE),
                 "space_max_new_tokens": int(SPACE_PLANNER_MAX_NEW_TOKENS),
                 "visual_max_new_tokens": int(VISUAL_PLANNER_MAX_NEW_TOKENS),
+                "model_id": str(planner_bundle.get("model_id", "") or ""),
+                "space_planner_thinking": True,
                 "cuda_mem": self._cuda_mem_snapshot(include_owners=True),
             },
         )
@@ -4114,7 +4920,16 @@ class LessonTimeline:
             approx_prompt_chars = 0
             try:
                 approx_prompt_chars = sum(
-                    len(json.dumps({"steps": b.get("steps") or [], "entries": b.get("entries") or []}, ensure_ascii=False))
+                    len(
+                        json.dumps(
+                            qwentest._compact_space_chunk_for_prompt(
+                                b,
+                                board_width=self.whiteboard_width,
+                                board_height=self.whiteboard_height,
+                            ),
+                            ensure_ascii=False,
+                        )
+                    )
                     for b in call_batch
                     if isinstance(b, dict)
                 )
@@ -4140,18 +4955,15 @@ class LessonTimeline:
                 call_chunks=int(len(call_batch)),
                 approx_prompt_chars=int(approx_prompt_chars),
             ):
-                with qwen_lock():
-                    batch_out = qwentest.plan_space_timeline_batch_transformers(
-                        model=qb.model,
-                        processor=qb.processor,
-                        device=qb.device,
-                        chunk_maps=call_batch,
-                        board_width=self.whiteboard_width,
-                        board_height=self.whiteboard_height,
-                        batch_size=max(1, min(int(SPACE_PLANNER_BATCH_SIZE), int(real_count))),
-                        temperature=0.15,
-                        max_new_tokens=SPACE_PLANNER_MAX_NEW_TOKENS,
-                    )
+                batch_out = qwentest.plan_space_timeline_batch_text_model(
+                    bundle=planner_bundle,
+                    chunk_maps=call_batch,
+                    board_width=self.whiteboard_width,
+                    board_height=self.whiteboard_height,
+                    temperature=0.15,
+                    max_new_tokens=SPACE_PLANNER_MAX_NEW_TOKENS,
+                    thinking_enabled=True,
+                )
             vram_after = self._cuda_mem_snapshot()
             elapsed_ms = round((time.perf_counter() - qwen_t0) * 1000.0, 2)
             got = batch_out.get("chunks") if isinstance(batch_out, dict) else None
@@ -4287,6 +5099,7 @@ class LessonTimeline:
                 bh = _safe_int(pb.get("h", bb_src.get("h", 300)), 300)
                 by_key[lk] = {
                     "name": nm,
+                    "processed_id": str(row.get("processed_id", "") or "").strip(),
                     "kind": "text" if str(row.get("type", "") or "").strip().lower() == "text" else "image",
                     "source_type": str(row.get("type", "image") or "image"),
                     "bbox": {"x": int(bx), "y": int(by), "w": int(bw), "h": int(bh)},
@@ -4303,6 +5116,95 @@ class LessonTimeline:
             )
             return rows
 
+        def _build_static_plan_context_rows(
+            visual_rows: List[Dict[str, Any]],
+            *,
+            current_index: int,
+        ) -> List[Dict[str, Any]]:
+            if not isinstance(visual_rows, list):
+                return []
+            if current_index < 0 or current_index >= len(visual_rows):
+                return []
+
+            current = visual_rows[current_index] if isinstance(visual_rows[current_index], dict) else {}
+            cur_start = int(current.get("range_start", 0) or 0)
+            cur_end = int(current.get("range_end", cur_start) or cur_start)
+            if cur_end < cur_start:
+                cur_end = cur_start
+            refined_labels_cache: Dict[str, List[str]] = {}
+
+            def _row_diagram_refined_labels(row: Dict[str, Any]) -> List[str]:
+                labels: List[str] = []
+                raw_objects = row.get("objects_that_comprise_image")
+                if isinstance(raw_objects, list):
+                    for it in raw_objects:
+                        s0 = str(it or "").strip()
+                        if s0:
+                            labels.append(s0)
+                if not labels:
+                    refined_file = str(row.get("refined_labels_file", "") or "").strip()
+                    if refined_file:
+                        if refined_file not in refined_labels_cache:
+                            refined_labels_cache[refined_file] = list(self._load_refined_label_strings(refined_file))
+                        labels = list(refined_labels_cache.get(refined_file) or [])
+
+                out_labels: List[str] = []
+                seen = set()
+                for label in labels:
+                    s0 = str(label or "").strip()
+                    if not s0:
+                        continue
+                    lk = s0.lower()
+                    if lk in seen:
+                        continue
+                    seen.add(lk)
+                    out_labels.append(s0)
+                return out_labels
+
+            context_rows: List[Dict[str, Any]] = []
+            for other_index, prev in enumerate(visual_rows):
+                if other_index == current_index or not isinstance(prev, dict):
+                    continue
+
+                other_start = int(prev.get("range_start", 0) or 0)
+                other_end = int(prev.get("range_end", other_start) or other_start)
+                if other_end < other_start:
+                    other_end = other_start
+
+                # Include visuals that are present at any point in the current row's active range,
+                # including items that start later but still before the current row ends.
+                if other_start > cur_end or other_end < cur_start:
+                    continue
+
+                is_repeat_context = bool(prev.get("diagram_repeat_context_only", False))
+                prev_type = str(prev.get("type", "") or "")
+                if is_repeat_context:
+                    prev_type = "text"
+                prev_name = str(
+                    prev.get("diagram_repeat_primary_name", "") if is_repeat_context else prev.get("name", "")
+                ).strip()
+                prev_diagram = 0 if is_repeat_context else int(prev.get("diagram", 0) or 0)
+                context_row = {
+                    "name": prev_name,
+                    "type": prev_type,
+                    "print_bbox": prev.get("print_bbox"),
+                    "processed_id": prev.get("processed_id"),
+                    "range_start": int(other_start),
+                    "range_end": int(other_end),
+                    "diagram": prev_diagram,
+                    "text_tag": int(prev.get("text_tag", 0) or 0),
+                    "diagram_repeat_context_only": bool(is_repeat_context),
+                }
+                if _is_diagram_mode(prev_diagram):
+                    other_labels = _row_diagram_refined_labels(prev)
+                    if other_labels:
+                        context_row["context_other_diagram_cluster_labels"] = {
+                            "diagram_name": prev_name,
+                            "refined_labels": other_labels,
+                        }
+                context_rows.append(context_row)
+            return context_rows
+
         with self._timed("qwen.build_visual_and_text_jobs", chunks=len(planned_chunks or [])):
             for chunk_i, ch in enumerate(planned_chunks):
                 chapter_index = int(ch.get("chapter_index", 0) or 0)
@@ -4312,6 +5214,7 @@ class LessonTimeline:
                 entries.sort(key=lambda e: (int(e.get("range_start", 0) or 0), 0 if str(e.get("type", "") or "") == "silence" else 1))
                 repeat_meta = ch.get("_repeated_diagram_merge") if isinstance(ch.get("_repeated_diagram_merge"), dict) else {}
                 keepalive_ranges_by_name = repeat_meta.get("keepalive_ranges_by_name") if isinstance(repeat_meta.get("keepalive_ranges_by_name"), dict) else {}
+                move_specs = repeat_meta.get("move_specs") if isinstance(repeat_meta.get("move_specs"), list) else []
 
                 split_groups = split_entries_by_deletion_silence(entries)
 
@@ -4324,29 +5227,10 @@ class LessonTimeline:
                     image_reqs: List[Dict[str, Any]] = []
                     for row_i, row in enumerate(segment_visuals):
                         row_type = str(row.get("type", "") or "").strip().lower()
-                        context_rows = []
-                        prev_slice = segment_visuals[max(0, row_i - 6):row_i]
-                        for prev in prev_slice:
-                            is_repeat_context = bool(prev.get("diagram_repeat_context_only", False))
-                            prev_type = str(prev.get("type", "") or "")
-                            if is_repeat_context:
-                                prev_type = "text"
-                            prev_name = str(
-                                prev.get("diagram_repeat_primary_name", "") if is_repeat_context else prev.get("name", "")
-                            ).strip()
-                            context_rows.append(
-                                {
-                                    "name": prev_name,
-                                    "type": prev_type,
-                                    "print_bbox": prev.get("print_bbox"),
-                                    "processed_id": prev.get("processed_id"),
-                                    "range_start": int(prev.get("range_start", 0) or 0),
-                                    "range_end": int(prev.get("range_end", 0) or 0),
-                                    "diagram": 0 if is_repeat_context else int(prev.get("diagram", 0) or 0),
-                                    "text_tag": int(prev.get("text_tag", 0) or 0),
-                                    "diagram_repeat_context_only": bool(is_repeat_context),
-                                }
-                            )
+                        context_rows = _build_static_plan_context_rows(
+                            segment_visuals,
+                            current_index=row_i,
+                        )
 
                         req = {
                             "chapter_index": chapter_index,
@@ -4371,6 +5255,28 @@ class LessonTimeline:
                             "objects_that_comprise_image": row.get("objects_that_comprise_image") or [],
                             "static_plan_context": context_rows,
                         }
+                        if _is_diagram_mode(row.get("diagram", 0)):
+                            current_labels_raw = row.get("objects_that_comprise_image") if isinstance(row.get("objects_that_comprise_image"), list) else []
+                            current_labels: List[str] = []
+                            seen_current = set()
+                            for label in current_labels_raw:
+                                s0 = str(label or "").strip()
+                                if not s0:
+                                    continue
+                                lk = s0.lower()
+                                if lk in seen_current:
+                                    continue
+                                seen_current.add(lk)
+                                current_labels.append(s0)
+                            if not current_labels:
+                                refined_file = str(row.get("refined_labels_file", "") or "").strip()
+                                if refined_file:
+                                    current_labels = list(self._load_refined_label_strings(refined_file))
+                            if current_labels:
+                                req["current_diagram_cluster_labels"] = {
+                                    "diagram_name": str(row.get("name", "") or "").strip(),
+                                    "refined_labels": current_labels,
+                                }
                         _blank_non_priority_overlaps(req, priority="name", fields=["name", "content", "query"])
 
                         if bool(row.get("diagram_repeat_context_only", False)):
@@ -4495,6 +5401,11 @@ class LessonTimeline:
                                 continue
                             filtered_delete_targets.append(nm)
                         delete_targets = filtered_delete_targets
+                        manual_shift_targets_due_active_diagram = _manual_shift_targets_for_silence(
+                            blocked_names=delete_targets_blocked,
+                            silence_start_word_index=silence_start,
+                            move_specs=move_specs,
+                        )
 
                         silence_jobs.append(
                             {
@@ -4513,6 +5424,7 @@ class LessonTimeline:
                                 "delete_all_requested": True,
                                 "delete_targets_original": delete_targets_original,
                                 "delete_targets_blocked_due_active_diagram": delete_targets_blocked,
+                                "manual_shift_targets_due_active_diagram": manual_shift_targets_due_active_diagram,
                             }
                         )
 
@@ -4603,16 +5515,12 @@ class LessonTimeline:
                 chapter_span=chapter_span,
                 segment_span=segment_span,
             ):
-                with qwen_lock():
-                    resp = qwentest.plan_visual_actions_batch_transformers(
-                        model=qb.model,
-                        processor=qb.processor,
-                        device=qb.device,
-                        events=call_reqs,
-                        batch_size=max(1, min(int(ACTION_PLANNER_BATCH_SIZE), int(real_count))),
-                        temperature=0.2,
-                        max_new_tokens=VISUAL_PLANNER_MAX_NEW_TOKENS,
-                    )
+                resp = qwentest.plan_visual_actions_batch_text_model(
+                    bundle=planner_bundle,
+                    events=call_reqs,
+                    temperature=0.2,
+                    max_new_tokens=VISUAL_PLANNER_MAX_NEW_TOKENS,
+                )
             vram_after = self._cuda_mem_snapshot()
             elapsed_ms = round((time.perf_counter() - qwen_t0) * 1000.0, 2)
             rows = resp.get("items") if isinstance(resp, dict) else None
@@ -4696,10 +5604,15 @@ class LessonTimeline:
                     req = reqs[i] if i < len(reqs) else {}
                     row = rows[i] if i < len(rows) and isinstance(rows[i], dict) else {}
                     prompt_chars = 0
+                    request_chars_raw = 0
                     try:
-                        prompt_chars = len(json.dumps(req, ensure_ascii=False))
+                        prompt_chars = int(qwentest.estimate_visual_action_prompt_chars(req))
                     except Exception:
                         prompt_chars = 0
+                    try:
+                        request_chars_raw = len(json.dumps(req, ensure_ascii=False))
+                    except Exception:
+                        request_chars_raw = 0
                     visual_items.append(
                         {
                             "item_index": int(i),
@@ -4707,6 +5620,7 @@ class LessonTimeline:
                             "segment_index": int(req.get("segment_index", 0) or 0) if isinstance(req, dict) else 0,
                             "name": str(req.get("name", "") or "") if isinstance(req, dict) else "",
                             "prompt_chars": int(prompt_chars),
+                            "request_chars_raw": int(request_chars_raw),
                             "prompt_payload": req,
                             "response_payload": row,
                             "estimated_vram_delta_mb": {
@@ -4756,7 +5670,7 @@ class LessonTimeline:
                 int(s.get("start_word_index", 0) or 0),
             )
         )
-        with self._timed("qwen.build_silence_cleanup_actions", silence_jobs=len(silence_jobs)):
+        with self._timed("cleanup.build_silence_actions", silence_jobs=len(silence_jobs)):
             for job in silence_jobs:
                 parsed_actions = _build_manual_deletion_actions_for_silence(job, wait_words=DELETE_SILENCE_WORD_WAIT)
                 delete_targets = job.get("delete_targets") if isinstance(job.get("delete_targets"), list) else []
@@ -4782,6 +5696,7 @@ class LessonTimeline:
                             "delete_all_requested": bool(job.get("delete_all_requested", True)),
                             "delete_targets_original": job.get("delete_targets_original") if isinstance(job.get("delete_targets_original"), list) else [],
                             "delete_targets_blocked_due_active_diagram": job.get("delete_targets_blocked_due_active_diagram") if isinstance(job.get("delete_targets_blocked_due_active_diagram"), list) else [],
+                            "manual_shift_targets_due_active_diagram": job.get("manual_shift_targets_due_active_diagram") if isinstance(job.get("manual_shift_targets_due_active_diagram"), list) else [],
                         },
                         "base_actions_parsed": parsed_actions,
                     }
@@ -4835,6 +5750,12 @@ class LessonTimeline:
         if action_debug_saved_path is not None:
             out_payload["action_planner_debug_json"] = action_debug_saved_path
             out_payload["action_planner_debug_steps_dir"] = action_step_saved_dir
+        try:
+            with self._timed("models.unload_qwen_text_after_action_planning"):
+                qwentest.destroy_action_planner_text_bundle(planner_bundle)
+        except Exception as e:
+            self._dbg("Failed unloading action-planner text qwen", data={"err": f"{type(e).__name__}: {e}"})
+        self._dbg("CUDA owner snapshot after action-planner text-qwen-unload", data=self._cuda_owner_snapshot())
         return out_payload
 
     def _resolve_schematic_descriptor_path(self, pid: str) -> Optional[Path]:
@@ -4846,6 +5767,9 @@ class LessonTimeline:
             base / "StrokeDescriptions" / f"{pid}_described.json",
             base / "PipelineOutputs" / "StrokeDescriptions" / f"{pid}_described.json",
             Path("StrokeDescriptions") / f"{pid}_described.json",
+            Path("PipelineOutputs") / "StrokeDescriptions" / f"{pid}_described.json",
+            base / "LineDescriptions" / f"{pid}_described.json",
+            Path("LineDescriptions") / f"{pid}_described.json",
         ]
         for p in candidates:
             try:
@@ -4854,6 +5778,784 @@ class LessonTimeline:
             except Exception:
                 continue
         return None
+
+    def _collect_render_backed_clusters(
+        self,
+        *,
+        clusters: Any,
+        renders_dir: Path,
+    ) -> Tuple[List[Dict[str, Any]], Set[str], List[str]]:
+        """
+        Keep the zero-shot/Qwen stages resilient: if the cluster map exists and
+        the individual render masks exist on disk, we should be able to proceed
+        even when SAM/descriptor stages collapse.
+        """
+        out_entries: List[Dict[str, Any]] = []
+        out_mask_names: Set[str] = set()
+        missing_mask_names: List[str] = []
+
+        rows = clusters if isinstance(clusters, list) else []
+        for row in rows:
+            if not isinstance(row, dict):
+                continue
+            mask_name = str(row.get("crop_file_mask", "") or "").strip()
+            if not mask_name:
+                continue
+            mask_path = renders_dir / mask_name
+            if not mask_path.is_file():
+                missing_mask_names.append(mask_name)
+                continue
+            out_entries.append(row)
+            out_mask_names.add(mask_name)
+
+        return out_entries, out_mask_names, missing_mask_names
+
+    def _diagram_relative_location_phrase(
+        self,
+        *,
+        centroid: Any,
+        width: Any,
+        height: Any,
+    ) -> str:
+        if not (isinstance(centroid, (list, tuple)) and len(centroid) >= 2):
+            return ""
+        try:
+            x = float(centroid[0])
+            y = float(centroid[1])
+            w = max(1.0, float(width))
+            h = max(1.0, float(height))
+        except Exception:
+            return ""
+
+        x_frac = x / w
+        y_frac = y / h
+        if x_frac < 0.22:
+            horiz = "far-left"
+        elif x_frac < 0.42:
+            horiz = "left"
+        elif x_frac <= 0.58:
+            horiz = "center"
+        elif x_frac <= 0.78:
+            horiz = "right"
+        else:
+            horiz = "far-right"
+
+        if y_frac < 0.22:
+            vert = "top"
+        elif y_frac < 0.42:
+            vert = "upper-middle"
+        elif y_frac <= 0.58:
+            vert = "center"
+        elif y_frac <= 0.78:
+            vert = "lower-middle"
+        else:
+            vert = "bottom"
+
+        if horiz == "center" and vert == "center":
+            return "center"
+        if horiz == "center":
+            return vert
+        if vert == "center":
+            return horiz
+        return f"{vert}-{horiz}"
+
+    def _fallback_diagram_snapshots(
+        self,
+        *,
+        line_desc_obj: Dict[str, Any],
+        width: int,
+        height: int,
+    ) -> List[Dict[str, Any]]:
+        out: List[Dict[str, Any]] = []
+        groups = line_desc_obj.get("groups") if isinstance(line_desc_obj, dict) else []
+        groups = groups if isinstance(groups, list) else []
+        described_lines = line_desc_obj.get("described_lines") if isinstance(line_desc_obj, dict) else []
+        described_lines = described_lines if isinstance(described_lines, list) else []
+
+        for idx, group in enumerate(groups[:12], start=1):
+            if not isinstance(group, dict):
+                continue
+            stroke_ids = self._coerce_int_list(group.get("source_stroke_indices"))
+            if not stroke_ids:
+                continue
+            summary = str(
+                group.get("description")
+                or group.get("shape_summary")
+                or (
+                    group.get("shape_inference", {}).get("group_summary", "")
+                    if isinstance(group.get("shape_inference"), dict)
+                    else ""
+                )
+                or ""
+            ).strip()
+            out.append(
+                {
+                    "snapshot_id": f"S{idx}",
+                    "location": self._diagram_relative_location_phrase(
+                        centroid=group.get("centroid"),
+                        width=width,
+                        height=height,
+                    ),
+                    "stroke_ids": stroke_ids,
+                    "group_indexes": self._coerce_int_list([group.get("group_index")]),
+                    "neighbor_snapshot_ids": [],
+                    "summary": summary[:420],
+                    "bundle_reason": "fallback_from_group",
+                    "stroke_notes": [],
+                }
+            )
+
+        if out:
+            return out
+
+        for idx, row in enumerate(described_lines[:12], start=1):
+            if not isinstance(row, dict):
+                continue
+            try:
+                stroke_id = int(row.get("source_stroke_index", row.get("described_line_index")))
+            except Exception:
+                continue
+            out.append(
+                {
+                    "snapshot_id": f"S{idx}",
+                    "location": self._diagram_relative_location_phrase(
+                        centroid=row.get("centroid"),
+                        width=width,
+                        height=height,
+                    ),
+                    "stroke_ids": [stroke_id],
+                    "group_indexes": self._coerce_int_list([row.get("group_index")]),
+                    "neighbor_snapshot_ids": [],
+                    "summary": str(row.get("description", "") or "")[:320],
+                    "bundle_reason": "fallback_single_stroke",
+                    "stroke_notes": [{"stroke_id": stroke_id, "note": str(row.get("description", "") or "")[:180]}],
+                }
+            )
+        return out
+
+    def _load_c2_component_profiles(
+        self,
+        *,
+        refined_file: Optional[str],
+        fallback_labels: List[str],
+    ) -> List[Dict[str, Any]]:
+        out: List[Dict[str, Any]] = []
+        seen = set()
+        payload = None
+        if refined_file:
+            try:
+                payload = json.loads(Path(refined_file).read_text(encoding="utf-8"))
+            except Exception:
+                payload = None
+
+        report_rows_by_label: Dict[str, Dict[str, Any]] = {}
+        if isinstance(payload, dict):
+            c2_report = payload.get("c2_report") if isinstance(payload.get("c2_report"), dict) else {}
+            visual_stage = c2_report.get("visual_stage") if isinstance(c2_report, dict) else {}
+            components = visual_stage.get("components") if isinstance(visual_stage, dict) else []
+            for row in components if isinstance(components, list) else []:
+                if not isinstance(row, dict):
+                    continue
+                label = str(row.get("label", "") or row.get("component", {}).get("label", "") or "").strip()
+                if label:
+                    report_rows_by_label[label.lower()] = row
+
+        components = payload.get("components") if isinstance(payload, dict) else []
+        for row in components if isinstance(components, list) else []:
+            if not isinstance(row, dict):
+                continue
+            label = str(row.get("name", "") or row.get("label", "") or "").strip()
+            if not label:
+                continue
+            key = label.lower()
+            if key in seen:
+                continue
+            seen.add(key)
+            report_row = report_rows_by_label.get(key, {})
+            canonical_candidate = report_row.get("canonical_candidate") if isinstance(report_row.get("canonical_candidate"), dict) else {}
+            if not canonical_candidate:
+                canonical_candidate = {
+                    "candidate_id": str(row.get("canonical_candidate_id", "") or "").strip(),
+                    "local_path": str(row.get("canonical_candidate_local_path", "") or "").strip(),
+                    "score": float(row.get("canonical_candidate_score", 0.0) or 0.0),
+                }
+            out.append(
+                {
+                    "label": label,
+                    "general_visual_description": str(row.get("refined_visual_description", "") or "").strip(),
+                    "wikipedia_visual_description": str(row.get("wikipedia_visual_description", "") or "").strip(),
+                    "component_dir": str(report_row.get("component_dir", "") or row.get("component_dir", "") or "").strip(),
+                    "json_path": str(report_row.get("json_path", "") or row.get("json_path", "") or "").strip(),
+                    "image_candidates": report_row.get("ranked_candidates") if isinstance(report_row.get("ranked_candidates"), list) else (
+                        report_row.get("image_candidates") if isinstance(report_row.get("image_candidates"), list) else []
+                    ),
+                    "canonical_candidate": {
+                        "candidate_id": str(canonical_candidate.get("candidate_id", "") or "").strip(),
+                        "local_path": str(canonical_candidate.get("local_path", "") or "").strip(),
+                        "score": float(canonical_candidate.get("score", 0.0) or 0.0),
+                        "title": str(canonical_candidate.get("title", "") or "").strip(),
+                        "source_kind": str(canonical_candidate.get("source_kind", "") or "").strip(),
+                        "page_url": str(canonical_candidate.get("page_url", "") or "").strip(),
+                        "image_url": str(canonical_candidate.get("image_url", "") or "").strip(),
+                    },
+                }
+            )
+
+        for label in fallback_labels:
+            s = str(label or "").strip()
+            if not s:
+                continue
+            key = s.lower()
+            if key in seen:
+                continue
+            seen.add(key)
+            out.append(
+                {
+                    "label": s,
+                    "general_visual_description": "",
+                    "wikipedia_visual_description": "",
+                    "component_dir": "",
+                    "json_path": "",
+                    "image_candidates": [],
+                    "canonical_candidate": {},
+                }
+            )
+        return out
+
+    def _resolve_component_candidate_image_path(self, component: Dict[str, Any]) -> Optional[str]:
+        if not isinstance(component, dict):
+            return None
+
+        canonical = component.get("canonical_candidate") if isinstance(component.get("canonical_candidate"), dict) else {}
+        direct_path = str(canonical.get("local_path", "") or "").strip()
+        if direct_path and os.path.isfile(direct_path):
+            return direct_path
+
+        candidate_id = str(canonical.get("candidate_id", "") or "").strip()
+        candidates = component.get("image_candidates") if isinstance(component.get("image_candidates"), list) else []
+        chosen: Optional[str] = None
+        for row in candidates:
+            if not isinstance(row, dict):
+                continue
+            row_path = str(row.get("local_path", "") or "").strip()
+            if not row_path or not os.path.isfile(row_path):
+                continue
+            row_id = str(row.get("id", "") or row.get("candidate_id", "") or "").strip()
+            if candidate_id and row_id and row_id == candidate_id:
+                return row_path
+            if chosen is None:
+                chosen = row_path
+
+        component_dir = str(component.get("component_dir", "") or "").strip()
+        if component_dir and os.path.isdir(component_dir):
+            try:
+                for name in sorted(os.listdir(component_dir)):
+                    lower = name.lower()
+                    if lower.endswith((".png", ".jpg", ".jpeg", ".webp", ".bmp", ".gif", ".tif", ".tiff")):
+                        path = os.path.join(component_dir, name)
+                        if os.path.isfile(path):
+                            return path
+            except Exception:
+                pass
+        return chosen
+
+    def _run_qwen_unified_diagram_matching(
+        self,
+        *,
+        assets_by_name: Dict[str, ImageAsset],
+        sam_bbox_map_any: Any,
+        diagram_modes_by_name: Optional[Dict[str, List[int]]] = None,
+        text_bundle: Dict[str, Any],
+    ) -> Dict[str, Any]:
+        import qwentest
+
+        filter_root = None
+        if isinstance(sam_bbox_map_any, dict):
+            if "result" in sam_bbox_map_any:
+                filter_root = sam_bbox_map_any.get("result")
+            else:
+                filter_root = sam_bbox_map_any
+        if not isinstance(filter_root, dict):
+            filter_root = {}
+        by_pid_root = filter_root.get("by_processed_id") if isinstance(filter_root.get("by_processed_id"), dict) else filter_root
+        if not isinstance(by_pid_root, dict):
+            by_pid_root = {}
+
+        prepared: Dict[str, Dict[str, Any]] = {}
+        base_dir = Path(__file__).resolve().parent
+
+        for image_name, asset in (assets_by_name or {}).items():
+            if not isinstance(asset, ImageAsset):
+                continue
+            modes_raw = (diagram_modes_by_name or {}).get(str(image_name or "").strip(), [])
+            modes = {int(x) for x in modes_raw if int(x) in (1, 2)} if isinstance(modes_raw, list) else set()
+            if not modes:
+                d = _normalize_diagram_mode(asset.diagram)
+                if d in (1, 2):
+                    modes.add(d)
+            if not modes or not asset.processed_ids:
+                continue
+            pid = str(asset.processed_ids[0] or "").strip()
+            if not pid:
+                continue
+
+            row = prepared.get(pid)
+            if row is None:
+                desc_path = self._resolve_schematic_descriptor_path(pid)
+                processed_image_path = self._resolve_processed_png_path(pid)
+                desc_obj = self._load_json_file_safe(desc_path)
+                cluster_map_path = base_dir / "ClusterMaps" / pid / "clusters.json"
+                cluster_map_obj = self._load_json_file_safe(cluster_map_path)
+                clusters_raw = cluster_map_obj.get("clusters") if isinstance(cluster_map_obj, dict) else []
+                clusters_raw = clusters_raw if isinstance(clusters_raw, list) else []
+                filter_payload = by_pid_root.get(pid) if isinstance(by_pid_root.get(pid), dict) else {}
+                keep_mask_list = filter_payload.get("kept_mask_names") if isinstance(filter_payload.get("kept_mask_names"), list) else []
+                keep_mask_set = {
+                    str(x or "").strip()
+                    for x in keep_mask_list
+                    if str(x or "").strip()
+                }
+                if not keep_mask_set:
+                    keep_mask_set = {
+                        str(c.get("crop_file_mask", "") or "").strip()
+                        for c in clusters_raw
+                        if isinstance(c, dict) and str(c.get("crop_file_mask", "") or "").strip()
+                    }
+
+                width = int((desc_obj or {}).get("width", 0) or 0)
+                height = int((desc_obj or {}).get("height", 0) or 0)
+                described_lines = desc_obj.get("described_lines") if isinstance(desc_obj, dict) else []
+                described_lines = described_lines if isinstance(described_lines, list) else []
+                groups = desc_obj.get("groups") if isinstance(desc_obj, dict) else []
+                groups = groups if isinstance(groups, list) else []
+
+                stroke_lookup: Dict[str, Dict[str, Any]] = {}
+                for line in described_lines:
+                    if not isinstance(line, dict):
+                        continue
+                    try:
+                        stroke_id = int(line.get("source_stroke_index", line.get("described_line_index")))
+                    except Exception:
+                        continue
+                    stroke_lookup[str(stroke_id)] = {
+                        "stroke_id": stroke_id,
+                        "group_index": (
+                            int(line.get("group_index"))
+                            if line.get("group_index") is not None
+                            else None
+                        ),
+                        "location": self._diagram_relative_location_phrase(
+                            centroid=line.get("centroid"),
+                            width=width,
+                            height=height,
+                        ),
+                        "description": str(line.get("description", "") or "")[:180],
+                    }
+
+                group_rows: List[Dict[str, Any]] = []
+                for group in groups:
+                    if not isinstance(group, dict):
+                        continue
+                    group_rows.append(
+                        {
+                            "group_index": group.get("group_index"),
+                            "location": self._diagram_relative_location_phrase(
+                                centroid=group.get("centroid"),
+                                width=width,
+                                height=height,
+                            ),
+                            "stroke_ids": self._coerce_int_list(group.get("source_stroke_indices")),
+                            "description": str(group.get("description", "") or group.get("shape_summary", "") or "")[:240],
+                        }
+                    )
+
+                cluster_rows: List[Dict[str, Any]] = []
+                for cluster_index, cluster in enumerate(clusters_raw, start=1):
+                    if not isinstance(cluster, dict):
+                        continue
+                    mask_name = str(cluster.get("crop_file_mask", "") or "").strip()
+                    if mask_name and mask_name not in keep_mask_set:
+                        continue
+                    stroke_ids = self._coerce_int_list(cluster.get("stroke_indexes"))
+                    bbox = cluster.get("bbox_xyxy") if isinstance(cluster.get("bbox_xyxy"), list) else None
+                    cx = None
+                    cy = None
+                    if isinstance(bbox, list) and len(bbox) == 4:
+                        try:
+                            cx = (float(bbox[0]) + float(bbox[2])) / 2.0
+                            cy = (float(bbox[1]) + float(bbox[3])) / 2.0
+                        except Exception:
+                            cx = None
+                            cy = None
+                    cluster_rows.append(
+                        {
+                            "cluster_id": f"C{cluster_index:03d}",
+                            "cluster_index": cluster_index,
+                            "mask_name": mask_name,
+                            "cluster_render_path": str(base_dir / "ClusterRenders" / pid / mask_name) if mask_name else None,
+                            "color_name": str(cluster.get("color_name", "") or "").strip() or None,
+                            "bbox_xyxy": [int(x) for x in bbox] if isinstance(bbox, list) and len(bbox) == 4 else None,
+                            "location": self._diagram_relative_location_phrase(
+                                centroid=[cx, cy] if cx is not None and cy is not None else None,
+                                width=width,
+                                height=height,
+                            ),
+                            "stroke_ids": stroke_ids,
+                            "stroke_rows": [
+                                stroke_lookup[str(sid)]
+                                for sid in stroke_ids
+                                if str(sid) in stroke_lookup
+                            ][:20],
+                        }
+                    )
+
+                refined_labels = self._load_refined_label_strings(asset.refined_labels_file)
+                components = self._load_c2_component_profiles(
+                    refined_file=asset.refined_labels_file,
+                    fallback_labels=refined_labels,
+                )
+                if not refined_labels:
+                    refined_labels = [str(c.get("label", "") or "").strip() for c in components if str(c.get("label", "") or "").strip()]
+
+                row = {
+                    "processed_id": pid,
+                    "base_context": str(image_name or asset.prompt or "").strip() or str(asset.prompt or "").strip() or pid,
+                    "image_names": set(),
+                    "diagram_modes": set(),
+                    "refined_labels_file": asset.refined_labels_file,
+                    "refined_labels": list(refined_labels),
+                    "processed_image_path": str(processed_image_path) if processed_image_path else None,
+                    "stroke_description_path": str(desc_path) if desc_path else None,
+                    "cluster_map_path": str(cluster_map_path) if cluster_map_path else None,
+                    "line_desc_obj": desc_obj if isinstance(desc_obj, dict) else {},
+                    "stroke_lookup": stroke_lookup,
+                    "group_rows": group_rows,
+                    "cluster_rows": cluster_rows,
+                    "components": components,
+                    "sam_filter_payload": filter_payload,
+                    "width": width,
+                    "height": height,
+                }
+                prepared[pid] = row
+
+            row["image_names"].add(str(image_name))
+            row["diagram_modes"].update(int(x) for x in modes if int(x) in (1, 2))
+            if asset.refined_labels_file and not row.get("refined_labels_file"):
+                row["refined_labels_file"] = asset.refined_labels_file
+            _merge_unique_str_list(row["refined_labels"], self._load_refined_label_strings(asset.refined_labels_file))
+
+        snapshot_jobs: List[Dict[str, Any]] = []
+        cluster_jobs: List[Dict[str, Any]] = []
+        canonical_jobs: List[Dict[str, Any]] = []
+
+        for pid, row in prepared.items():
+            if not row.get("stroke_lookup"):
+                row["error"] = "missing_stroke_descriptions"
+                continue
+            component_labels_seen = {
+                str(component.get("label", "") or "").strip().lower()
+                for component in (row.get("components") or [])
+                if isinstance(component, dict) and str(component.get("label", "") or "").strip()
+            }
+            for label in row.get("refined_labels") or []:
+                s = str(label or "").strip()
+                if not s or s.lower() in component_labels_seen:
+                    continue
+                component_labels_seen.add(s.lower())
+                row.setdefault("components", []).append(
+                    {
+                        "label": s,
+                        "general_visual_description": "",
+                        "wikipedia_visual_description": "",
+                        "component_dir": "",
+                        "json_path": "",
+                        "image_candidates": [],
+                        "canonical_candidate": {},
+                    }
+                )
+            diagram_payload = {
+                "canvas_size": {
+                    "width": int(row.get("width", 0) or 0),
+                    "height": int(row.get("height", 0) or 0),
+                },
+                "groups": list(row.get("group_rows") or [])[:120],
+                "strokes": list(row.get("stroke_lookup", {}).values())[:260],
+            }
+            snapshot_jobs.append(
+                {
+                    "job_key": pid,
+                    "base_context": row.get("base_context"),
+                    "refined_labels": list(row.get("refined_labels") or []),
+                    "diagram_payload": diagram_payload,
+                }
+            )
+            for cluster in row.get("cluster_rows") or []:
+                cluster_jobs.append(
+                    {
+                        "job_key": f"{pid}::{cluster.get('cluster_id')}",
+                        "base_context": row.get("base_context"),
+                        "refined_labels": list(row.get("refined_labels") or []),
+                        "stroke_ids": list(cluster.get("stroke_ids") or []),
+                        "cluster_render_path": cluster.get("cluster_render_path"),
+                        "full_image_path": row.get("processed_image_path"),
+                        "bbox_xyxy": cluster.get("bbox_xyxy"),
+                        "cluster_payload": {
+                            "cluster_id": cluster.get("cluster_id"),
+                            "mask_name": cluster.get("mask_name"),
+                            "color_name": cluster.get("color_name"),
+                            "location": cluster.get("location"),
+                            "bbox_xyxy": cluster.get("bbox_xyxy"),
+                            "stroke_ids": cluster.get("stroke_ids"),
+                            "stroke_rows": cluster.get("stroke_rows"),
+                        },
+                    }
+                )
+            for component in row.get("components") or []:
+                if not isinstance(component, dict):
+                    continue
+                candidate_image_path = self._resolve_component_candidate_image_path(component)
+                canonical_jobs.append(
+                    {
+                        "job_key": f"{pid}::{str(component.get('label', '') or '').strip()}",
+                        "base_context": row.get("base_context"),
+                        "candidate_image_path": candidate_image_path,
+                        "component_payload": {
+                            "label": component.get("label"),
+                            "general_visual_description": component.get("general_visual_description"),
+                            "wikipedia_visual_description": component.get("wikipedia_visual_description"),
+                            "candidate_image_path": candidate_image_path,
+                            "canonical_candidate": component.get("canonical_candidate", {}),
+                        },
+                    }
+                )
+
+        snapshot_results = qwentest.refine_diagram_snapshots_text_model(
+            bundle=text_bundle,
+            jobs=snapshot_jobs,
+            temperature=0.15,
+            max_new_tokens=900,
+        )
+        cluster_results = qwentest.describe_diagram_clusters_multimodal_model(
+            bundle=text_bundle,
+            jobs=cluster_jobs,
+            temperature=0.7,
+            max_new_tokens=420,
+        )
+        canonical_results = qwentest.describe_canonical_parts_multimodal_model(
+            bundle=text_bundle,
+            jobs=canonical_jobs,
+            temperature=0.65,
+            max_new_tokens=280,
+        )
+
+        final_jobs: List[Dict[str, Any]] = []
+        for pid, row in prepared.items():
+            if row.get("error"):
+                continue
+            snapshot_payload = snapshot_results.get(pid) if isinstance(snapshot_results.get(pid), dict) else {}
+            snapshots = snapshot_payload.get("snapshots") if isinstance(snapshot_payload.get("snapshots"), list) else []
+            if not snapshots:
+                snapshots = self._fallback_diagram_snapshots(
+                    line_desc_obj=row.get("line_desc_obj") if isinstance(row.get("line_desc_obj"), dict) else {},
+                    width=int(row.get("width", 0) or 0),
+                    height=int(row.get("height", 0) or 0),
+                )
+            row["snapshots"] = snapshots
+
+            clusters_out: List[Dict[str, Any]] = []
+            for cluster in row.get("cluster_rows") or []:
+                cluster_key = f"{pid}::{cluster.get('cluster_id')}"
+                cluster_desc = cluster_results.get(cluster_key) if isinstance(cluster_results.get(cluster_key), dict) else {}
+                clusters_out.append(
+                    {
+                        "cluster_id": cluster.get("cluster_id"),
+                        "mask_name": cluster.get("mask_name"),
+                        "cluster_render_path": cluster.get("cluster_render_path"),
+                        "color_name": cluster.get("color_name"),
+                        "location": cluster_desc.get("location") or cluster.get("location"),
+                        "bbox_xyxy": cluster.get("bbox_xyxy"),
+                        "stroke_ids": list(cluster.get("stroke_ids") or []),
+                        "stroke_rows": list(cluster.get("stroke_rows") or [])[:16],
+                        "CLUSTER_VISUAL_DESCRIPTION": cluster_desc.get("visual_summary") or " | ".join(
+                            str(x.get("description", "") or "")
+                            for x in (cluster.get("stroke_rows") or [])[:3]
+                            if isinstance(x, dict)
+                        ),
+                        "neighbor_context": cluster_desc.get("neighbor_context") or "",
+                        "bundle_reason": cluster_desc.get("bundle_reason") or "cluster_map_bundle",
+                        "dominant_cues": cluster_desc.get("dominant_cues") if isinstance(cluster_desc.get("dominant_cues"), list) else [],
+                        "visual_parts": cluster_desc.get("visual_parts") if isinstance(cluster_desc.get("visual_parts"), list) else [],
+                    }
+                )
+            row["clusters_out"] = clusters_out
+
+            canonical_parts: List[Dict[str, Any]] = []
+            for component in row.get("components") or []:
+                if not isinstance(component, dict):
+                    continue
+                comp_label = str(component.get("label", "") or "").strip()
+                comp_key = f"{pid}::{comp_label}"
+                canonical_desc = canonical_results.get(comp_key) if isinstance(canonical_results.get(comp_key), dict) else {}
+                candidate_image_path = self._resolve_component_candidate_image_path(component)
+                canonical_parts.append(
+                    {
+                        "label": comp_label,
+                        "CANONICAL_VISUAL_PARTS": canonical_desc.get("canonical_visual_parts")
+                        or str(component.get("general_visual_description", "") or "")
+                        or str(component.get("wikipedia_visual_description", "") or ""),
+                        "GENERAL_VISUAL_DESCRIPTION": str(component.get("general_visual_description", "") or ""),
+                        "WIKIPEDIA_VISUAL_DESCRIPTION": str(component.get("wikipedia_visual_description", "") or ""),
+                        "notable_cues": canonical_desc.get("notable_cues") if isinstance(canonical_desc.get("notable_cues"), list) else [],
+                        "candidate_image_path": candidate_image_path,
+                        "candidate_note": canonical_desc.get("candidate_note") or "",
+                        "canonical_candidate": component.get("canonical_candidate", {}),
+                    }
+                )
+            row["canonical_parts"] = canonical_parts
+
+            final_jobs.append(
+                {
+                    "job_key": pid,
+                    "base_context": row.get("base_context"),
+                    "refined_labels": list(row.get("refined_labels") or []),
+                    "snapshots": snapshots,
+                    "clusters": clusters_out,
+                    "canonical_parts": canonical_parts,
+                    "stroke_lookup": row.get("stroke_lookup", {}),
+                }
+            )
+
+        final_match_bundle = None
+        try:
+            # The final refined-label matching stage is text-only, so release the
+            # multimodal model before loading the smaller text planner bundle.
+            self._dbg("CUDA owner snapshot before diagram multimodal->text handoff", data=self._cuda_owner_snapshot())
+            qwentest.destroy_diagram_multimodal_bundle(text_bundle)
+            self._dbg(
+                "CUDA trim after diagram multimodal unload before text matching",
+                data=self._cuda_trim_allocator(reason="diagram_multimodal_to_text_handoff", reset_peak=False),
+            )
+            self._dbg("CUDA owner snapshot after diagram multimodal->text handoff", data=self._cuda_owner_snapshot())
+
+            with self._timed("models.load_qwen_text_for_diagram_matching", gpu_index=self.gpu_index, cpu_threads=self.cpu_threads):
+                final_match_bundle = qwentest.create_action_planner_text_bundle()
+
+            final_results = qwentest.match_diagram_parts_text_model(
+                bundle=final_match_bundle,
+                jobs=final_jobs,
+                temperature=0.2,
+                max_new_tokens=1200,
+                thinking_enabled=True,
+            )
+        finally:
+            try:
+                qwentest.destroy_action_planner_text_bundle(final_match_bundle)
+            except Exception as e:
+                self._dbg("Failed unloading diagram final text bundle", data={"err": f"{type(e).__name__}: {e}"})
+
+        by_processed_id: Dict[str, Dict[str, Any]] = {}
+        images: List[Dict[str, Any]] = []
+        for pid, row in prepared.items():
+            matches_payload = final_results.get(pid) if isinstance(final_results.get(pid), dict) else {}
+            match_rows = matches_payload.get("matches") if isinstance(matches_payload.get("matches"), list) else []
+            refined_label_to_strokes: Dict[str, Dict[str, Any]] = {}
+            matched_count = 0
+            normalized_rows: List[Dict[str, Any]] = []
+            for match in match_rows:
+                if not isinstance(match, dict):
+                    continue
+                label = str(match.get("label", "") or "").strip()
+                if not label:
+                    continue
+                stroke_ids = self._coerce_int_list(match.get("stroke_ids"))
+                if stroke_ids:
+                    matched_count += 1
+                normalized = {
+                    "matched_label": label,
+                    "stroke_indexes": stroke_ids,
+                    "source_type": str(match.get("source_type", "") or "unmatched"),
+                    "source_key": str(match.get("source_key", "") or ""),
+                    "snapshot_ids": [
+                        str(x).strip()
+                        for x in (match.get("snapshot_ids") if isinstance(match.get("snapshot_ids"), list) else [])
+                        if str(x).strip()
+                    ],
+                    "cluster_ids": [
+                        str(x).strip()
+                        for x in (match.get("cluster_ids") if isinstance(match.get("cluster_ids"), list) else [])
+                        if str(x).strip()
+                    ],
+                    "match_confidence": float(match.get("confidence", 0.0) or 0.0),
+                    "reason": str(match.get("reason", "") or ""),
+                }
+                normalized_rows.append(normalized)
+                refined_label_to_strokes[label] = {
+                    "stroke_indexes": stroke_ids,
+                    "source_type": normalized["source_type"],
+                    "source_key": normalized["source_key"],
+                    "snapshot_ids": normalized["snapshot_ids"],
+                    "cluster_ids": normalized["cluster_ids"],
+                    "confidence": normalized["match_confidence"],
+                    "reason": normalized["reason"],
+                }
+
+            payload = {
+                "schema": "diagram_refined_label_stroke_map_v2",
+                "processed_id": pid,
+                "image_names": sorted(str(x) for x in (row.get("image_names") or set()) if str(x).strip()),
+                "diagram_modes": sorted(int(x) for x in (row.get("diagram_modes") or set()) if int(x) in (1, 2)),
+                "diagram_type": (
+                    min(int(x) for x in (row.get("diagram_modes") or set()) if int(x) in (1, 2))
+                    if any(int(x) in (1, 2) for x in (row.get("diagram_modes") or set()))
+                    else 0
+                ),
+                "parser_kind": "diagram_unified_match_v2",
+                "refined_labels_file": row.get("refined_labels_file"),
+                "refined_labels": list(row.get("refined_labels") or []),
+                "status": "ok" if not row.get("error") else "skipped",
+                "reason": row.get("error"),
+                "matched_labels": int(matched_count),
+                "source_artifacts": {
+                    "processed_image_path": row.get("processed_image_path"),
+                    "stroke_description_path": row.get("stroke_description_path"),
+                    "cluster_map_path": row.get("cluster_map_path"),
+                },
+                "mental_map": {
+                    "snapshot_count": len(row.get("snapshots") or []),
+                    "snapshots": row.get("snapshots") or [],
+                },
+                "clusters": {
+                    "cluster_count": len(row.get("clusters_out") or []),
+                    "items": row.get("clusters_out") or [],
+                    "sam_keep_mask_names": (
+                        row.get("sam_filter_payload", {}).get("kept_mask_names")
+                        if isinstance(row.get("sam_filter_payload"), dict)
+                        else []
+                    ),
+                },
+                "canonical_parts": row.get("canonical_parts") or [],
+                "matches": normalized_rows,
+                "refined_label_to_strokes": refined_label_to_strokes,
+            }
+            by_processed_id[pid] = payload
+            images.append(
+                {
+                    "processed_id": pid,
+                    "image_names": payload.get("image_names", []),
+                    "matched_labels": int(matched_count),
+                    "snapshot_count": int(len(row.get("snapshots") or [])),
+                    "cluster_count": int(len(row.get("clusters_out") or [])),
+                    "canonical_part_count": int(len(row.get("canonical_parts") or [])),
+                    "status": payload.get("status"),
+                    "reason": payload.get("reason"),
+                }
+            )
+
+        return {
+            "ok": True,
+            "images": images,
+            "by_processed_id": by_processed_id,
+        }
 
     def _run_qwen_schematic_line_labeling(
         self,
@@ -4865,7 +6567,7 @@ class LessonTimeline:
         For each schematic diagram (diagram=2):
           - read StrokeDescriptions/processed_n_described.json
           - run qwentest.label_schematic_lines_transformers in batch
-          - writes LineLabels/processed_n/labels.json via qwentest
+          - writes clean ClustersLabeled/processed_n/labels.json and debug ClustersLabeled/debug/processed_n/labels.json via qwentest
         """
         import qwentest
         from shared_models import get_qwen
@@ -4873,6 +6575,10 @@ class LessonTimeline:
         qb = get_qwen()
         if qb is None:
             return {"ok": False, "error": "qwen_not_loaded_for_schematic_labeling"}
+
+        base_dir = Path(__file__).resolve().parent
+        cluster_maps_root = base_dir / "ClusterMaps"
+        cluster_renders_root = base_dir / "ClusterRenders"
 
         schematic_state: Dict[int, Dict[str, Any]] = {}
         index_meta: Dict[int, Dict[str, Any]] = {}
@@ -4906,23 +6612,153 @@ class LessonTimeline:
                 continue
 
             desc_path = self._resolve_schematic_descriptor_path(pid)
-            if not desc_path:
-                summary["images"].append({"image_name": name, "processed_id": pid, "skipped": True, "reason": "missing_stroke_description"})
-                continue
+            desc_obj: Optional[Dict[str, Any]] = None
+            descriptor_source = "stroke_descriptions"
+            if desc_path:
+                try:
+                    loaded = json.loads(desc_path.read_text(encoding="utf-8"))
+                    if isinstance(loaded, dict):
+                        desc_obj = loaded
+                except Exception as e:
+                    summary["images"].append(
+                        {
+                            "image_name": name,
+                            "processed_id": pid,
+                            "skipped": True,
+                            "reason": f"bad_stroke_description_json: {type(e).__name__}: {e}",
+                            "stroke_description_path": str(desc_path),
+                        }
+                    )
+                    continue
 
-            try:
-                desc_obj = json.loads(desc_path.read_text(encoding="utf-8"))
-            except Exception as e:
-                summary["images"].append(
-                    {
-                        "image_name": name,
-                        "processed_id": pid,
-                        "skipped": True,
-                        "reason": f"bad_stroke_description_json: {type(e).__name__}: {e}",
-                        "stroke_description_path": str(desc_path),
-                    }
+            if desc_obj is None:
+                cmap_path = cluster_maps_root / f"processed_{idx}" / "clusters.json"
+                renders_dir = cluster_renders_root / f"processed_{idx}"
+                if not cmap_path.is_file() or not renders_dir.is_dir():
+                    summary["images"].append({"image_name": name, "processed_id": pid, "skipped": True, "reason": "missing_stroke_description"})
+                    continue
+                try:
+                    cmap = json.loads(cmap_path.read_text(encoding="utf-8"))
+                except Exception as e:
+                    summary["images"].append(
+                        {
+                            "image_name": name,
+                            "processed_id": pid,
+                            "skipped": True,
+                            "reason": f"bad_clusters_json_for_zero_shot_schematic: {type(e).__name__}: {e}",
+                            "clusters_json": str(cmap_path),
+                        }
+                    )
+                    continue
+
+                clusters = cmap.get("clusters") if isinstance(cmap, dict) else []
+                clusters = clusters if isinstance(clusters, list) else []
+                if not clusters:
+                    summary["images"].append(
+                        {
+                            "image_name": name,
+                            "processed_id": pid,
+                            "skipped": True,
+                            "reason": "zero_shot_schematic_no_clusters",
+                            "clusters_json": str(cmap_path),
+                        }
+                    )
+                    continue
+
+                render_backed_clusters, render_backed_mask_names, missing_render_mask_names = self._collect_render_backed_clusters(
+                    clusters=clusters,
+                    renders_dir=renders_dir,
                 )
-                continue
+                if not render_backed_clusters:
+                    summary["images"].append(
+                        {
+                            "image_name": name,
+                            "processed_id": pid,
+                            "skipped": True,
+                            "reason": "zero_shot_schematic_no_cluster_renders",
+                            "clusters_json": str(cmap_path),
+                            "renders_dir": str(renders_dir),
+                            "clusters_total": len(clusters),
+                            "cluster_renders_found": 0,
+                            "cluster_renders_missing_sample": missing_render_mask_names[:20],
+                        }
+                    )
+                    continue
+
+                renders_mask_rgb: Dict[str, Any] = {}
+                zero_shot_entries: List[Dict[str, Any]] = []
+                for c in render_backed_clusters:
+                    mask_name = str(c.get("crop_file_mask", "") or "").strip()
+                    p = renders_dir / mask_name
+                    try:
+                        from PIL import Image
+                        import numpy as np
+
+                        with Image.open(p) as mi:
+                            mi = mi.convert("RGB")
+                            renders_mask_rgb[mask_name] = np.asarray(mi, dtype=np.uint8)
+                        zero_shot_entries.append(c)
+                    except Exception:
+                        continue
+
+                if not zero_shot_entries:
+                    summary["images"].append(
+                        {
+                            "image_name": name,
+                            "processed_id": pid,
+                            "skipped": True,
+                            "reason": "zero_shot_schematic_no_cluster_renders",
+                            "clusters_json": str(cmap_path),
+                            "renders_dir": str(renders_dir),
+                            "clusters_total": len(clusters),
+                            "cluster_renders_found": len(render_backed_mask_names),
+                            "cluster_renders_missing_sample": missing_render_mask_names[:20],
+                        }
+                    )
+                    continue
+
+                try:
+                    desc_obj = qwentest.build_zero_shot_schematic_descriptor_from_clusters(
+                        processed_id=pid,
+                        base_context=name,
+                        refined_labels=list(refined_labels),
+                        clusters=zero_shot_entries,
+                        renders_mask_rgb=renders_mask_rgb,
+                        model=qb.model,
+                        processor=qb.processor,
+                        device=qb.device,
+                        batch_size=8,
+                    )
+                    descriptor_source = "cluster_renders_zero_shot"
+                except Exception as e:
+                    summary["images"].append(
+                        {
+                            "image_name": name,
+                            "processed_id": pid,
+                            "skipped": True,
+                            "reason": f"zero_shot_schematic_descriptor_failed: {type(e).__name__}: {e}",
+                            "clusters_json": str(cmap_path),
+                            "renders_dir": str(renders_dir),
+                            "clusters_total": len(clusters),
+                            "cluster_renders_found": len(render_backed_mask_names),
+                        }
+                    )
+                    continue
+
+                if not isinstance(desc_obj, dict) or not list(desc_obj.get("described_lines") or []):
+                    summary["images"].append(
+                        {
+                            "image_name": name,
+                            "processed_id": pid,
+                            "skipped": True,
+                            "reason": "zero_shot_schematic_descriptor_empty",
+                            "clusters_json": str(cmap_path),
+                            "renders_dir": str(renders_dir),
+                            "clusters_total": len(clusters),
+                            "cluster_renders_found": len(render_backed_mask_names),
+                        }
+                    )
+                    continue
 
             schematic_state[idx] = {
                 "base_context": name,
@@ -4933,7 +6769,8 @@ class LessonTimeline:
             index_meta[idx] = {
                 "image_name": name,
                 "processed_id": pid,
-                "stroke_description_path": str(desc_path),
+                "stroke_description_path": str(desc_path) if desc_path else None,
+                "descriptor_source": descriptor_source,
             }
 
         if summary.get("images"):
@@ -4952,15 +6789,20 @@ class LessonTimeline:
             summary["note"] = "no_schematic_assets_for_line_labeling"
             return summary
 
-        res = qwentest.label_schematic_lines_transformers(
-            schematic_state=schematic_state,
-            model=qb.model,
-            processor=qb.processor,
-            device=qb.device,
-            batch_size=8,
-            save_outputs=True,
-            skip_existing_labels=False,
-        )
+        try:
+            res = qwentest.label_schematic_lines_transformers(
+                schematic_state=schematic_state,
+                model=qb.model,
+                processor=qb.processor,
+                device=qb.device,
+                batch_size=8,
+                save_outputs=True,
+                skip_existing_labels=False,
+            )
+        except Exception as e:
+            summary["ok"] = False
+            summary["error"] = f"{type(e).__name__}: {e}"
+            return summary
 
         for idx in sorted(index_meta.keys()):
             meta = index_meta[idx]
@@ -4970,6 +6812,7 @@ class LessonTimeline:
                     "image_name": meta.get("image_name"),
                     "processed_id": meta.get("processed_id"),
                     "stroke_description_path": meta.get("stroke_description_path"),
+                    "descriptor_source": meta.get("descriptor_source"),
                     "label_line_map": one.get("label_line_map", {}),
                     "line_label_rows": one.get("line_label_rows", []),
                     "line_count": len(one.get("line_key_order", []) or []),
@@ -4988,36 +6831,30 @@ class LessonTimeline:
         """
         For each VISUAL diagram image (diagram=1):
           - read ClusterMaps/processed_n/clusters.json
-          - match SAM bboxes -> closest cluster bboxes
-          - load ONLY matched cluster renders from ClusterRenders
+          - use EfficientSAM3 keep/drop decisions on cluster renders
+          - load ONLY kept cluster renders from ClusterRenders
           - run qwentest.label_clusters_transformers (visual-only stage1 + post-facto stage2 label match)
-          - writes ClustersLabeled/processed_n/labels.json via qwentest
+          - writes clean ClustersLabeled/processed_n/labels.json and debug ClustersLabeled/debug/processed_n/labels.json via qwentest
         """
         import qwentest
         from PIL import Image
         import numpy as np
 
-        # normalize SAM root structure
-        # expected outer shape from _run_efficientsam3_bboxes: {"ok":True,"result": bbox_map}
-        # bbox_map can be:
-        #   - {processed_id: {...}} (legacy)
-        #   - {"by_processed_id": {processed_id: {"labels": {...}}}} (current EfficientSAM3Clusters)
-        bbox_root = None
+        filter_root = None
         if isinstance(sam_bbox_map_any, dict):
             if "result" in sam_bbox_map_any:
-                bbox_root = sam_bbox_map_any.get("result")
+                filter_root = sam_bbox_map_any.get("result")
             elif "re6sult" in sam_bbox_map_any:
-                # tolerate old typo from previously written runs
-                bbox_root = sam_bbox_map_any.get("re6sult")
+                filter_root = sam_bbox_map_any.get("re6sult")
             else:
-                bbox_root = sam_bbox_map_any
+                filter_root = sam_bbox_map_any
 
-        if not isinstance(bbox_root, dict):
-            bbox_root = {}
+        if not isinstance(filter_root, dict):
+            filter_root = {}
 
-        by_pid_root = bbox_root
-        if isinstance(bbox_root.get("by_processed_id"), dict):
-            by_pid_root = bbox_root.get("by_processed_id") or {}
+        by_pid_root = filter_root
+        if isinstance(filter_root.get("by_processed_id"), dict):
+            by_pid_root = filter_root.get("by_processed_id") or {}
 
         # lazily load Qwen (must be loaded already by the caller)
         from shared_models import get_qwen
@@ -5086,6 +6923,21 @@ class LessonTimeline:
                 summary["images"].append({"image_name": name, "processed_id": pid, "skipped": True, "reason": "no_clusters"})
                 continue
 
+            render_backed_clusters, available_render_mask_names, missing_render_mask_names = self._collect_render_backed_clusters(
+                clusters=clusters,
+                renders_dir=renders_dir,
+            )
+            if not render_backed_clusters:
+                summary["images"].append({
+                    "image_name": name,
+                    "processed_id": pid,
+                    "skipped": True,
+                    "reason": "no_render_backed_clusters",
+                    "clusters_total": len(clusters),
+                    "cluster_renders_missing_sample": missing_render_mask_names[:20],
+                })
+                continue
+
             try:
                 with Image.open(img_path) as im:
                     im = im.convert("RGB")
@@ -5098,62 +6950,110 @@ class LessonTimeline:
             # refined labels list: prefer refined_labels_file; fallback to SAM label keys
             refined_file = asset.refined_labels_file
             refined_labels = self._load_refined_label_strings(refined_file)
-
-            sam_pid_payload = by_pid_root.get(pid)
-            if isinstance(sam_pid_payload, dict) and isinstance(sam_pid_payload.get("labels"), dict):
-                sam_pid_payload = sam_pid_payload.get("labels")
-            sam_items = self._extract_sam_items_for_pid(sam_pid_payload)
+            filter_payload = by_pid_root.get(pid)
+            if not isinstance(filter_payload, dict):
+                filter_payload = {}
 
             if not refined_labels:
-                # fallback to label keys from SAM items
-                labs = []
-                seen = set()
-                for it in sam_items:
-                    lab = str(it.get("label", "") or "").strip()
-                    if lab and lab.lower() not in seen:
+                labels_from_filter = filter_payload.get("labels")
+                if isinstance(labels_from_filter, list):
+                    seen = set()
+                    labs = []
+                    for it in labels_from_filter:
+                        lab = str(it or "").strip()
+                        if not lab or lab.lower() in seen:
+                            continue
                         seen.add(lab.lower())
                         labs.append(lab)
-                refined_labels = labs
+                    refined_labels = labs
 
-            if not sam_items:
+            if not refined_labels:
                 summary["images"].append({
                     "image_name": name,
                     "processed_id": pid,
                     "skipped": True,
-                    "reason": "no_sam_bboxes_for_pid",
+                    "reason": "missing_refined_labels",
+                    "clusters_total": len(clusters),
+                    "render_backed_clusters": len(render_backed_clusters),
                 })
                 continue
 
-            matched_clusters, debug_rows = self._match_sam_bboxes_to_cluster_entries(
-                pid=pid,
-                sam_items=sam_items,
-                clusters=clusters,
-                img_w=img_w,
-                img_h=img_h,
+            keep_mask_names = filter_payload.get("kept_mask_names")
+            if not isinstance(keep_mask_names, list):
+                keep_mask_names = []
+            keep_mask_set = {
+                str(x or "").strip()
+                for x in keep_mask_names
+                if str(x or "").strip()
+            }
+            filter_strategy = "sam_filter"
+
+            by_mask = filter_payload.get("by_mask") if isinstance(filter_payload.get("by_mask"), dict) else {}
+            debug_rows: List[Dict[str, Any]] = []
+            for mask_name, info in by_mask.items():
+                if not isinstance(info, dict):
+                    continue
+                aggregate = info.get("aggregate") if isinstance(info.get("aggregate"), dict) else {}
+                debug_rows.append(
+                    {
+                        "mask_name": str(mask_name),
+                        "keep": bool(info.get("keep", False)),
+                        "decision_reason": str(info.get("decision_reason", "") or ""),
+                        "best_prompt": info.get("best_prompt"),
+                        "best_score": info.get("best_score"),
+                        "best_quality": info.get("best_quality"),
+                        "good_prompt_count": aggregate.get("good_prompt_count"),
+                        "marginal_prompt_count": aggregate.get("marginal_prompt_count"),
+                        "small_prompt_count": aggregate.get("small_prompt_count"),
+                        "low_conf_prompt_count": aggregate.get("low_conf_prompt_count"),
+                    }
+                )
+            debug_rows.sort(
+                key=lambda r: (
+                    1 if bool(r.get("keep", False)) else 0,
+                    float(r.get("best_quality", 0.0) or 0.0),
+                    float(r.get("best_score", 0.0) or 0.0),
+                ),
+                reverse=True,
             )
 
-            if not matched_clusters:
-                summary["images"].append({
-                    "image_name": name,
-                    "processed_id": pid,
-                    "skipped": True,
-                    "reason": "sam_to_cluster_match_empty",
-                    "debug_matches": debug_rows[:50],
-                })
-                continue
+            if not keep_mask_set:
+                if available_render_mask_names:
+                    keep_mask_set = set(available_render_mask_names)
+                    filter_strategy = "zero_shot_all_clusters"
+                    reason = "missing_sam_render_filter_for_pid" if not filter_payload else "all_clusters_dropped_by_sam_filter"
+                    self._dbg(
+                        "Diagram labeling fallback to zero-shot cluster set",
+                        data={
+                            "processed_id": pid,
+                            "reason": reason,
+                            "clusters_selected": len(keep_mask_set),
+                            "clusters_total": len(clusters),
+                        },
+                    )
+                else:
+                    summary["images"].append({
+                        "image_name": name,
+                        "processed_id": pid,
+                        "skipped": True,
+                        "reason": "all_clusters_dropped_by_sam_filter" if filter_payload else "no_sam_render_filter_for_pid",
+                        "sam_filter_debug": debug_rows[:50],
+                    })
+                    continue
 
-            # solid debug prints (as requested)
-            print(f"[sam-match] {pid} matched_clusters={len(matched_clusters)} total_clusters={len(clusters)}")
-            for r in debug_rows[:40]:
-                print(
-                    f"  [sam-match] label={r.get('sam_label')} iou={r.get('iou'):.3f} center={r.get('center_dist'):.3f} close={r.get('close_match')} score={r.get('match_score'):.4f} -> {r.get('matched_mask')}"
-                )
+            print(f"[sam-filter] {pid} kept_clusters={len(keep_mask_set)} total_clusters={len(clusters)} strategy={filter_strategy}")
+            if debug_rows:
+                for r in debug_rows[:40]:
+                    print(
+                        f"  [sam-filter] mask={r.get('mask_name')} keep={r.get('keep')} quality={float(r.get('best_quality', 0.0) or 0.0):.4f} "
+                        f"score={float(r.get('best_score', 0.0) or 0.0):.4f} prompt={r.get('best_prompt')} reason={r.get('decision_reason')}"
+                    )
 
-            # Load ONLY matched cluster renders
+            # Load ONLY kept cluster renders
             renders_mask_rgb: Dict[str, Any] = {}
-            for c in matched_clusters:
+            for c in render_backed_clusters:
                 mname = str(c.get("crop_file_mask", "") or "").strip()
-                if not mname:
+                if not mname or mname not in keep_mask_set:
                     continue
                 p = renders_dir / mname
                 if not p.is_file():
@@ -5167,26 +7067,55 @@ class LessonTimeline:
 
             filtered_entries = []
             keep = set(renders_mask_rgb.keys())
-            for c in matched_clusters:
+            for c in render_backed_clusters:
                 mname = str(c.get("crop_file_mask", "") or "").strip()
                 if mname in keep:
                     filtered_entries.append(c)
 
             if not filtered_entries:
-                summary["images"].append({
-                    "image_name": name,
-                    "processed_id": pid,
-                    "skipped": True,
-                    "reason": "matched_clusters_have_no_renders",
-                    "debug_matches": debug_rows[:50],
-                })
-                continue
+                if filter_strategy != "zero_shot_all_clusters" and available_render_mask_names:
+                    filter_strategy = "zero_shot_all_clusters_recovery"
+                    keep = set(available_render_mask_names)
+                    filtered_entries = list(render_backed_clusters)
+                    renders_mask_rgb = {}
+                    for c in render_backed_clusters:
+                        mname = str(c.get("crop_file_mask", "") or "").strip()
+                        if not mname:
+                            continue
+                        p = renders_dir / mname
+                        if not p.is_file():
+                            continue
+                        try:
+                            with Image.open(p) as mi:
+                                mi = mi.convert("RGB")
+                                renders_mask_rgb[mname] = np.asarray(mi, dtype=np.uint8)
+                        except Exception:
+                            continue
+                    keep = set(renders_mask_rgb.keys())
+                    filtered_entries = [
+                        c for c in render_backed_clusters
+                        if str(c.get("crop_file_mask", "") or "").strip() in keep
+                    ]
+
+                if not filtered_entries:
+                    summary["images"].append({
+                        "image_name": name,
+                        "processed_id": pid,
+                        "skipped": True,
+                        "reason": "kept_clusters_have_no_renders",
+                        "sam_filter_debug": debug_rows[:50],
+                        "clusters_total": len(clusters),
+                        "render_backed_clusters": len(render_backed_clusters),
+                        "cluster_renders_missing_sample": missing_render_mask_names[:20],
+                    })
+                    continue
 
             clusters_state = {
                 idx: {
                     "base_context": name,  # best available here (image content)
                     "candidate_labels_raw": refined_labels,
                     "candidate_labels_refined": refined_labels,
+                    "sam_keep_mask_names": sorted(keep),
                     "full_img_rgb": full_img_rgb,
                     "clusters": filtered_entries,
                     "renders_mask_rgb": renders_mask_rgb,
@@ -5194,23 +7123,40 @@ class LessonTimeline:
             }
 
             # Run OLD labeling function (now visual-only + post-facto match) and SAVE into ClustersLabeled
-            res = qwentest.label_clusters_transformers(
-                clusters_state=clusters_state,
-                model=qb.model,
-                processor=qb.processor,
-                device=qb.device,
-                save_outputs=True,
-                skip_existing_labels=False,
-            )
+            try:
+                res = qwentest.label_clusters_transformers(
+                    clusters_state=clusters_state,
+                    model=qb.model,
+                    processor=qb.processor,
+                    device=qb.device,
+                    save_outputs=True,
+                    skip_existing_labels=False,
+                )
+            except Exception as e:
+                summary["images"].append({
+                    "image_name": name,
+                    "processed_id": pid,
+                    "skipped": True,
+                    "reason": f"qwen_cluster_labeling_failed: {type(e).__name__}: {e}",
+                    "clusters_total": len(clusters),
+                    "clusters_kept": len(filtered_entries),
+                    "clusters_dropped": max(0, len(clusters) - len(filtered_entries)),
+                    "sam_filter_debug_count": len(debug_rows),
+                    "sam_filter_debug_sample": debug_rows[:80],
+                })
+                continue
             qwen_idx_out = res.get(idx, {}) if isinstance(res.get(idx), dict) else {}
 
             summary["images"].append({
                 "image_name": name,
                 "processed_id": pid,
                 "clusters_total": len(clusters),
-                "clusters_matched": len(filtered_entries),
-                "debug_matches_count": len(debug_rows),
-                "debug_matches_sample": debug_rows[:80],
+                "clusters_kept": len(filtered_entries),
+                "clusters_dropped": max(0, len(clusters) - len(filtered_entries)),
+                "render_backed_clusters": len(render_backed_clusters),
+                "cluster_selection_strategy": filter_strategy,
+                "sam_filter_debug_count": len(debug_rows),
+                "sam_filter_debug_sample": debug_rows[:80],
                 "qwen_output_keys": list(qwen_idx_out.keys()),
                 "label_cluster_map": qwen_idx_out.get("label_cluster_map", {}),
                 "cluster_label_rows": qwen_idx_out.get("cluster_label_rows", []),
@@ -5368,6 +7314,189 @@ class LessonTimeline:
         )
         return saved
 
+    def _build_lesson_ready_output(self, run_out: Dict[str, Any]) -> Dict[str, Any]:
+        chapters = run_out.get("chapters") if isinstance(run_out, dict) else []
+        if not isinstance(chapters, list):
+            chapters = []
+
+        whiteboard_actions = run_out.get("whiteboard_actions") if isinstance(run_out, dict) else {}
+        if not isinstance(whiteboard_actions, dict):
+            whiteboard_actions = {}
+        events = whiteboard_actions.get("events")
+        if not isinstance(events, list):
+            events = []
+
+        logical_map: List[Dict[str, Any]] = []
+        speech_map: List[Dict[str, Any]] = []
+        parsed_action_events: List[Dict[str, Any]] = []
+        logical_steps_count = 0
+        parsed_actions_count = 0
+
+        for ch in chapters:
+            if not isinstance(ch, dict):
+                continue
+
+            chapter_index = int(ch.get("chapter_index", 0) or 0)
+            timeline_steps_raw = ch.get("timeline_steps")
+            if not isinstance(timeline_steps_raw, list):
+                timeline_steps_raw = []
+
+            logical_steps: List[Dict[str, Any]] = []
+            logical_step_order: List[str] = []
+            for row in timeline_steps_raw:
+                if not isinstance(row, dict):
+                    continue
+                step_key = str(row.get("key", row.get("step_key", "")) or "").strip()
+                if not step_key:
+                    continue
+                logical_step_order.append(step_key)
+                logical_steps.append(
+                    {
+                        "step_key": step_key,
+                        "timeline_text": str(row.get("timeline_text", "") or "").strip(),
+                    }
+                )
+            logical_steps_count += len(logical_steps)
+            logical_map.append(
+                {
+                    "chapter_index": chapter_index,
+                    "step_order": logical_step_order,
+                    "steps": logical_steps,
+                }
+            )
+
+            speech_step_order = ch.get("speech_step_order")
+            if not isinstance(speech_step_order, list):
+                speech_step_order = []
+            speech_step_map_raw = ch.get("speech_step_map")
+            if not isinstance(speech_step_map_raw, dict):
+                speech_step_map_raw = {}
+            speech_step_ranges_raw = ch.get("speech_step_ranges")
+            if not isinstance(speech_step_ranges_raw, dict):
+                speech_step_ranges_raw = {}
+
+            speech_step_map_clean: Dict[str, str] = {}
+            for key in speech_step_order:
+                sk = str(key or "").strip()
+                if not sk:
+                    continue
+                speech_step_map_clean[sk] = str(speech_step_map_raw.get(sk, "") or "")
+
+            speech_step_ranges_clean: Dict[str, Dict[str, int]] = {}
+            for key in speech_step_order:
+                sk = str(key or "").strip()
+                if not sk:
+                    continue
+                rr = speech_step_ranges_raw.get(sk)
+                if not isinstance(rr, dict):
+                    rr = {}
+                speech_step_ranges_clean[sk] = {
+                    "start_word_index": int(rr.get("start_word_index", 0) or 0),
+                    "end_word_index": int(rr.get("end_word_index", -1) or -1),
+                }
+
+            speech_map.append(
+                {
+                    "chapter_index": chapter_index,
+                    "speech": str(ch.get("speech", "") or ""),
+                    "step_order": [str(x or "").strip() for x in speech_step_order if str(x or "").strip()],
+                    "step_map": speech_step_map_clean,
+                    "step_ranges": speech_step_ranges_clean,
+                }
+            )
+
+        for ev_i, pack in enumerate(events):
+            if not isinstance(pack, dict):
+                continue
+            ev = pack.get("event")
+            if not isinstance(ev, dict):
+                ev = {}
+            qwen_payload = pack.get("qwen_payload")
+            if not isinstance(qwen_payload, dict):
+                qwen_payload = {}
+            base_actions = pack.get("base_actions_parsed")
+            if not isinstance(base_actions, list):
+                base_actions = []
+            delete_targets_original = qwen_payload.get("delete_targets_original")
+            if not isinstance(delete_targets_original, list):
+                delete_targets_original = []
+            delete_targets_blocked = qwen_payload.get("delete_targets_blocked_due_active_diagram")
+            if not isinstance(delete_targets_blocked, list):
+                delete_targets_blocked = []
+            manual_shift_targets = qwen_payload.get("manual_shift_targets_due_active_diagram")
+            if not isinstance(manual_shift_targets, list):
+                manual_shift_targets = []
+
+            cleaned_actions: List[Dict[str, Any]] = []
+            for local_i, action in enumerate(base_actions):
+                if not isinstance(action, dict):
+                    continue
+
+                cleaned_action: Dict[str, Any] = {
+                    "global_action_index": int(parsed_actions_count),
+                    "action_index_in_event": int(local_i),
+                }
+                for key, value in action.items():
+                    if key in ("sync_local", "sync_absolute") or value is None:
+                        continue
+                    cleaned_action[key] = value
+
+                sync_local = action.get("sync_local")
+                if isinstance(sync_local, dict):
+                    cleaned_action["sync_local"] = {
+                        "start_word_offset": int(sync_local.get("start_word_offset", sync_local.get("start", 0)) or 0),
+                        "end_word_offset": int(sync_local.get("end_word_offset", sync_local.get("end", 0)) or 0),
+                    }
+
+                sync_absolute = action.get("sync_absolute")
+                if isinstance(sync_absolute, dict):
+                    cleaned_action["sync_absolute"] = {
+                        "start_word_index": int(sync_absolute.get("start_word_index", 0) or 0),
+                        "end_word_index": int(sync_absolute.get("end_word_index", 0) or 0),
+                    }
+
+                cleaned_actions.append(cleaned_action)
+                parsed_actions_count += 1
+
+            parsed_action_events.append(
+                {
+                    "event_index": int(ev.get("event_index", ev_i) or ev_i),
+                    "chapter_index": int(ev.get("chapter_index", 0) or 0),
+                    "chunk_index": int(ev.get("chunk_index", 0) or 0),
+                    "segment_index": int(ev.get("segment_index", 0) or 0),
+                    "batch_index": int(ev.get("batch_index", 0) or 0),
+                    "planner": str(pack.get("planner", "") or ""),
+                    "event_kind": str(ev.get("kind", "") or ""),
+                    "event_type": str(ev.get("type", "") or ""),
+                    "name": str(ev.get("name", ev.get("image_name", "")) or ""),
+                    "image_name": str(ev.get("image_name", ev.get("name", "")) or ""),
+                    "processed_id": str(ev.get("processed_id", "") or ""),
+                    "step_key": str(ev.get("step_key", "") or ""),
+                    "start_word_index": int(ev.get("start_word_index", 0) or 0),
+                    "end_word_index": int(ev.get("end_word_index", 0) or 0),
+                    "duration_sec": float(ev.get("duration_sec", 0.0) or 0.0),
+                    "delete_targets_original": list(delete_targets_original),
+                    "delete_targets_blocked_due_active_diagram": list(delete_targets_blocked),
+                    "manual_shift_targets_due_active_diagram": list(manual_shift_targets),
+                    "repeat_occurrence_name": str(qwen_payload.get("repeat_occurrence_name", "") or ""),
+                    "parsed_actions": cleaned_actions,
+                }
+            )
+
+        return {
+            "schema": "lesson_ready_output_v1",
+            "topic": str(run_out.get("topic", "") or "") if isinstance(run_out, dict) else "",
+            "logical_map": logical_map,
+            "speech_map": speech_map,
+            "parsed_action_events": parsed_action_events,
+            "counts": {
+                "chapters": len(logical_map),
+                "logical_steps": int(logical_steps_count),
+                "parsed_action_events": len(parsed_action_events),
+                "parsed_actions": int(parsed_actions_count),
+            },
+        }
+
     def _summarize_sam_bbox_output(self, sam_bbox_map_any: Any) -> Dict[str, Any]:
         out: Dict[str, Any] = {
             "ok": True,
@@ -5407,7 +7536,48 @@ class LessonTimeline:
         pid_rows: List[Dict[str, Any]] = []
         for pid in sorted([str(k) for k in by_pid_root.keys()]):
             payload = by_pid_root.get(pid)
-            if isinstance(payload, dict) and isinstance(payload.get("labels"), dict):
+            if not isinstance(payload, dict):
+                continue
+
+            by_mask = payload.get("by_mask") if isinstance(payload.get("by_mask"), dict) else {}
+            labels = payload.get("labels") if isinstance(payload.get("labels"), list) else []
+
+            if by_mask:
+                kept = []
+                dropped = []
+                for mask_name, info in by_mask.items():
+                    if not isinstance(info, dict):
+                        continue
+                    row = {
+                        "mask_name": str(mask_name),
+                        "keep": bool(info.get("keep", False)),
+                        "best_prompt": info.get("best_prompt"),
+                        "best_score": info.get("best_score"),
+                        "best_quality": info.get("best_quality"),
+                        "decision_reason": info.get("decision_reason"),
+                    }
+                    if row["keep"]:
+                        kept.append(row)
+                    else:
+                        dropped.append(row)
+
+                kept.sort(key=lambda r: float(r.get("best_quality", 0.0) or 0.0), reverse=True)
+                dropped.sort(key=lambda r: float(r.get("best_quality", 0.0) or 0.0), reverse=True)
+
+                pid_rows.append(
+                    {
+                        "processed_id": pid,
+                        "labels_count": len(labels),
+                        "clusters_total": int(payload.get("clusters_total", len(by_mask)) or len(by_mask)),
+                        "clusters_kept": int(len(kept)),
+                        "clusters_dropped": int(len(dropped)),
+                        "kept_sample": kept[:10],
+                        "dropped_sample": dropped[:10],
+                    }
+                )
+                continue
+
+            if isinstance(payload.get("labels"), dict):
                 payload = payload.get("labels")
             sam_items = self._extract_sam_items_for_pid(payload)
             if not sam_items:
@@ -5547,7 +7717,7 @@ class LessonTimeline:
                 if not isinstance(a, dict):
                     continue
                 one: Dict[str, Any] = {"type": str(a.get("type", "") or "")}
-                for k in ("target", "image_name", "image_id", "processed_id", "cluster_name", "x", "y", "w", "h", "scale", "source"):
+                for k in ("target", "image_name", "image_id", "processed_id", "cluster_name", "from_cluster", "to_cluster", "duration_sec", "text", "x", "y", "w", "h", "scale", "source"):
                     if k in a:
                         one[k] = a.get(k)
                 if isinstance(a.get("sync_absolute"), dict):
@@ -5834,8 +8004,9 @@ class LessonTimeline:
                 "status": "skipped" if bool(row.get("skipped", False)) else "ok",
                 "reason": row.get("reason"),
                 "clusters_total": row.get("clusters_total"),
-                "clusters_matched": row.get("clusters_matched"),
-                "debug_matches_count": row.get("debug_matches_count"),
+                "clusters_kept": row.get("clusters_kept", row.get("clusters_matched")),
+                "clusters_dropped": row.get("clusters_dropped"),
+                "sam_filter_debug_count": row.get("sam_filter_debug_count", row.get("debug_matches_count")),
                 "label_cluster_keys": list((row.get("label_cluster_map") or {}).keys())[:80]
                 if isinstance(row.get("label_cluster_map"), dict)
                 else [],
@@ -5843,6 +8014,8 @@ class LessonTimeline:
                 if isinstance(row.get("cluster_label_rows"), list)
                 else 0,
             }
+            if isinstance(row.get("sam_filter_debug_sample"), list):
+                item["sam_filter_debug_sample"] = row.get("sam_filter_debug_sample")[:12]
             if isinstance(row.get("debug_matches_sample"), list):
                 item["debug_matches_sample"] = row.get("debug_matches_sample")[:12]
             if isinstance(row.get("debug_matches"), list):
@@ -5875,6 +8048,19 @@ class LessonTimeline:
                     "stroke_description_path": row.get("stroke_description_path"),
                 }
             )
+
+        diagram_label_stroke_maps = run_out.get("diagram_label_stroke_maps")
+        if not isinstance(diagram_label_stroke_maps, dict):
+            diagram_label_stroke_maps = {}
+        diagram_label_stroke_map_files = diagram_label_stroke_maps.get("files")
+        if not isinstance(diagram_label_stroke_map_files, list):
+            diagram_label_stroke_map_files = []
+        diagram_unified_matching = run_out.get("diagram_unified_matching")
+        if not isinstance(diagram_unified_matching, dict):
+            diagram_unified_matching = {}
+        diagram_unified_images = diagram_unified_matching.get("images")
+        if not isinstance(diagram_unified_images, list):
+            diagram_unified_images = []
 
         timings_raw = run_out.get("timings_ms")
         if not isinstance(timings_raw, list):
@@ -5910,6 +8096,7 @@ class LessonTimeline:
             "comfy.",
             "efficientsam3.",
             "qwen.diagram_",
+            "qwen.diagram_unified_",
             "qwen.schematic_",
             "diagram.group_close_prompts",
         )
@@ -5955,6 +8142,7 @@ class LessonTimeline:
                     "pipeline_warnings": pipeline_warnings,
                 },
             },
+            "sam_cluster_filter": sam_summary,
             "sam_bboxes": sam_summary,
             "diagram_cluster_labeling": {
                 "ok": bool(cluster_labeling.get("ok", True)),
@@ -5967,6 +8155,19 @@ class LessonTimeline:
                 "note": schematic_labeling.get("note"),
                 "error": schematic_labeling.get("error"),
                 "images": schematic_images,
+            },
+            "diagram_unified_matching": {
+                "ok": bool(diagram_unified_matching.get("ok", True)),
+                "note": diagram_unified_matching.get("note"),
+                "error": diagram_unified_matching.get("error"),
+                "images": diagram_unified_images[:80],
+            },
+            "diagram_label_stroke_maps": {
+                "ok": bool(diagram_label_stroke_maps.get("ok", True)),
+                "dir": diagram_label_stroke_maps.get("dir"),
+                "count": int(diagram_label_stroke_maps.get("count", 0) or 0),
+                "error": diagram_label_stroke_maps.get("error"),
+                "files": diagram_label_stroke_map_files[:80],
             },
             "action_planner": action_summary,
             "timings_ms_all": compact_timings,
@@ -6216,7 +8417,7 @@ class LessonTimeline:
                 for t in embed_preload_threads:
                     t.join()
 
-        # selection + refinement only (returns handle so colours can keep running)
+        # selection only (diagram components are attached from the C2 pipeline)
         with self._timed("image_pipeline.selection_only"):
             assets, dbg, handle = self._orchestrate_images_selection_only(
                 lesson_topic=topic,
@@ -6286,7 +8487,7 @@ class LessonTimeline:
                 im["bbox_px"] = {"w": a.bbox_px[0], "h": a.bbox_px[1]} if a.bbox_px else None
                 im["objects_that_comprise_image"] = a.objects or []
 
-        # 1) Qwen action planning (static batched v2; Qwen must still be loaded here)
+        # 1) Qwen action planning (static batched v2 with local 0.8B text worker)
         qwen_actions_err: Optional[str] = None
         try:
             with self._timed("qwen.whiteboard_action_planning"):
@@ -6340,7 +8541,7 @@ class LessonTimeline:
         except Exception as e:
             qwen_unload_before_sam_err = repr(e)
 
-        # 3) LOAD EfficientSAM3 + run bbox search per refined label
+        # 3) LOAD EfficientSAM3 + run render-level keep/drop filtering per refined label
         diagram_assets_for_labeling = assets_by_name if assets_by_name else assets
         out["efficientsam3_bboxes"] = {"ok": True, "note": "skipped"}
 
@@ -6351,7 +8552,7 @@ class LessonTimeline:
                 init_efficientsam3_hot(gpu_index=self.gpu_index, cpu_threads=self.cpu_threads, warmup=True)
             self._dbg("CUDA owner snapshot after sam-load", data=self._cuda_owner_snapshot())
             out_dir = str(getattr(handle, "out_dir", Path("PipelineOutputs"))) if handle is not None else "PipelineOutputs"
-            with self._timed("efficientsam3.compute_bboxes"):
+            with self._timed("efficientsam3.filter_cluster_renders"):
                 out["efficientsam3_bboxes"] = self._run_efficientsam3_bboxes(
                     assets_by_name=diagram_assets_for_labeling,
                     diagram_modes_by_name=diagram_modes_by_name,
@@ -6374,9 +8575,10 @@ class LessonTimeline:
             with self._timed("image_pipeline.wait_colours_done"):
                 handle.colours_done.wait()
             out["image_pipeline"]["debug"]["colours_done"] = True
-            out["image_pipeline"]["debug"]["pipeline_errors"] = dict(getattr(handle, "errors", {}) or {})
+            pipe_errs = out["image_pipeline"]["debug"].setdefault("pipeline_errors", {})
+            pipe_errs.update(dict(getattr(handle, "errors", {}) or {}))
 
-        # 6) Load Qwen only if there is actual diagram-labeling work.
+        # 6) Load text Qwen only if there is actual diagram-labeling work.
         def _asset_modes_for_labeling(name: str, asset: ImageAsset) -> set:
             modes_raw = diagram_modes_by_name.get(str(name or "").strip(), [])
             modes = {int(x) for x in modes_raw if int(x) in (1, 2)} if isinstance(modes_raw, list) else set()
@@ -6386,62 +8588,63 @@ class LessonTimeline:
                     modes.add(d)
             return modes
 
-        visual_diagram_labeling_needed = any(
-            (1 in _asset_modes_for_labeling(name, a)) and bool(a.processed_ids)
+        diagram_labeling_needed = any(
+            bool(_asset_modes_for_labeling(name, a)) and bool(a.processed_ids)
             for name, a in diagram_assets_for_labeling.items()
         )
-        schematic_diagram_labeling_needed = any(
-            (2 in _asset_modes_for_labeling(name, a)) and bool(a.processed_ids)
-            for name, a in diagram_assets_for_labeling.items()
-        )
-        diagram_labeling_needed = bool(visual_diagram_labeling_needed or schematic_diagram_labeling_needed)
         qwen_ready_err: Optional[str] = None
         if not diagram_labeling_needed:
-            out["diagram_cluster_labels"] = {"ok": True, "note": "no_diagram_assets_for_labeling"}
-            out["diagram_schematic_labels"] = {"ok": True, "note": "no_schematic_assets_for_labeling"}
+            out["diagram_cluster_labels"] = {"ok": True, "note": "replaced_by_unified_diagram_matching"}
+            out["diagram_schematic_labels"] = {"ok": True, "note": "replaced_by_unified_diagram_matching"}
+            out["diagram_unified_matching"] = {"ok": True, "note": "no_diagram_assets_for_labeling", "images": [], "by_processed_id": {}}
         else:
+            diagram_text_bundle = None
             try:
-                from shared_models import get_qwen, init_qwen_hot
-                evict_dbg = self._evict_imagepipeline_hot_qwen_if_any()
-                if not bool(evict_dbg.get("ok", True)):
-                    qwen_ready_err = f"imagepipeline_hot_qwen_evict_failed: {evict_dbg.get('err', 'unknown')}"
-                else:
-                    self._dbg("CUDA owner snapshot before diagram-labeling qwen-load", data=self._cuda_owner_snapshot())
-                    if get_qwen() is None:
-                        with self._timed("models.load_qwen_for_diagram_labeling", gpu_index=self.gpu_index, cpu_threads=self.cpu_threads):
-                            init_qwen_hot(
-                                gpu_index=self.gpu_index,
-                                cpu_threads=self.cpu_threads,
-                                warmup=True,
-                            )
-                    self._dbg("CUDA owner snapshot after diagram-labeling qwen-load", data=self._cuda_owner_snapshot())
+                import qwentest
+                self._dbg("CUDA owner snapshot before unified diagram multimodal-qwen-load", data=self._cuda_owner_snapshot())
+                with self._timed("models.load_qwen_multimodal_for_diagram_matching", gpu_index=self.gpu_index, cpu_threads=self.cpu_threads):
+                    diagram_text_bundle = qwentest.create_diagram_multimodal_bundle()
+                self._dbg("CUDA owner snapshot after unified diagram multimodal-qwen-load", data=self._cuda_owner_snapshot())
             except Exception as e:
                 qwen_ready_err = repr(e)
 
             if qwen_ready_err:
                 out["diagram_cluster_labels"] = {"ok": False, "error": f"qwen_ready_failed: {qwen_ready_err}"}
                 out["diagram_schematic_labels"] = {"ok": False, "error": f"qwen_ready_failed: {qwen_ready_err}"}
+                out["diagram_unified_matching"] = {"ok": False, "error": f"qwen_ready_failed: {qwen_ready_err}", "images": [], "by_processed_id": {}}
             else:
-                # 7a) Run schematic line labeling first.
-                if schematic_diagram_labeling_needed:
-                    with self._timed("qwen.schematic_line_labeling"):
-                        out["diagram_schematic_labels"] = self._run_qwen_schematic_line_labeling(
-                            assets_by_name=diagram_assets_for_labeling,
-                            diagram_modes_by_name=diagram_modes_by_name,
-                        )
-                else:
-                    out["diagram_schematic_labels"] = {"ok": True, "note": "no_schematic_assets_for_labeling"}
-
-                # 7b) Run visual diagram cluster labeling (ONLY matched clusters via SAM bboxes).
-                if visual_diagram_labeling_needed:
-                    with self._timed("qwen.diagram_cluster_labeling"):
-                        out["diagram_cluster_labels"] = self._run_qwen_diagram_cluster_labeling(
+                try:
+                    with self._timed("qwen.diagram_unified_matching"):
+                        out["diagram_unified_matching"] = self._run_qwen_unified_diagram_matching(
                             assets_by_name=diagram_assets_for_labeling,
                             sam_bbox_map_any=out.get("efficientsam3_bboxes", {}),
                             diagram_modes_by_name=diagram_modes_by_name,
+                            text_bundle=diagram_text_bundle,
                         )
-                else:
-                    out["diagram_cluster_labels"] = {"ok": True, "note": "no_visual_diagram_assets_for_labeling"}
+                    out["diagram_cluster_labels"] = {"ok": True, "note": "replaced_by_unified_diagram_matching"}
+                    out["diagram_schematic_labels"] = {"ok": True, "note": "replaced_by_unified_diagram_matching"}
+                finally:
+                    try:
+                        import qwentest
+                        with self._timed("models.unload_qwen_multimodal_after_diagram_matching"):
+                            qwentest.destroy_diagram_multimodal_bundle(diagram_text_bundle)
+                    except Exception as e:
+                        self._dbg("Failed unloading diagram text qwen", data={"err": f"{type(e).__name__}: {e}"})
+
+        diagram_label_stroke_map_err: Optional[str] = None
+        try:
+            out_dir = str(getattr(handle, "out_dir", Path("PipelineOutputs"))) if handle is not None else "PipelineOutputs"
+            out["diagram_label_stroke_maps"] = self._write_diagram_label_stroke_maps(
+                assets_by_name=diagram_assets_for_labeling,
+                diagram_modes_by_name=diagram_modes_by_name,
+                cluster_labeling=out.get("diagram_cluster_labels"),
+                schematic_labeling=out.get("diagram_schematic_labels"),
+                diagram_matching=out.get("diagram_unified_matching"),
+                out_dir=out_dir,
+            )
+        except Exception as e:
+            diagram_label_stroke_map_err = f"{type(e).__name__}: {e}"
+            out["diagram_label_stroke_maps"] = {"ok": False, "error": diagram_label_stroke_map_err}
 
         # Checkpoint save before teardown (qwen unload/comfy warmup), so debug survives
         # even if shutdown hangs or is interrupted.
@@ -6488,6 +8691,8 @@ class LessonTimeline:
             pipe_errs["qwen_unload_after_diagram_labeling"] = qwen_final_unload_err
         if comfy_warmup_err:
             pipe_errs["comfy_warmup_after_qwen"] = comfy_warmup_err
+        if diagram_label_stroke_map_err:
+            pipe_errs["diagram_label_stroke_maps"] = diagram_label_stroke_map_err
 
         return self._finalize_run_output(out, run_t0=run_t0, run_vram_start=run_vram_start)
 
@@ -6565,58 +8770,6 @@ class LessonTimeline:
             out.append(ss)
         return out
 
-    @staticmethod
-    def _bbox_iou(a: List[int], b: List[int]) -> float:
-        ax0, ay0, ax1, ay1 = [int(x) for x in a]
-        bx0, by0, bx1, by1 = [int(x) for x in b]
-        ix0 = max(ax0, bx0)
-        iy0 = max(ay0, by0)
-        ix1 = min(ax1, bx1)
-        iy1 = min(ay1, by1)
-        iw = max(0, ix1 - ix0)
-        ih = max(0, iy1 - iy0)
-        inter = iw * ih
-        if inter <= 0:
-            return 0.0
-        aa = max(1, (ax1 - ax0) * (ay1 - ay0))
-        ba = max(1, (bx1 - bx0) * (by1 - by0))
-        return float(inter / float(aa + ba - inter))
-
-    @staticmethod
-    def _bbox_center_norm_dist(a: List[int], b: List[int], img_w: int, img_h: int) -> float:
-        ax0, ay0, ax1, ay1 = [int(x) for x in a]
-        bx0, by0, bx1, by1 = [int(x) for x in b]
-        acx = (ax0 + ax1) * 0.5
-        acy = (ay0 + ay1) * 0.5
-        bcx = (bx0 + bx1) * 0.5
-        bcy = (by0 + by1) * 0.5
-        diag = max(1.0, (img_w * img_w + img_h * img_h) ** 0.5)
-        return float((((acx - bcx) ** 2 + (acy - bcy) ** 2) ** 0.5) / diag)
-
-    def _bbox_match_score(self, sam_bb: List[int], cl_bb: List[int], img_w: int, img_h: int) -> float:
-        # lower = better
-        sx0, sy0, sx1, sy1 = [int(x) for x in sam_bb]
-        cx0, cy0, cx1, cy1 = [int(x) for x in cl_bb]
-
-        scx = (sx0 + sx1) * 0.5
-        scy = (sy0 + sy1) * 0.5
-        ccx = (cx0 + cx1) * 0.5
-        ccy = (cy0 + cy1) * 0.5
-
-        diag = max(1.0, (img_w * img_w + img_h * img_h) ** 0.5)
-        center_d = (((scx - ccx) ** 2 + (scy - ccy) ** 2) ** 0.5) / diag
-
-        sa = max(1.0, float((sx1 - sx0) * (sy1 - sy0)))
-        ca = max(1.0, float((cx1 - cx0) * (cy1 - cy0)))
-        # size similarity in log-space
-        import math
-        size_d = abs(math.log(ca / sa))
-
-        iou = self._bbox_iou(sam_bb, cl_bb)
-        # combine: center + size + iou penalty
-        score = center_d + 0.70 * size_d + (1.0 - iou)
-        return float(score)
-
     def _extract_sam_items_for_pid(self, sam_pid_payload: Any) -> List[Dict[str, Any]]:
         """
         Normalize SAM output into:
@@ -6663,86 +8816,597 @@ class LessonTimeline:
                     out.append({"label": label, "bbox_xyxy": [int(x) for x in bb0], "score": it.get("score")})
         return out
 
-    def _match_sam_bboxes_to_cluster_entries(
+    def _resolve_cluster_labels_path(self, processed_id: str) -> Optional[Path]:
+        pid = str(processed_id or "").strip()
+        if not pid:
+            return None
+        candidates = [
+            Path(__file__).resolve().parent / "ClustersLabeled" / pid / "labels.json",
+            Path("ClustersLabeled") / pid / "labels.json",
+        ]
+        for p in candidates:
+            try:
+                if p.is_file():
+                    return p
+            except Exception:
+                continue
+        return None
+
+    def _resolve_line_labels_path(self, processed_id: str) -> Optional[Path]:
+        pid = str(processed_id or "").strip()
+        if not pid:
+            return None
+        candidates = [
+            Path(__file__).resolve().parent / "ClustersLabeled" / pid / "labels.json",
+            Path("ClustersLabeled") / pid / "labels.json",
+            Path(__file__).resolve().parent / "LineLabels" / pid / "labels.json",
+            Path("LineLabels") / pid / "labels.json",
+        ]
+        for p in candidates:
+            try:
+                if p.is_file():
+                    return p
+            except Exception:
+                continue
+        return None
+
+    def _diagram_label_stroke_maps_dir(self, out_dir: Optional[str]) -> Path:
+        base = Path(str(out_dir or "PipelineOutputs"))
+        return base / "_diagram_label_stroke_maps"
+
+    def _diagram_part_stroke_maps_dir(self, out_dir: Optional[str]) -> Path:
+        base = Path(str(out_dir or "PipelineOutputs"))
+        return base / "_diagram_part_stroke_maps"
+
+    def _load_json_file_safe(self, path: Optional[Path]) -> Any:
+        if path is None:
+            return None
+        try:
+            return json.loads(path.read_text(encoding="utf-8"))
+        except Exception:
+            return None
+
+    def _coerce_int_list(self, values: Any) -> List[int]:
+        out: List[int] = []
+        seen = set()
+        if not isinstance(values, list):
+            return out
+        for v in values:
+            try:
+                i = int(v)
+            except Exception:
+                continue
+            if i in seen:
+                continue
+            seen.add(i)
+            out.append(i)
+        return out
+
+    def _extract_clean_label_rows_by_label(
+        self,
+        labels_obj: Any,
+        *,
+        expected_diagram_type: Optional[int] = None,
+    ) -> Dict[str, Dict[str, Any]]:
+        if not isinstance(labels_obj, dict):
+            return {}
+        schema = str(labels_obj.get("schema", "") or "").strip()
+        if schema != "diagram_label_matches_clean_v1":
+            return {}
+        if expected_diagram_type in (1, 2):
+            try:
+                actual_diagram_type = int(labels_obj.get("diagram_type", 0) or 0)
+            except Exception:
+                actual_diagram_type = 0
+            if actual_diagram_type not in (0, expected_diagram_type):
+                return {}
+
+        rows = labels_obj.get("labels")
+        if not isinstance(rows, list):
+            return {}
+
+        out: Dict[str, Dict[str, Any]] = {}
+        for row in rows:
+            if not isinstance(row, dict):
+                continue
+            label = str(row.get("matched_label", "") or "").strip()
+            if not label:
+                continue
+            out[label] = row
+        return out
+
+    def _build_visual_refined_label_stroke_map(
         self,
         *,
-        pid: str,
-        sam_items: List[Dict[str, Any]],
-        clusters: List[Dict[str, Any]],
-        img_w: int,
-        img_h: int,
-    ) -> Tuple[List[Dict[str, Any]], List[Dict[str, Any]]]:
-        """
-        Returns: (matched_cluster_entries, debug_rows)
-        - Matches each SAM bbox to the closest cluster bbox by combined center+size+IoU score.
-        - Keeps UNIQUE cluster mask targets (dedup by crop_file_mask).
-        """
-        debug_rows: List[Dict[str, Any]] = []
-        if not sam_items or not clusters:
-            return [], debug_rows
+        processed_id: str,
+        refined_labels: List[str],
+        summary_row: Optional[Dict[str, Any]],
+    ) -> Dict[str, Any]:
+        labels_path = self._resolve_cluster_labels_path(processed_id)
+        labels_obj = self._load_json_file_safe(labels_path)
 
-        best_by_mask: Dict[str, Tuple[float, Dict[str, Any], Dict[str, Any]]] = {}
+        cluster_map_path = Path(__file__).resolve().parent / "ClusterMaps" / processed_id / "clusters.json"
+        cluster_map_obj = self._load_json_file_safe(cluster_map_path)
+        clusters = cluster_map_obj.get("clusters") if isinstance(cluster_map_obj, dict) else []
+        clusters = clusters if isinstance(clusters, list) else []
+        clean_rows_by_label = self._extract_clean_label_rows_by_label(
+            labels_obj,
+            expected_diagram_type=1,
+        )
 
-        for si, it in enumerate(sam_items, start=1):
-            bb = it.get("bbox_xyxy")
-            lab = str(it.get("label", "") or "").strip()
-            if not (isinstance(bb, list) and len(bb) == 4):
+        cluster_by_mask: Dict[str, Dict[str, Any]] = {}
+        for row in clusters:
+            if not isinstance(row, dict):
+                continue
+            mask_name = str(row.get("crop_file_mask", "") or "").strip()
+            if mask_name:
+                cluster_by_mask[mask_name] = row
+
+        label_cluster_map = {}
+        if isinstance(labels_obj, dict) and isinstance(labels_obj.get("label_cluster_map"), dict):
+            label_cluster_map = labels_obj.get("label_cluster_map") or {}
+        elif isinstance(summary_row, dict) and isinstance(summary_row.get("label_cluster_map"), dict):
+            label_cluster_map = summary_row.get("label_cluster_map") or {}
+
+        fallback_by_label: Dict[str, Dict[str, Any]] = {}
+        clusters_labeled = labels_obj.get("clusters") if isinstance(labels_obj, dict) else None
+        if isinstance(clusters_labeled, dict):
+            for rec in clusters_labeled.values():
+                if not isinstance(rec, dict):
+                    continue
+                lab = str(rec.get("matched_label", "") or "").strip()
+                entry = rec.get("entry") if isinstance(rec.get("entry"), dict) else {}
+                if not lab:
+                    continue
+                fallback_by_label[lab] = {
+                    "stroke_indexes": self._coerce_int_list(entry.get("stroke_indexes")),
+                    "cluster_mask_name": str(entry.get("crop_file_mask", "") or "").strip() or None,
+                    "confidence": rec.get("match_confidence"),
+                    "reason": str(rec.get("match_reason", "") or ""),
+                }
+
+        if not refined_labels:
+            refined_labels = [str(x).strip() for x in clean_rows_by_label.keys() if str(x).strip()]
+        if not refined_labels:
+            refined_labels = [str(x).strip() for x in label_cluster_map.keys() if str(x).strip()]
+
+        refined_label_to_strokes: Dict[str, Dict[str, Any]] = {}
+        matched_count = 0
+        for label in refined_labels:
+            clean_rec = clean_rows_by_label.get(label) if isinstance(clean_rows_by_label, dict) else None
+            if isinstance(clean_rec, dict):
+                mask_name = str(
+                    clean_rec.get("target_key", "")
+                    or clean_rec.get("cluster_mask_name", "")
+                    or ""
+                ).strip() or None
+                cluster = cluster_by_mask.get(mask_name or "")
+                stroke_indexes = self._coerce_int_list(clean_rec.get("stroke_indexes"))
+                if not stroke_indexes and isinstance(cluster, dict):
+                    stroke_indexes = self._coerce_int_list(cluster.get("stroke_indexes"))
+
+                if stroke_indexes:
+                    matched_count += 1
+
+                refined_label_to_strokes[label] = {
+                    "stroke_indexes": stroke_indexes,
+                    "cluster_mask_name": mask_name,
+                    "cluster_color_name": (
+                        str(cluster.get("color_name", "") or "").strip() or None
+                        if isinstance(cluster, dict)
+                        else None
+                    ),
+                    "cluster_group_index": (
+                        int(cluster.get("group_index_in_color"))
+                        if isinstance(cluster, dict) and cluster.get("group_index_in_color") is not None
+                        else None
+                    ),
+                    "confidence": clean_rec.get("match_confidence", clean_rec.get("confidence", 0.0)),
+                    "reason": str(clean_rec.get("match_reason", "") or clean_rec.get("reason", "") or ""),
+                }
                 continue
 
-            best = None
-            best_score = None
+            rec = label_cluster_map.get(label) if isinstance(label_cluster_map, dict) else None
+            rec = rec if isinstance(rec, dict) else {}
+            mask_name = str(rec.get("mask_name", "") or "").strip() or None
+            cluster = cluster_by_mask.get(mask_name or "")
+            stroke_indexes = self._coerce_int_list(cluster.get("stroke_indexes")) if isinstance(cluster, dict) else []
 
-            for c in clusters:
-                cbb = c.get("bbox_xyxy")
-                mname = c.get("crop_file_mask")
-                if not (isinstance(cbb, list) and len(cbb) == 4):
-                    continue
-                if not isinstance(mname, str) or not mname.strip():
-                    continue
+            fallback = fallback_by_label.get(label)
+            if not stroke_indexes and isinstance(fallback, dict):
+                stroke_indexes = self._coerce_int_list(fallback.get("stroke_indexes"))
+                if mask_name is None:
+                    mask_name = fallback.get("cluster_mask_name")
 
-                score = self._bbox_match_score(bb, cbb, img_w, img_h)
+            if stroke_indexes:
+                matched_count += 1
 
-                if best_score is None or score < best_score:
-                    best_score = score
-                    best = c
-
-            if best is None or best_score is None:
-                continue
-
-            mname = str(best.get("crop_file_mask", "") or "").strip()
-            best_bbox = [int(x) for x in best.get("bbox_xyxy", [0, 0, 0, 0])]
-            iou = float(self._bbox_iou(bb, best_bbox))
-            center_dist = float(self._bbox_center_norm_dist(bb, best_bbox, img_w, img_h))
-            is_close = bool(
-                (iou >= float(SAM_CLUSTER_MATCH_MIN_IOU))
-                or (center_dist <= float(SAM_CLUSTER_MATCH_MAX_CENTER_DIST))
-            )
-            row = {
-                "processed_id": pid,
-                "sam_index": si,
-                "sam_label": lab,
-                "sam_bbox_xyxy": [int(x) for x in bb],
-                "matched_mask": mname,
-                "cluster_bbox_xyxy": best_bbox,
-                "match_score": float(best_score),
-                "iou": iou,
-                "center_dist": center_dist,
-                "close_match": is_close,
+            refined_label_to_strokes[label] = {
+                "stroke_indexes": stroke_indexes,
+                "cluster_mask_name": mask_name,
+                "cluster_color_name": (
+                    str(cluster.get("color_name", "") or "").strip() or None
+                    if isinstance(cluster, dict)
+                    else None
+                ),
+                "cluster_group_index": (
+                    int(cluster.get("group_index_in_color"))
+                    if isinstance(cluster, dict) and cluster.get("group_index_in_color") is not None
+                    else None
+                ),
+                "confidence": rec.get("confidence", fallback.get("confidence") if isinstance(fallback, dict) else 0.0),
+                "reason": str(
+                    rec.get("reason", "")
+                    or (fallback.get("reason", "") if isinstance(fallback, dict) else "")
+                    or ""
+                ),
             }
-            debug_rows.append(row)
-            if not is_close:
+
+        return {
+            "status": "skipped" if isinstance(summary_row, dict) and bool(summary_row.get("skipped", False)) else "ok",
+            "reason": (summary_row or {}).get("reason") if isinstance(summary_row, dict) else None,
+            "labels_path": str(labels_path) if labels_path else None,
+            "cluster_map_path": str(cluster_map_path),
+            "cluster_map_exists": bool(cluster_map_path.is_file()),
+            "matched_labels": int(matched_count),
+            "refined_label_to_strokes": refined_label_to_strokes,
+        }
+
+    def _build_schematic_refined_label_stroke_map(
+        self,
+        *,
+        processed_id: str,
+        refined_labels: List[str],
+        summary_row: Optional[Dict[str, Any]],
+    ) -> Dict[str, Any]:
+        labels_path = self._resolve_line_labels_path(processed_id)
+        labels_obj = self._load_json_file_safe(labels_path)
+        clean_rows_by_label = self._extract_clean_label_rows_by_label(
+            labels_obj,
+            expected_diagram_type=2,
+        )
+
+        label_line_map = labels_obj.get("label_line_map") if isinstance(labels_obj, dict) else None
+        if not isinstance(label_line_map, dict) and isinstance(summary_row, dict):
+            cand = summary_row.get("label_line_map")
+            label_line_map = cand if isinstance(cand, dict) else {}
+        if not isinstance(label_line_map, dict):
+            label_line_map = {}
+
+        line_keyed = labels_obj.get("line_keyed") if isinstance(labels_obj, dict) else None
+        line_keyed = line_keyed if isinstance(line_keyed, dict) else {}
+
+        if not refined_labels:
+            refined_labels = [str(x).strip() for x in clean_rows_by_label.keys() if str(x).strip()]
+        if not refined_labels:
+            refined_labels = [str(x).strip() for x in label_line_map.keys() if str(x).strip()]
+
+        refined_label_to_strokes: Dict[str, Dict[str, Any]] = {}
+        matched_count = 0
+        for label in refined_labels:
+            clean_rec = clean_rows_by_label.get(label) if isinstance(clean_rows_by_label, dict) else None
+            if isinstance(clean_rec, dict):
+                line_keys = [
+                    str(x).strip()
+                    for x in (clean_rec.get("line_keys") if isinstance(clean_rec.get("line_keys"), list) else [])
+                    if str(x).strip()
+                ]
+                line_indexes = self._coerce_int_list(clean_rec.get("line_indexes"))
+                stroke_indexes = self._coerce_int_list(clean_rec.get("stroke_indexes"))
+                if (not line_indexes or not stroke_indexes) and line_keys:
+                    seen_line_indexes = set(line_indexes)
+                    seen_strokes = set(stroke_indexes)
+                    for key in line_keys:
+                        line_row = line_keyed.get(key) if isinstance(line_keyed, dict) else None
+                        if not isinstance(line_row, dict):
+                            continue
+                        try:
+                            line_idx = int(line_row.get("line_index"))
+                        except Exception:
+                            line_idx = None
+                        if line_idx is not None and line_idx not in seen_line_indexes:
+                            seen_line_indexes.add(line_idx)
+                            line_indexes.append(line_idx)
+                        try:
+                            stroke_idx = int(line_row.get("source_stroke_index", line_idx if line_idx is not None else -1))
+                        except Exception:
+                            stroke_idx = None
+                        if stroke_idx is not None and stroke_idx >= 0 and stroke_idx not in seen_strokes:
+                            seen_strokes.add(stroke_idx)
+                            stroke_indexes.append(stroke_idx)
+
+                if stroke_indexes:
+                    matched_count += 1
+
+                refined_label_to_strokes[label] = {
+                    "stroke_indexes": stroke_indexes,
+                    "line_indexes": line_indexes,
+                    "line_keys": line_keys,
+                    "target_type": clean_rec.get("target_type"),
+                    "target_key": clean_rec.get("target_key"),
+                    "confidence": clean_rec.get("match_confidence", clean_rec.get("confidence", 0.0)),
+                    "reason": str(clean_rec.get("match_reason", "") or clean_rec.get("reason", "") or ""),
+                }
                 continue
 
-            # keep best (lowest score) per mask_name
-            prev = best_by_mask.get(mname)
-            if prev is None or best_score < prev[0]:
-                best_by_mask[mname] = (best_score, best, row)
+            rec = label_line_map.get(label) if isinstance(label_line_map, dict) else None
+            rec = rec if isinstance(rec, dict) else {}
+            line_keys_raw = rec.get("line_keys") if isinstance(rec.get("line_keys"), list) else []
+            line_keys: List[str] = []
+            line_indexes: List[int] = []
+            stroke_indexes: List[int] = []
+            seen_line_keys = set()
+            seen_line_indexes = set()
+            seen_strokes = set()
+            for raw_key in line_keys_raw:
+                key = str(raw_key or "").strip()
+                if not key or key in seen_line_keys:
+                    continue
+                seen_line_keys.add(key)
+                line_keys.append(key)
+                line_row = line_keyed.get(key) if isinstance(line_keyed, dict) else None
+                if not isinstance(line_row, dict):
+                    continue
+                try:
+                    line_idx = int(line_row.get("line_index"))
+                except Exception:
+                    line_idx = None
+                if line_idx is not None and line_idx not in seen_line_indexes:
+                    seen_line_indexes.add(line_idx)
+                    line_indexes.append(line_idx)
+                try:
+                    stroke_idx = int(line_row.get("source_stroke_index", line_idx if line_idx is not None else -1))
+                except Exception:
+                    stroke_idx = None
+                if stroke_idx is not None and stroke_idx >= 0 and stroke_idx not in seen_strokes:
+                    seen_strokes.add(stroke_idx)
+                    stroke_indexes.append(stroke_idx)
 
-        # stable order: by bbox position
-        matched = [v[1] for v in best_by_mask.values()]
-        matched.sort(key=lambda c: (int(c.get("bbox_xyxy", [0, 0, 0, 0])[0]), int(c.get("bbox_xyxy", [0, 0, 0, 0])[1])))
+            if stroke_indexes:
+                matched_count += 1
 
-        return matched, debug_rows
+            refined_label_to_strokes[label] = {
+                "stroke_indexes": stroke_indexes,
+                "line_indexes": line_indexes,
+                "line_keys": line_keys,
+                "target_type": rec.get("target_type"),
+                "target_key": rec.get("target_key"),
+                "confidence": rec.get("confidence", 0.0),
+                "reason": str(rec.get("reason", "") or ""),
+            }
+
+        return {
+            "status": "skipped" if isinstance(summary_row, dict) and bool(summary_row.get("skipped", False)) else "ok",
+            "reason": (summary_row or {}).get("reason") if isinstance(summary_row, dict) else None,
+            "labels_path": str(labels_path) if labels_path else None,
+            "matched_labels": int(matched_count),
+            "refined_label_to_strokes": refined_label_to_strokes,
+        }
+
+    def _write_diagram_label_stroke_maps(
+        self,
+        *,
+        assets_by_name: Dict[str, ImageAsset],
+        diagram_modes_by_name: Optional[Dict[str, List[int]]],
+        cluster_labeling: Any,
+        schematic_labeling: Any,
+        diagram_matching: Any = None,
+        out_dir: Optional[str],
+    ) -> Dict[str, Any]:
+        output_dir = self._diagram_label_stroke_maps_dir(out_dir)
+        output_dir.mkdir(parents=True, exist_ok=True)
+        compact_output_dir = self._diagram_part_stroke_maps_dir(out_dir)
+        compact_output_dir.mkdir(parents=True, exist_ok=True)
+
+        if isinstance(diagram_matching, dict) and isinstance(diagram_matching.get("by_processed_id"), dict):
+            files: List[Dict[str, Any]] = []
+            compact_files: List[Dict[str, Any]] = []
+            by_pid = diagram_matching.get("by_processed_id") or {}
+            for pid in sorted(str(k) for k in by_pid.keys() if str(k).strip()):
+                payload = by_pid.get(pid)
+                if not isinstance(payload, dict):
+                    continue
+                out_path = output_dir / f"{pid}.json"
+                self._write_json_file(out_path, payload)
+                compact_path = compact_output_dir / f"{pid}.json"
+                compact_payload = {
+                    "schema": "diagram_part_stroke_map_v1",
+                    "processed_id": pid,
+                    "diagram_type": payload.get("diagram_type"),
+                    "matched_labels": payload.get("matched_labels"),
+                    "refined_labels": payload.get("refined_labels"),
+                    "refined_label_to_strokes": payload.get("refined_label_to_strokes") if isinstance(payload.get("refined_label_to_strokes"), dict) else {},
+                }
+                self._write_json_file(compact_path, compact_payload)
+                files.append(
+                    {
+                        "processed_id": pid,
+                        "diagram_type": payload.get("diagram_type"),
+                        "parser_kind": "diagram_unified_match_v2",
+                        "status": payload.get("status"),
+                        "matched_labels": payload.get("matched_labels"),
+                        "path": str(out_path),
+                    }
+                )
+                compact_files.append(
+                    {
+                        "processed_id": pid,
+                        "matched_labels": payload.get("matched_labels"),
+                        "path": str(compact_path),
+                    }
+                )
+            return {
+                "ok": True,
+                "dir": str(output_dir),
+                "compact_dir": str(compact_output_dir),
+                "count": len(files),
+                "files": files,
+                "compact_files": compact_files,
+            }
+
+        cluster_rows_by_pid: Dict[str, Dict[str, Any]] = {}
+        cluster_images = cluster_labeling.get("images") if isinstance(cluster_labeling, dict) else []
+        for row in cluster_images if isinstance(cluster_images, list) else []:
+            if not isinstance(row, dict):
+                continue
+            pid = str(row.get("processed_id", "") or "").strip()
+            if pid:
+                cluster_rows_by_pid[pid] = row
+
+        schematic_rows_by_pid: Dict[str, Dict[str, Any]] = {}
+        schematic_images = schematic_labeling.get("images") if isinstance(schematic_labeling, dict) else []
+        for row in schematic_images if isinstance(schematic_images, list) else []:
+            if not isinstance(row, dict):
+                continue
+            pid = str(row.get("processed_id", "") or "").strip()
+            if pid:
+                schematic_rows_by_pid[pid] = row
+
+        by_pid: Dict[str, Dict[str, Any]] = {}
+        for image_name, asset in (assets_by_name or {}).items():
+            if not isinstance(asset, ImageAsset):
+                continue
+            modes_raw = (diagram_modes_by_name or {}).get(str(image_name or "").strip(), [])
+            modes = {int(x) for x in modes_raw if int(x) in (1, 2)} if isinstance(modes_raw, list) else set()
+            if not modes:
+                d = _normalize_diagram_mode(asset.diagram)
+                if d in (1, 2):
+                    modes.add(d)
+            if not modes or not asset.processed_ids:
+                continue
+            pid = str(asset.processed_ids[0] or "").strip()
+            if not pid:
+                continue
+            entry = by_pid.setdefault(
+                pid,
+                {
+                    "processed_id": pid,
+                    "image_names": set(),
+                    "diagram_modes": set(),
+                    "refined_labels_file": None,
+                },
+            )
+            entry["image_names"].add(str(image_name))
+            entry["diagram_modes"].update(int(x) for x in modes if int(x) in (1, 2))
+            if not entry.get("refined_labels_file") and asset.refined_labels_file:
+                entry["refined_labels_file"] = asset.refined_labels_file
+
+        files: List[Dict[str, Any]] = []
+        for pid in sorted(by_pid.keys()):
+            meta = by_pid[pid]
+            refined_file = meta.get("refined_labels_file")
+            refined_labels = self._load_refined_label_strings(refined_file)
+            cluster_row = cluster_rows_by_pid.get(pid)
+            schematic_row = schematic_rows_by_pid.get(pid)
+            cluster_labels_path = self._resolve_cluster_labels_path(pid)
+            line_labels_path = self._resolve_line_labels_path(pid)
+
+            cluster_row_usable = bool(cluster_labels_path) or (
+                isinstance(cluster_row, dict)
+                and not bool(cluster_row.get("skipped"))
+                and (
+                    isinstance(cluster_row.get("label_cluster_map"), dict)
+                    or isinstance(cluster_row.get("cluster_label_rows"), list)
+                )
+            )
+            schematic_row_usable = bool(line_labels_path) or (
+                isinstance(schematic_row, dict)
+                and not bool(schematic_row.get("skipped"))
+                and (
+                    isinstance(schematic_row.get("label_line_map"), dict)
+                    or isinstance(schematic_row.get("line_label_rows"), list)
+                )
+            )
+            prefer_visual = 1 in diagram_modes and 2 not in diagram_modes
+            prefer_schematic = 2 in diagram_modes and 1 not in diagram_modes
+
+            parser_kind = None
+            parser_payload: Dict[str, Any]
+            if prefer_visual and cluster_row_usable:
+                parser_kind = "diagram_1_cluster_match"
+                parser_payload = self._build_visual_refined_label_stroke_map(
+                    processed_id=pid,
+                    refined_labels=list(refined_labels),
+                    summary_row=cluster_row,
+                )
+            elif prefer_schematic and schematic_row_usable:
+                parser_kind = "diagram_2_line_match"
+                parser_payload = self._build_schematic_refined_label_stroke_map(
+                    processed_id=pid,
+                    refined_labels=list(refined_labels),
+                    summary_row=schematic_row,
+                )
+            elif cluster_row_usable and not schematic_row_usable:
+                parser_kind = "diagram_1_cluster_match"
+                parser_payload = self._build_visual_refined_label_stroke_map(
+                    processed_id=pid,
+                    refined_labels=list(refined_labels),
+                    summary_row=cluster_row,
+                )
+            elif schematic_row_usable:
+                parser_kind = "diagram_2_line_match"
+                parser_payload = self._build_schematic_refined_label_stroke_map(
+                    processed_id=pid,
+                    refined_labels=list(refined_labels),
+                    summary_row=schematic_row,
+                )
+            else:
+                parser_kind = "unknown"
+                parser_payload = {
+                    "status": "skipped",
+                    "reason": "no_labeling_artifact_found",
+                    "labels_path": None,
+                    "matched_labels": 0,
+                    "refined_label_to_strokes": {
+                        label: {"stroke_indexes": []}
+                        for label in refined_labels
+                    },
+                }
+
+            diagram_modes = sorted(int(x) for x in meta.get("diagram_modes", set()) if int(x) in (1, 2))
+            payload = {
+                "schema": "diagram_refined_label_stroke_map_v1",
+                "processed_id": pid,
+                "image_names": sorted(str(x) for x in meta.get("image_names", set()) if str(x).strip()),
+                "diagram_modes": diagram_modes,
+                "diagram_type": (
+                    int(diagram_modes[0])
+                    if len(diagram_modes) == 1
+                    else (1 if parser_kind == "diagram_1_cluster_match" else (2 if parser_kind == "diagram_2_line_match" else 0))
+                ),
+                "parser_kind": parser_kind,
+                "refined_labels_file": refined_file,
+                "refined_labels": list(refined_labels),
+                "status": parser_payload.get("status"),
+                "reason": parser_payload.get("reason"),
+                "matched_labels": int(parser_payload.get("matched_labels", 0) or 0),
+                "source_artifacts": {
+                    "labels_path": parser_payload.get("labels_path"),
+                    "cluster_map_path": parser_payload.get("cluster_map_path"),
+                    "cluster_map_exists": parser_payload.get("cluster_map_exists"),
+                },
+                "refined_label_to_strokes": parser_payload.get("refined_label_to_strokes", {}),
+            }
+
+            out_path = output_dir / f"{pid}.json"
+            self._write_json_file(out_path, payload)
+            files.append(
+                {
+                    "processed_id": pid,
+                    "diagram_type": payload.get("diagram_type"),
+                    "parser_kind": parser_kind,
+                    "status": payload.get("status"),
+                    "matched_labels": payload.get("matched_labels"),
+                    "path": str(out_path),
+                }
+            )
+
+        return {
+            "ok": True,
+            "dir": str(output_dir),
+            "count": len(files),
+            "files": files,
+        }
 
 
 # ----------------------------
@@ -6788,10 +9452,15 @@ if __name__ == "__main__":
         gpt_cache_file=(str(args.gpt_cache_file).strip() or None),
     )
     result = pipe.run_full(args.topic, integrate_image_pipeline=(not args.no_images))
+    lesson_output = pipe._build_lesson_ready_output(result)
 
     with open(args.out, "w", encoding="utf-8") as f:
-        json.dump(result, f, ensure_ascii=False, indent=2)
+        json.dump(lesson_output, f, ensure_ascii=False, indent=2)
 
     print(f"Wrote: {args.out}")
+    if isinstance(result, dict):
+        whiteboard_actions = result.get("whiteboard_actions") if isinstance(result.get("whiteboard_actions"), dict) else {}
+        if whiteboard_actions.get("saved_action_timeline_json"):
+            print(f"Action timeline: {whiteboard_actions['saved_action_timeline_json']}")
     if isinstance(result, dict) and result.get("full_image_flow_debug_json"):
         print(f"Full image flow debug: {result['full_image_flow_debug_json']}")

@@ -1,0 +1,8 @@
+Comfy
+python main.py --listen 0.0.0.0 --port 8188 --disable-auto-launch --verbose INFO --use-quad-cross-attention --fast --disable-metadata --dont-upcast-attention --force-channels-last --preview-method none
+
+Timeline Generator
+python timeline.py --topic "Eukaryotic cell structure and organells explained" --gpt-cache
+
+Lesson stream (launch first then frontend)
+python lesson_tts_ws_streamer.py --lesson-json lesson_output.json --host 0.0.0.0 --port 8765 --wait-for-client
