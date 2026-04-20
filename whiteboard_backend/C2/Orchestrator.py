@@ -14,6 +14,7 @@ import json
 import logging
 import os
 import re
+import threading
 import time
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from dataclasses import dataclass, field
@@ -24,13 +25,18 @@ from requests.adapters import HTTPAdapter
 
 try:
     from .VisualDescriptionStage import run_visual_description_stage
+    from .QwenWorker import ServerQwenWorker
 except Exception:
     from VisualDescriptionStage import run_visual_description_stage
+    from QwenWorker import ServerQwenWorker
 
 
 WIKIDATA_API = "https://www.wikidata.org/w/api.php"
 WDQS_ENDPOINT = "https://query.wikidata.org/sparql"
-DEFAULT_WORKER = os.environ.get("QWEN_WORKER_URL", "http://127.0.0.1:8090/infer")
+DEFAULT_WORKER = str(
+    os.environ.get("QWEN_VLLM_SERVER_URL", os.environ.get("QWEN_WORKER_URL", "http://127.0.0.1:8009"))
+    or "http://127.0.0.1:8009"
+).strip().rstrip("/")
 USER_AGENT = os.environ.get(
     "WIKIDATA_COMPONENT_AGENT_UA",
     "WikidataComponentAgent/1.2 (graph-part-orchestrator; contact: local-script)",
@@ -53,6 +59,11 @@ Rules:
 - you may drop modifiers, remove trailing qualifiers, replace hyphens, or use a simpler wording
 - do not add facts that are not already implied by the input
 """.strip()
+
+_WIKIDATA_REQUEST_LIMIT = max(1, int(os.environ.get("WIKIDATA_HTTP_MAX_CONCURRENCY", "4") or 4))
+_WIKIDATA_REQUEST_SEMAPHORE = threading.BoundedSemaphore(_WIKIDATA_REQUEST_LIMIT)
+_WIKIDATA_RATE_LOCK = threading.Lock()
+_WIKIDATA_COOLDOWN_UNTIL = 0.0
 
 
 @dataclass
@@ -83,51 +94,25 @@ class CandidateRecord:
 
 class WorkerClient:
     def __init__(self, url: str, timeout: int = 180):
-        self.url = url
-        self.timeout = timeout
-        self.session = requests.Session()
-        adapter = HTTPAdapter(pool_connections=16, pool_maxsize=16)
-        self.session.mount("http://", adapter)
-        self.session.mount("https://", adapter)
+        self.url = str(url or DEFAULT_WORKER).rstrip("/")
+        self.timeout = int(timeout)
+        self.worker = ServerQwenWorker(
+            model_name=str(os.environ.get("QWEN_TEXT_MODEL_ID", os.environ.get("QWEN_MODEL", "cyankiwi/Qwen3.5-4B-AWQ-4bit")) or "cyankiwi/Qwen3.5-4B-AWQ-4bit"),
+            max_new_tokens=max(96, int(os.environ.get("C2_QWEN_MAX_NEW_TOKENS", "256") or 256)),
+            server_base_url=self.url,
+            stage_io_dir=str(os.environ.get("QWEN_STAGE_IO_DIR", "") or ""),
+        )
 
     def infer(self, task: str, mode: str, payload: Dict[str, Any]) -> Dict[str, Any]:
-        body = {"task": task, "mode": mode, "payload": payload}
-        response = self.session.post(self.url, json=body, timeout=self.timeout)
-        response.raise_for_status()
-        data = response.json()
-        if not data.get("ok"):
-            raise RuntimeError(data.get("error", "worker error"))
-        return data["result"]
+        return self.worker.infer({"task": task, "mode": mode, "payload": payload})
 
     def infer_many(self, task: str, mode: str, payloads: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
-        if not payloads:
-            return []
-        batch_url = self.url[:-6] + "/infer_batch" if self.url.endswith("/infer") else self.url.rstrip("/") + "/infer_batch"
-        if len(payloads) == 1:
-            return [self.infer(task=task, mode=mode, payload=payloads[0])]
-        body = {
-            "items": [
+        return self.worker.infer_many(
+            [
                 {"task": task, "mode": mode, "payload": payload}
-                for payload in payloads
+                for payload in (payloads or [])
             ]
-        }
-        try:
-            response = self.session.post(batch_url, json=body, timeout=self.timeout)
-            response.raise_for_status()
-            data = response.json()
-            if not data.get("ok"):
-                raise RuntimeError(data.get("error", "worker batch error"))
-            results = data.get("results", [])
-            if not isinstance(results, list) or len(results) != len(payloads):
-                raise RuntimeError("worker batch returned invalid results")
-            return results
-        except Exception:
-            if len(payloads) <= 2:
-                return [self.infer(task=task, mode=mode, payload=payload) for payload in payloads]
-            mid = max(1, len(payloads) // 2)
-            left = self.infer_many(task=task, mode=mode, payloads=payloads[:mid])
-            right = self.infer_many(task=task, mode=mode, payloads=payloads[mid:])
-            return left + right
+        )
 
 
 class LocalWorkerClient:
@@ -167,6 +152,36 @@ class WikidataClient:
         self.check_cache: Dict[Tuple[str, str], Dict[str, Any]] = {}
         self.survey_cache: Dict[Tuple[str, int], List[Dict[str, Any]]] = {}
         self.expand_cache: Dict[Tuple[str, int], List[Dict[str, Any]]] = {}
+
+    def _acquire_request_slot(self) -> None:
+        global _WIKIDATA_COOLDOWN_UNTIL
+        while True:
+            with _WIKIDATA_RATE_LOCK:
+                wait_for = max(0.0, float(_WIKIDATA_COOLDOWN_UNTIL) - time.monotonic())
+            if wait_for <= 0.0:
+                break
+            time.sleep(min(wait_for, 0.5))
+        _WIKIDATA_REQUEST_SEMAPHORE.acquire()
+
+    def _release_request_slot(self) -> None:
+        try:
+            _WIKIDATA_REQUEST_SEMAPHORE.release()
+        except Exception:
+            pass
+
+    def _note_rate_limit(self, response: Optional[requests.Response], *, attempt: int) -> None:
+        global _WIKIDATA_COOLDOWN_UNTIL
+        retry_after = 0.0
+        if response is not None:
+            raw = str(response.headers.get("Retry-After", "") or "").strip()
+            if raw:
+                try:
+                    retry_after = max(retry_after, float(raw))
+                except Exception:
+                    retry_after = retry_after
+        retry_after = max(retry_after, self.sparql_retry_backoff * (attempt + 1), 1.0)
+        with _WIKIDATA_RATE_LOCK:
+            _WIKIDATA_COOLDOWN_UNTIL = max(float(_WIKIDATA_COOLDOWN_UNTIL), time.monotonic() + retry_after)
 
     def resolve_entity(self, text: str, limit: int = 10) -> List[Dict[str, Any]]:
         params = {
@@ -689,9 +704,18 @@ LIMIT {int(limit)}
         return f"https://www.wikidata.org/wiki/{qid}"
 
     def _api_get(self, params: Dict[str, Any]) -> Dict[str, Any]:
-        response = self.session.get(WIKIDATA_API, params=params, timeout=self.timeout)
-        response.raise_for_status()
-        return response.json()
+        self._acquire_request_slot()
+        try:
+            response = self.session.get(WIKIDATA_API, params=params, timeout=self.timeout)
+            response.raise_for_status()
+            return response.json()
+        except requests.exceptions.RequestException as exc:
+            status = getattr(getattr(exc, "response", None), "status_code", None)
+            if status in {429, 500, 502, 503, 504}:
+                self._note_rate_limit(getattr(exc, "response", None), attempt=0)
+            raise
+        finally:
+            self._release_request_slot()
 
     def _run_sparql(self, query: str) -> List[Dict[str, Any]]:
         headers = {
@@ -703,24 +727,31 @@ LIMIT {int(limit)}
         for attempt in range(self.sparql_retry_count + 1):
             request_timeout = min(self.sparql_timeout_cap, self.timeout + attempt * 20)
             try:
-                response = self.session.get(
-                    WDQS_ENDPOINT,
-                    params={"query": query, "format": "json"},
-                    headers=headers,
-                    timeout=request_timeout,
-                )
+                self._acquire_request_slot()
+                try:
+                    response = self.session.get(
+                        WDQS_ENDPOINT,
+                        params={"query": query, "format": "json"},
+                        headers=headers,
+                        timeout=request_timeout,
+                    )
+                finally:
+                    self._release_request_slot()
                 response.raise_for_status()
                 payload = response.json()
                 last_exc = None
                 break
             except (requests.exceptions.ReadTimeout, requests.exceptions.ConnectTimeout) as exc:
                 last_exc = exc
+                self._note_rate_limit(None, attempt=attempt)
                 if attempt >= self.sparql_retry_count:
                     raise
                 time.sleep(self.sparql_retry_backoff * (attempt + 1))
             except requests.exceptions.RequestException as exc:
                 last_exc = exc
                 status = getattr(getattr(exc, "response", None), "status_code", None)
+                if status in {429, 500, 502, 503, 504}:
+                    self._note_rate_limit(getattr(exc, "response", None), attempt=attempt)
                 if status not in {429, 500, 502, 503, 504} or attempt >= self.sparql_retry_count:
                     raise
                 time.sleep(self.sparql_retry_backoff * (attempt + 1))
@@ -2941,7 +2972,8 @@ def run_orchestrator_bundle(
         return {"ok": True, "prompts": {}, "errors": {}, "count": 0}
 
     shared_worker = worker_client or WorkerClient(worker_url, timeout=max(60, int(timeout) * 4))
-    worker_count = max_workers if max_workers is not None else max(1, min(len(prompt_rows), 8))
+    default_bundle_workers = max(1, int(os.environ.get("C2_DIAGRAM_BUNDLE_WORKERS", "6") or 6))
+    worker_count = max_workers if max_workers is not None else max(1, min(len(prompt_rows), default_bundle_workers))
     reports_by_prompt: Dict[str, Dict[str, Any]] = {}
     errors_by_prompt: Dict[str, str] = {}
 
