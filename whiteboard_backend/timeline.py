@@ -2414,6 +2414,7 @@ class LessonTimeline:
         self.debug_action_planner_json = bool(debug_action_planner_json)
         self.debug_print = bool(debug_print)
         self.debug_out_dir = str(debug_out_dir or "PipelineOutputs")
+        os.environ["QWEN_STAGE_IO_DIR"] = str(Path(self.debug_out_dir) / "qwen_stage_io")
         self._timings_ms: List[Dict[str, Any]] = []
         self._vram_events: List[Dict[str, Any]] = []
         self.gpt_cache_enabled = bool(gpt_cache)
@@ -2439,16 +2440,19 @@ class LessonTimeline:
     def _dbg(self, msg: str, *, data: Any = None) -> None:
         if not self.debug_print:
             return
+        msg_text = str(msg or "")
+        if msg_text.startswith("CUDA owner snapshot") or msg_text.startswith("CUDA trim"):
+            return
         if data is None:
-            print(f"[timeline][DBG] {msg}")
+            print(f"[timeline][DBG] {msg_text}")
             return
         try:
             s = json.dumps(data, ensure_ascii=False)
             if len(s) > 1500:
                 s = s[:1500] + " ...<truncated>"
-            print(f"[timeline][DBG] {msg} | {s}")
+            print(f"[timeline][DBG] {msg_text} | {s}")
         except Exception:
-            print(f"[timeline][DBG] {msg} | <unserializable>")
+            print(f"[timeline][DBG] {msg_text} | <unserializable>")
 
     def _write_json_file(self, path: Path, payload: Any) -> str:
         path.parent.mkdir(parents=True, exist_ok=True)
@@ -4812,7 +4816,9 @@ class LessonTimeline:
         self._dbg("CUDA owner snapshot before action-planner text-qwen-load", data=self._cuda_owner_snapshot())
         try:
             with self._timed("models.load_qwen_text_for_action_planning", gpu_index=self.gpu_index, cpu_threads=self.cpu_threads):
-                planner_bundle = qwentest.create_action_planner_text_bundle()
+                planner_bundle = qwentest.create_action_planner_text_bundle(
+                    stage_io_dir=str(Path(self.debug_out_dir) / "qwen_stage_io")
+                )
         except Exception as e:
             return {"enabled": False, "error": f"qwen_text_action_planner_load_failed: {type(e).__name__}: {e}"}
         if not isinstance(planner_bundle, dict):
@@ -4962,7 +4968,7 @@ class LessonTimeline:
                     board_height=self.whiteboard_height,
                     temperature=0.15,
                     max_new_tokens=SPACE_PLANNER_MAX_NEW_TOKENS,
-                    thinking_enabled=True,
+                    thinking_enabled=False,
                 )
             vram_after = self._cuda_mem_snapshot()
             elapsed_ms = round((time.perf_counter() - qwen_t0) * 1000.0, 2)
@@ -6438,14 +6444,16 @@ class LessonTimeline:
             self._dbg("CUDA owner snapshot after diagram multimodal->text handoff", data=self._cuda_owner_snapshot())
 
             with self._timed("models.load_qwen_text_for_diagram_matching", gpu_index=self.gpu_index, cpu_threads=self.cpu_threads):
-                final_match_bundle = qwentest.create_action_planner_text_bundle()
+                final_match_bundle = qwentest.create_action_planner_text_bundle(
+                    stage_io_dir=str(Path(self.debug_out_dir) / "qwen_stage_io")
+                )
 
             final_results = qwentest.match_diagram_parts_text_model(
                 bundle=final_match_bundle,
                 jobs=final_jobs,
                 temperature=0.2,
                 max_new_tokens=1200,
-                thinking_enabled=True,
+                thinking_enabled=False,
             )
         finally:
             try:
@@ -8603,7 +8611,9 @@ class LessonTimeline:
                 import qwentest
                 self._dbg("CUDA owner snapshot before unified diagram multimodal-qwen-load", data=self._cuda_owner_snapshot())
                 with self._timed("models.load_qwen_multimodal_for_diagram_matching", gpu_index=self.gpu_index, cpu_threads=self.cpu_threads):
-                    diagram_text_bundle = qwentest.create_diagram_multimodal_bundle()
+                    diagram_text_bundle = qwentest.create_diagram_multimodal_bundle(
+                        stage_io_dir=str(Path(self.debug_out_dir) / "qwen_stage_io")
+                    )
                 self._dbg("CUDA owner snapshot after unified diagram multimodal-qwen-load", data=self._cuda_owner_snapshot())
             except Exception as e:
                 qwen_ready_err = repr(e)

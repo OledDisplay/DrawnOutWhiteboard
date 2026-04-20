@@ -6,6 +6,7 @@ import os
 import re
 import time
 import gc
+import itertools
 import logging
 import threading
 from difflib import SequenceMatcher
@@ -22,9 +23,17 @@ from transformers import (
     AutoModelForImageTextToText,
     AutoProcessor,
     AutoTokenizer,
-    Qwen3VLForConditionalGeneration,
-    Qwen3_5ForConditionalGeneration,
 )
+
+try:
+    from transformers import Qwen3VLForConditionalGeneration  # type: ignore
+except Exception:
+    Qwen3VLForConditionalGeneration = None
+
+try:
+    from transformers import Qwen3_5ForConditionalGeneration  # type: ignore
+except Exception:
+    Qwen3_5ForConditionalGeneration = None
 
 try:
     from vllm import LLM as VllmLLM, SamplingParams as VllmSamplingParams
@@ -61,6 +70,7 @@ CACHE_DIR = BASE_DIR / "_path_cache"
 CACHE_DIR.mkdir(parents=True, exist_ok=True)
 IMG_CACHE_PATH = CACHE_DIR / "processed_png_index.json"
 JSON_CACHE_PATH = CACHE_DIR / "processed_json_index.json"
+_QWEN_STAGE_IO_GLOBAL_COUNTER = itertools.count(1)
 
 SKIP_EXISTING_LABELS = True
 
@@ -70,11 +80,12 @@ SKIP_EXISTING_LABELS = True
 # MODEL CONFIG 
 # ============================
 MODEL_ID = "Qwen/Qwen3-VL-2B-Instruct"
+FALLBACK_TEXT_MODEL_ID = os.environ.get("QWEN_TEXT_MODEL_FALLBACK", "Qwen/Qwen2.5-0.5B-Instruct")
 C2_TEXT_MODEL_ID = os.environ.get("QWEN_TEXT_MODEL_ID", "Qwen/Qwen3.5-0.8B")
 ACTION_PLANNER_TEXT_MODEL_ID = os.environ.get("QWEN_ACTION_MODEL_ID", C2_TEXT_MODEL_ID)
 DIAGRAM_MULTIMODAL_MODEL_ID = os.environ.get(
     "QWEN_DIAGRAM_MULTIMODAL_MODEL_ID",
-    os.environ.get("QWEN_MULTIMODAL_MODEL_ID", "Qwen/Qwen3.5-0.8B"),
+    os.environ.get("QWEN_MULTIMODAL_MODEL_ID", MODEL_ID),
 )
 
 QWEN_MIN_PIXELS = 256 * 28 * 28
@@ -135,6 +146,28 @@ def _should_use_vllm_for_text_model(model_id: Any) -> bool:
     if QWEN_TEXT_BACKEND == "vllm":
         return _is_qwen_35_08b_model(model_id)
     return False
+
+
+def _resolved_text_model_id(model_id: Any) -> str:
+    requested = str(model_id or "").strip() or str(FALLBACK_TEXT_MODEL_ID)
+    if _is_qwen_35_08b_model(requested) and Qwen3_5ForConditionalGeneration is None:
+        print(
+            f"[qwen][DBG] text_model_fallback requested={requested} "
+            f"fallback={FALLBACK_TEXT_MODEL_ID} reason=transformers_missing_qwen3_5"
+        )
+        return str(FALLBACK_TEXT_MODEL_ID)
+    return requested
+
+
+def _resolved_multimodal_model_id(model_id: Any) -> str:
+    requested = str(model_id or "").strip() or str(MODEL_ID)
+    if _is_qwen_35_08b_model(requested):
+        print(
+            f"[qwen][DBG] multimodal_model_fallback requested={requested} "
+            f"fallback={MODEL_ID} reason=text_model_not_multimodal"
+        )
+        return str(MODEL_ID)
+    return requested
 
 
 def _ensure_vllm_text_backend(model_id: Any) -> None:
@@ -2090,6 +2123,22 @@ def postfacto_match_labels_with_qwen(
                 max_new_tokens=min(220, int(POSTFACTO_MATCH_MAX_NEW_TOKENS)),
                 batch_size=max(1, min(6, len(prompts))),
                 debug_label=f"postfacto_match_round_{round_i+1}",
+                stage_io_contexts=[
+                    _build_qwen_stage_io_context(
+                        bundle=None,
+                        debug_label=f"postfacto_match_round_{round_i+1}",
+                        job_key=str(ck),
+                        stage_kind="multimodal",
+                        rendered_input_text=str(prompts[idx] if idx < len(prompts) else ""),
+                        input_prompt_text=str(prompts[idx] if idx < len(prompts) else ""),
+                        extra={
+                            "round_index": int(round_i + 1),
+                            "object_key": str(ck),
+                            "force_assignment": bool(force_assignment),
+                        },
+                    )
+                    for idx, ck in enumerate(pending_keys)
+                ],
             )
 
             round_matches: Dict[str, Dict[str, Any]] = {}
@@ -2265,23 +2314,25 @@ def load_model_and_processor():
             if used_quant:
                 load_kwargs["quantization_config"] = quant_config
                 load_kwargs["device_map"] = "auto" if INT8_CPU_OFFLOAD else {"": GPU_INDEX}
-                model = Qwen3VLForConditionalGeneration.from_pretrained(
+                model = _load_qwen_vl_direct(
                     MODEL_ID,
-                    **load_kwargs,
-                ).eval()
+                    load_kwargs=load_kwargs,
+                )
             else:
                 load_kwargs["torch_dtype"] = DTYPE
                 load_kwargs["device_map"] = {"": GPU_INDEX}
-                model = Qwen3VLForConditionalGeneration.from_pretrained(
+                model = _load_qwen_vl_direct(
                     MODEL_ID,
-                    **load_kwargs,
-                ).eval()
+                    load_kwargs=load_kwargs,
+                )
     else:
-        model = Qwen3VLForConditionalGeneration.from_pretrained(
+        model = _load_qwen_vl_direct(
             MODEL_ID,
-            torch_dtype=torch.float32,
-            **load_kwargs,
-        ).eval().to(device)
+            load_kwargs={
+                **load_kwargs,
+                "torch_dtype": torch.float32,
+            },
+        ).to(device)
 
     if tok is not None and hasattr(model, "generation_config"):
         model.generation_config.pad_token_id = tok.pad_token_id
@@ -2516,12 +2567,14 @@ def preload_qwen_cpu_only(
         if tok.pad_token_id is None:
             tok.pad_token = tok.eos_token
 
-    model = Qwen3VLForConditionalGeneration.from_pretrained(
+    model = _load_qwen_vl_direct(
         model_id,
-        torch_dtype=torch.float32,
-        low_cpu_mem_usage=True,
-        trust_remote_code=True,
-    ).eval().to(device)
+        load_kwargs={
+            "torch_dtype": torch.float32,
+            "low_cpu_mem_usage": True,
+            "trust_remote_code": True,
+        },
+    ).to(device)
 
     if tok is not None and hasattr(model, "generation_config"):
         model.generation_config.pad_token_id = tok.pad_token_id
@@ -2572,6 +2625,22 @@ def create_c2_local_worker(
     max_new_tokens: int = 256,
 ):
     from C2.QwenWorker import QwenWorker
+    model_id = _resolved_text_model_id(model_id)
+
+    if _should_use_vllm_for_text_model(model_id):
+        try:
+            llm = _build_vllm_text_engine(model_id)
+            tokenizer = _get_vllm_tokenizer(llm)
+            return QwenWorker(
+                model_name=model_id,
+                max_new_tokens=max_new_tokens,
+                llm=llm,
+                tokenizer=tokenizer,
+                backend="vllm",
+                stage_io_dir=str(os.getenv("QWEN_STAGE_IO_DIR", "") or ""),
+            )
+        except Exception as e:
+            print(f"[qwen][DBG] c2_local_worker vllm_unavailable fallback err={type(e).__name__}: {e}")
 
     tokenizer = AutoTokenizer.from_pretrained(model_id, trust_remote_code=True)
     model = AutoModelForCausalLM.from_pretrained(
@@ -2588,6 +2657,7 @@ def create_c2_local_worker(
         max_new_tokens=max_new_tokens,
         model=model,
         tokenizer=tokenizer,
+        stage_io_dir=str(os.getenv("QWEN_STAGE_IO_DIR", "") or ""),
     )
 
 
@@ -3370,6 +3440,21 @@ def label_schematic_lines_transformers(
             max_new_tokens=420,
             batch_size=max(1, int(batch_size)),
             debug_label="schematic_line_match",
+            stage_io_contexts=[
+                _build_qwen_stage_io_context(
+                    bundle=None,
+                    debug_label="schematic_line_match",
+                    job_key=f"processed_{int(job.get('idx', 0))}",
+                    stage_kind="multimodal",
+                    rendered_input_text=str(prompts[idx] if idx < len(prompts) else ""),
+                    input_prompt_text=str(prompts[idx] if idx < len(prompts) else ""),
+                    extra={
+                        "processed_index": int(job.get("idx", 0) or 0),
+                        "base_context": str(job.get("base_context", "") or ""),
+                    },
+                )
+                for idx, job in enumerate(jobs)
+            ],
         )
 
         for i, job in enumerate(jobs):
@@ -4273,7 +4358,24 @@ def _infer_text_model_device(model: Any, fallback: Any = None) -> torch.device:
 
 def create_action_planner_text_bundle(
     model_id: str = ACTION_PLANNER_TEXT_MODEL_ID,
+    stage_io_dir: Optional[str] = None,
 ) -> Dict[str, Any]:
+    model_id = _resolved_text_model_id(model_id)
+    if _should_use_vllm_for_text_model(model_id):
+        try:
+            llm = _build_vllm_text_engine(model_id)
+            tokenizer = _get_vllm_tokenizer(llm)
+            return {
+                "model_id": model_id,
+                "backend": "vllm",
+                "llm": llm,
+                "tokenizer": tokenizer,
+                "device": torch.device(f"cuda:{GPU_INDEX}" if torch.cuda.is_available() and not FORCE_CPU else "cpu"),
+                "stage_io_dir": str(stage_io_dir or "").strip(),
+            }
+        except Exception as e:
+            print(f"[qwen][DBG] action_planner_text_bundle vllm_unavailable fallback err={type(e).__name__}: {e}")
+
     tokenizer = AutoTokenizer.from_pretrained(model_id, trust_remote_code=True)
     model = AutoModelForCausalLM.from_pretrained(
         model_id,
@@ -4286,15 +4388,21 @@ def create_action_planner_text_bundle(
         tokenizer.pad_token_id = tokenizer.eos_token_id
     return {
         "model_id": model_id,
+        "backend": "transformers",
         "model": model,
         "tokenizer": tokenizer,
         "device": _infer_text_model_device(model),
+        "stage_io_dir": str(stage_io_dir or "").strip(),
     }
 
 
 def destroy_action_planner_text_bundle(bundle: Any) -> None:
     if not isinstance(bundle, dict):
         return
+    try:
+        bundle["llm"] = None
+    except Exception:
+        pass
     try:
         bundle["model"] = None
     except Exception:
@@ -4326,17 +4434,32 @@ def _load_qwen_multimodal_model(
         ("AutoModelForImageTextToText", AutoModelForImageTextToText),
         ("Qwen3VLForConditionalGeneration", Qwen3VLForConditionalGeneration),
     ):
+        if loader is None:
+            tried.append(f"{loader_name}:missing")
+            continue
         try:
             return loader.from_pretrained(model_id, **load_kwargs).eval()
-        except Exception:
-            tried.append(loader_name)
+        except Exception as e:
+            tried.append(f"{loader_name}:{type(e).__name__}")
             continue
     raise RuntimeError(f"no_multimodal_loader_succeeded:{','.join(tried)}")
 
 
+def _load_qwen_vl_direct(
+    model_id: str,
+    *,
+    load_kwargs: Dict[str, Any],
+):
+    if Qwen3VLForConditionalGeneration is not None:
+        return Qwen3VLForConditionalGeneration.from_pretrained(model_id, **load_kwargs).eval()
+    return AutoModelForImageTextToText.from_pretrained(model_id, **load_kwargs).eval()
+
+
 def create_diagram_multimodal_bundle(
     model_id: str = DIAGRAM_MULTIMODAL_MODEL_ID,
+    stage_io_dir: Optional[str] = None,
 ) -> Dict[str, Any]:
+    model_id = _resolved_multimodal_model_id(model_id)
     have_cuda = torch.cuda.is_available() and not FORCE_CPU
     device = torch.device(f"cuda:{GPU_INDEX}" if have_cuda else "cpu")
 
@@ -4393,6 +4516,7 @@ def create_diagram_multimodal_bundle(
         "processor": processor,
         "tokenizer": tok if tok is not None else processor,
         "device": device,
+        "stage_io_dir": str(stage_io_dir or "").strip(),
     }
 
 
@@ -4504,6 +4628,7 @@ def _run_text_model_json_jobs(
         f"vram={_vram_str()}"
     )
     parsed_objs, raws = _generate_json_objects_from_prompts_text_model(
+        llm=bundle.get("llm"),
         model=bundle.get("model"),
         tokenizer=bundle.get("tokenizer"),
         device=bundle.get("device"),
@@ -4514,6 +4639,24 @@ def _run_text_model_json_jobs(
         thinking_enabled=bool(thinking_enabled),
         max_rounds=int(max_rounds),
         batch_size=max(1, int(batch_size or 1)),
+        stage_io_contexts=[
+            _build_qwen_stage_io_context(
+                bundle=bundle,
+                debug_label=str(debug_label or "diagram_text_jobs"),
+                job_key=str(job.get("job_key", "") or f"job_{idx + 1}"),
+                stage_kind="text",
+                rendered_input_text=str(prompts[idx] if idx < len(prompts) else ""),
+                input_prompt_text=str(prompts[idx] if idx < len(prompts) else ""),
+                extra={
+                    "thinking_enabled": bool(thinking_enabled),
+                    "max_rounds": int(max_rounds),
+                    "temperature": float(temperature),
+                    "max_new_tokens": int(max_new_tokens),
+                    "job_input": job,
+                },
+            )
+            for idx, job in enumerate(active_jobs)
+        ],
     )
     print(
         f"[qwen][DBG] {str(debug_label or 'diagram_text_jobs')} jobs_done "
@@ -4533,6 +4676,144 @@ def _run_text_model_json_jobs(
                 "raw_text": raw_text,
             }
     return out
+
+
+def _sanitize_qwen_stage_name(value: Any, *, fallback: str) -> str:
+    text = str(value or "").strip()
+    if not text:
+        text = fallback
+    text = re.sub(r"[^A-Za-z0-9._-]+", "_", text).strip("._-")
+    return text or fallback
+
+
+def _qwen_tokenizer_from_any(value: Any) -> Any:
+    if value is None:
+        return None
+    tok = getattr(value, "tokenizer", None)
+    if tok is not None:
+        return tok
+    return value
+
+
+def _safe_qwen_token_count(tokenizer_or_processor: Any, text: Any) -> Optional[int]:
+    tok = _qwen_tokenizer_from_any(tokenizer_or_processor)
+    if tok is None:
+        return None
+    try:
+        encoded = tok(str(text or ""), add_special_tokens=False, return_attention_mask=False)
+        input_ids = encoded.get("input_ids") if isinstance(encoded, dict) else None
+        if isinstance(input_ids, list):
+            return int(len(input_ids))
+    except Exception:
+        pass
+    try:
+        if hasattr(tok, "encode"):
+            return int(len(tok.encode(str(text or ""), add_special_tokens=False)))
+    except Exception:
+        pass
+    return None
+
+
+def _build_qwen_stage_io_context(
+    *,
+    bundle: Optional[Dict[str, Any]],
+    debug_label: str,
+    job_key: str,
+    stage_kind: str,
+    rendered_input_text: str,
+    input_prompt_text: Optional[str] = None,
+    system_prompt: Optional[str] = None,
+    user_prompt: Optional[str] = None,
+    extra: Optional[Dict[str, Any]] = None,
+) -> Dict[str, Any]:
+    ctx: Dict[str, Any] = {
+        "bundle": bundle if isinstance(bundle, dict) else None,
+        "debug_label": str(debug_label or ""),
+        "job_key": str(job_key or ""),
+        "stage_kind": str(stage_kind or ""),
+        "rendered_input_text": str(rendered_input_text or ""),
+    }
+    if input_prompt_text is not None:
+        ctx["input_prompt_text"] = str(input_prompt_text or "")
+    if system_prompt is not None:
+        ctx["system_prompt"] = str(system_prompt or "")
+    if user_prompt is not None:
+        ctx["user_prompt"] = str(user_prompt or "")
+    if isinstance(extra, dict) and extra:
+        ctx["extra"] = extra
+    return ctx
+
+
+def _write_qwen_stage_io_json(
+    bundle: Optional[Dict[str, Any]],
+    *,
+    tokenizer_or_processor: Any = None,
+    debug_label: str,
+    job_key: str,
+    prompt_text: str,
+    raw_text: str,
+    parsed_obj: Any,
+    parsed_payload: Any,
+    stage_kind: str,
+    rendered_input_text: Optional[str] = None,
+    system_prompt: Optional[str] = None,
+    user_prompt: Optional[str] = None,
+    extra: Optional[Dict[str, Any]] = None,
+) -> Optional[str]:
+    out_dir_raw = ""
+    if isinstance(bundle, dict):
+        out_dir_raw = str(bundle.get("stage_io_dir", "") or "").strip()
+    if not out_dir_raw:
+        out_dir_raw = str(os.getenv("QWEN_STAGE_IO_DIR", "") or "").strip()
+    if not out_dir_raw:
+        return None
+    try:
+        out_dir = Path(out_dir_raw)
+        out_dir.mkdir(parents=True, exist_ok=True)
+        counter = 1
+        if isinstance(bundle, dict):
+            counter = int(bundle.get("_stage_io_counter", 0) or 0) + 1
+            bundle["_stage_io_counter"] = counter
+        else:
+            counter = int(next(_QWEN_STAGE_IO_GLOBAL_COUNTER))
+        input_text = str(rendered_input_text if rendered_input_text is not None else prompt_text or "")
+        output_text = str(raw_text or "")
+        filename = (
+            f"{counter:05d}_"
+            f"{_sanitize_qwen_stage_name(debug_label, fallback='qwen_stage')}_"
+            f"{_sanitize_qwen_stage_name(job_key, fallback='job')}.json"
+        )
+        payload: Dict[str, Any] = {
+            "schema": "qwen_stage_io_v1",
+            "stage_kind": str(stage_kind or ""),
+            "stage_label": str(debug_label or ""),
+            "job_key": str(job_key or ""),
+            "created_at_epoch_ms": int(time.time() * 1000),
+            "model_id": str(bundle.get("model_id", "") or "") if isinstance(bundle, dict) else "",
+            "backend": str(bundle.get("backend", "") or "") if isinstance(bundle, dict) else "",
+            "input": {
+                "system_prompt": str(system_prompt or ""),
+                "user_prompt": str(user_prompt or ""),
+                "prompt_text": str(prompt_text or ""),
+                "rendered_model_input": input_text,
+            },
+            "output": {
+                "raw_text": output_text,
+            },
+            "token_counts": {
+                "input": _safe_qwen_token_count(tokenizer_or_processor, input_text),
+                "output": _safe_qwen_token_count(tokenizer_or_processor, output_text),
+            },
+            "parsed_output": parsed_payload,
+            "parsed_model_object": parsed_obj,
+        }
+        if isinstance(extra, dict) and extra:
+            payload["extra"] = extra
+        path = out_dir / filename
+        path.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
+        return str(path)
+    except Exception:
+        return None
 
 
 def _open_rgb_image_for_qwen(path: Any) -> Optional[Image.Image]:
@@ -4566,6 +4847,7 @@ def _run_multimodal_json_jobs(
         return {}
 
     active_jobs: List[Dict[str, Any]] = []
+    user_prompts: List[str] = []
     chat_texts: List[str] = []
     images: List[Image.Image] = []
     for job in jobs or []:
@@ -4586,6 +4868,7 @@ def _run_multimodal_json_jobs(
         ]
         chat_text = processor.apply_chat_template(conv, tokenize=False, add_generation_prompt=True)
         active_jobs.append(job)
+        user_prompts.append(prompt_text)
         chat_texts.append(str(chat_text or ""))
         images.append(image)
 
@@ -4603,6 +4886,24 @@ def _run_multimodal_json_jobs(
         max_new_tokens=int(max_new_tokens),
         batch_size=max(1, int(batch_size or 1)),
         debug_label=str(debug_label or "diagram_vl_jobs"),
+        stage_io_contexts=[
+            _build_qwen_stage_io_context(
+                bundle=bundle,
+                debug_label=str(debug_label or "diagram_vl_jobs"),
+                job_key=str(job.get("job_key", "") or f"job_{idx + 1}"),
+                stage_kind="multimodal",
+                rendered_input_text=str(chat_texts[idx] if idx < len(chat_texts) else ""),
+                input_prompt_text=str(user_prompts[idx] if idx < len(user_prompts) else ""),
+                system_prompt=str(system_prompt or ""),
+                user_prompt=str(user_prompts[idx] if idx < len(user_prompts) else ""),
+                extra={
+                    "temperature": float(temperature),
+                    "max_new_tokens": int(max_new_tokens),
+                    "job_input": job,
+                },
+            )
+            for idx, job in enumerate(active_jobs)
+        ],
     )
 
     out: Dict[str, Any] = {}
@@ -5083,7 +5384,7 @@ def match_diagram_parts_text_model(
     jobs: List[Dict[str, Any]],
     temperature: float = 0.2,
     max_new_tokens: int = 1200,
-    thinking_enabled: bool = True,
+    thinking_enabled: bool = False,
 ) -> Dict[str, Any]:
     return _run_text_model_json_jobs(
         bundle=bundle,
@@ -5823,6 +6124,7 @@ def _generate_json_objects_from_prompts(
     max_new_tokens: int,
     batch_size: int = 8,
     debug_label: str = "qwen_json",
+    stage_io_contexts: Optional[List[Optional[Dict[str, Any]]]] = None,
 ) -> Tuple[List[Dict[str, Any]], List[str]]:
     if not prompts:
         return [], []
@@ -6155,17 +6457,34 @@ def _generate_json_objects_from_prompts(
             break
 
     objs: List[Dict[str, Any]] = []
-    for raw in all_raws:
+    for idx, raw in enumerate(all_raws):
         parsed = _extract_first_json_object(raw)
         if not isinstance(parsed, dict):
             parsed = {}
         parsed["raw_text"] = raw
         objs.append(parsed)
+        ctx = stage_io_contexts[idx] if isinstance(stage_io_contexts, list) and idx < len(stage_io_contexts) else None
+        _write_qwen_stage_io_json(
+            (ctx or {}).get("bundle") if isinstance(ctx, dict) else None,
+            tokenizer_or_processor=processor,
+            debug_label=str((ctx or {}).get("debug_label", "") or debug_label or "qwen_json"),
+            job_key=str((ctx or {}).get("job_key", "") or f"prompt_{idx + 1}"),
+            prompt_text=str((ctx or {}).get("input_prompt_text", "") or (capped_prompts[idx] if idx < len(capped_prompts) else "")),
+            raw_text=str(raw or ""),
+            parsed_obj=parsed,
+            parsed_payload=parsed,
+            stage_kind=str((ctx or {}).get("stage_kind", "") or "generic"),
+            rendered_input_text=str((ctx or {}).get("rendered_input_text", "") or (chat_texts[idx] if idx < len(chat_texts) else "")),
+            system_prompt=str((ctx or {}).get("system_prompt", "") or ""),
+            user_prompt=str((ctx or {}).get("user_prompt", "") or ""),
+            extra=((ctx or {}).get("extra") if isinstance((ctx or {}).get("extra"), dict) else {"prompt_index": int(idx), "multimodal": bool(images is not None)}),
+        )
     return objs, all_raws
 
 
 def _generate_json_objects_from_prompts_text_model(
     *,
+    llm=None,
     model,
     tokenizer,
     device,
@@ -6176,9 +6495,75 @@ def _generate_json_objects_from_prompts_text_model(
     thinking_enabled: bool = False,
     max_rounds: int = 4,
     batch_size: int = 8,
+    stage_io_contexts: Optional[List[Optional[Dict[str, Any]]]] = None,
 ) -> Tuple[List[Dict[str, Any]], List[str]]:
     if not prompts:
         return [], []
+
+    if llm is not None:
+        capped_prompts: List[str] = []
+        for p in prompts:
+            one = str(p or "")
+            if PLAN_PROMPT_CHAR_CAP > 0 and len(one) > PLAN_PROMPT_CHAR_CAP:
+                one = one[:PLAN_PROMPT_CHAR_CAP].rstrip() + "\n\n[TRUNCATED_FOR_VRAM]"
+            capped_prompts.append(one)
+
+        rendered_prompts = [
+            _apply_chat_template_text(
+                tokenizer,
+                [{"role": "user", "content": str(p or "")}],
+                thinking_enabled=bool(thinking_enabled),
+            )
+            for p in capped_prompts
+        ]
+        print(
+            f"[qwen][DBG] {debug_label} vllm_batch_mode prompts={len(rendered_prompts)} "
+            f"thinking={int(bool(thinking_enabled))} batch_size={max(1, int(batch_size or 1))}"
+        )
+        raws = _vllm_generate_texts(
+            llm=llm,
+            prompts=rendered_prompts,
+            temperature=float(temperature),
+            max_new_tokens=int(max_new_tokens),
+            thinking_enabled=bool(thinking_enabled),
+            do_sample=bool(PLAN_DO_SAMPLE),
+        )
+        objs: List[Dict[str, Any]] = []
+        out_raws: List[str] = []
+        for raw_text in raws:
+            split = _split_vllm_generated_text(raw_text, thinking_enabled=bool(thinking_enabled))
+            parse_text = (
+                _normalize_raw_jsonish_text(str(split.get("final_text", "") or ""))
+                if thinking_enabled
+                else _normalize_raw_jsonish_text(str(split.get("raw_text", "") or ""))
+            )
+            if thinking_enabled and not parse_text:
+                parse_text = _normalize_raw_jsonish_text(str(split.get("raw_text", "") or ""))
+            parsed = _extract_last_json_object(parse_text) or _extract_first_json_object(parse_text)
+            if not isinstance(parsed, dict):
+                parsed = {}
+            parsed["raw_text"] = str(split.get("raw_text", "") or raw_text or "")
+            parsed["parse_text"] = parse_text
+            objs.append(parsed)
+            out_raws.append(str(split.get("raw_text", "") or raw_text or ""))
+            idx = len(objs) - 1
+            ctx = stage_io_contexts[idx] if isinstance(stage_io_contexts, list) and idx < len(stage_io_contexts) else None
+            _write_qwen_stage_io_json(
+                (ctx or {}).get("bundle") if isinstance(ctx, dict) else None,
+                tokenizer_or_processor=tokenizer,
+                debug_label=str((ctx or {}).get("debug_label", "") or debug_label or "qwen_text_json"),
+                job_key=str((ctx or {}).get("job_key", "") or f"prompt_{len(objs)}"),
+                prompt_text=str((ctx or {}).get("input_prompt_text", "") or (capped_prompts[idx] if idx < len(capped_prompts) else "")),
+                raw_text=str(split.get("raw_text", "") or raw_text or ""),
+                parsed_obj=parsed,
+                parsed_payload=parsed,
+                stage_kind=str((ctx or {}).get("stage_kind", "") or "generic_text"),
+                rendered_input_text=str((ctx or {}).get("rendered_input_text", "") or (rendered_prompts[idx] if idx < len(rendered_prompts) else "")),
+                system_prompt=str((ctx or {}).get("system_prompt", "") or ""),
+                user_prompt=str((ctx or {}).get("user_prompt", "") or ""),
+                extra=((ctx or {}).get("extra") if isinstance((ctx or {}).get("extra"), dict) else {"prompt_index": int(idx), "thinking_enabled": bool(thinking_enabled), "backend": "vllm"}),
+            )
+        return objs, out_raws
 
     capped_prompts: List[str] = []
     for p in prompts:
@@ -6206,6 +6591,7 @@ def _generate_json_objects_from_prompts_text_model(
             max_new_tokens=int(max_new_tokens),
             batch_size=int(effective_bs),
             debug_label=str(debug_label or "qwen_text_json"),
+            stage_io_contexts=stage_io_contexts,
         )
         objs: List[Dict[str, Any]] = []
         for raw_text in raws:
@@ -6329,13 +6715,29 @@ def _generate_json_objects_from_prompts_text_model(
         parse_texts.append(parse_text)
 
     objs: List[Dict[str, Any]] = []
-    for raw, parse_text in zip(raws, parse_texts):
+    for idx, (raw, parse_text) in enumerate(zip(raws, parse_texts)):
         parsed = _extract_last_json_object(parse_text) or _extract_first_json_object(parse_text)
         if not isinstance(parsed, dict):
             parsed = {}
         parsed["raw_text"] = raw
         parsed["parse_text"] = parse_text
         objs.append(parsed)
+        ctx = stage_io_contexts[idx] if isinstance(stage_io_contexts, list) and idx < len(stage_io_contexts) else None
+        _write_qwen_stage_io_json(
+            (ctx or {}).get("bundle") if isinstance(ctx, dict) else None,
+            tokenizer_or_processor=tokenizer,
+            debug_label=str((ctx or {}).get("debug_label", "") or debug_label or "qwen_text_json"),
+            job_key=str((ctx or {}).get("job_key", "") or f"prompt_{idx + 1}"),
+            prompt_text=str((ctx or {}).get("input_prompt_text", "") or (capped_prompts[idx] if idx < len(capped_prompts) else "")),
+            raw_text=str(raw or ""),
+            parsed_obj=parsed,
+            parsed_payload=parsed,
+            stage_kind=str((ctx or {}).get("stage_kind", "") or "generic_text"),
+            rendered_input_text=str((ctx or {}).get("rendered_input_text", "") or (_render_chat_text(tokenizer, capped_prompts[idx], thinking_enabled=thinking_enabled) if idx < len(capped_prompts) else "")),
+            system_prompt=str((ctx or {}).get("system_prompt", "") or ""),
+            user_prompt=str((ctx or {}).get("user_prompt", "") or ""),
+            extra=((ctx or {}).get("extra") if isinstance((ctx or {}).get("extra"), dict) else {"prompt_index": int(idx), "thinking_enabled": bool(thinking_enabled), "backend": "transformers_thinking"}),
+        )
     return objs, raws
 
 def plan_whiteboard_actions_transformers(
@@ -6732,6 +7134,22 @@ def plan_space_timeline_batch_transformers(
         max_new_tokens=int(max_new_tokens),
         batch_size=int(batch_size),
         debug_label="plan_space",
+        stage_io_contexts=[
+            _build_qwen_stage_io_context(
+                bundle=None,
+                debug_label="plan_space",
+                job_key=str(ch.get("job_key", "") or f"chunk_{idx}"),
+                stage_kind="text",
+                rendered_input_text=str(prompts[idx] if idx < len(prompts) else ""),
+                input_prompt_text=str(prompts[idx] if idx < len(prompts) else ""),
+                extra={
+                    "temperature": float(temperature),
+                    "max_new_tokens": int(max_new_tokens),
+                    "job_input": ch,
+                },
+            )
+            for idx, ch in enumerate(chunks)
+        ],
     )
 
     out_chunks: List[Dict[str, Any]] = []
@@ -6757,7 +7175,7 @@ def plan_space_timeline_batch_text_model(
     board_height: int = WHITEBOARD_BOARD_HEIGHT_PX,
     temperature: float = 0.15,
     max_new_tokens: int = 900,
-    thinking_enabled: bool = True,
+    thinking_enabled: bool = False,
 ) -> Dict[str, Any]:
     chunks = [c for c in (chunk_maps or []) if isinstance(c, dict)]
     if not chunks:
@@ -6811,6 +7229,7 @@ def plan_space_timeline_batch_text_model(
         prompts.append(prompt)
 
     parsed_objs, _ = _generate_json_objects_from_prompts_text_model(
+        llm=bundle.get("llm"),
         model=bundle.get("model"),
         tokenizer=bundle.get("tokenizer"),
         device=bundle.get("device"),
@@ -6820,6 +7239,23 @@ def plan_space_timeline_batch_text_model(
         debug_label="plan_space_text",
         thinking_enabled=bool(thinking_enabled),
         batch_size=max(1, len(chunks)),
+        stage_io_contexts=[
+            _build_qwen_stage_io_context(
+                bundle=bundle,
+                debug_label="plan_space_text",
+                job_key=str(ch.get("job_key", "") or f"chunk_{idx}"),
+                stage_kind="text",
+                rendered_input_text=str(prompts[idx] if idx < len(prompts) else ""),
+                input_prompt_text=str(prompts[idx] if idx < len(prompts) else ""),
+                extra={
+                    "thinking_enabled": bool(thinking_enabled),
+                    "temperature": float(temperature),
+                    "max_new_tokens": int(max_new_tokens),
+                    "job_input": ch,
+                },
+            )
+            for idx, ch in enumerate(chunks)
+        ],
     )
 
     out_chunks: List[Dict[str, Any]] = []
@@ -7134,6 +7570,22 @@ def plan_visual_actions_batch_transformers(
         max_new_tokens=int(max_new_tokens),
         batch_size=int(batch_size),
         debug_label="plan_visual",
+        stage_io_contexts=[
+            _build_qwen_stage_io_context(
+                bundle=None,
+                debug_label="plan_visual",
+                job_key=str(ev.get("job_key", "") or f"event_{idx}"),
+                stage_kind="text",
+                rendered_input_text=str(prompts[idx] if idx < len(prompts) else ""),
+                input_prompt_text=str(prompts[idx] if idx < len(prompts) else ""),
+                extra={
+                    "temperature": float(temperature),
+                    "max_new_tokens": int(max_new_tokens),
+                    "job_input": ev,
+                },
+            )
+            for idx, ev in enumerate(rows)
+        ],
     )
 
     out_items: List[Dict[str, Any]] = []
@@ -7184,6 +7636,7 @@ def plan_visual_actions_batch_text_model(
 
     prompts: List[str] = [build_visual_action_prompt(ev) for ev in rows]
     parsed_objs, _ = _generate_json_objects_from_prompts_text_model(
+        llm=bundle.get("llm"),
         model=bundle.get("model"),
         tokenizer=bundle.get("tokenizer"),
         device=bundle.get("device"),
@@ -7193,6 +7646,22 @@ def plan_visual_actions_batch_text_model(
         debug_label="plan_visual_text",
         thinking_enabled=False,
         batch_size=max(1, len(rows)),
+        stage_io_contexts=[
+            _build_qwen_stage_io_context(
+                bundle=bundle,
+                debug_label="plan_visual_text",
+                job_key=str(ev.get("job_key", "") or f"event_{idx}"),
+                stage_kind="text",
+                rendered_input_text=str(prompts[idx] if idx < len(prompts) else ""),
+                input_prompt_text=str(prompts[idx] if idx < len(prompts) else ""),
+                extra={
+                    "temperature": float(temperature),
+                    "max_new_tokens": int(max_new_tokens),
+                    "job_input": ev,
+                },
+            )
+            for idx, ev in enumerate(rows)
+        ],
     )
 
     out_items: List[Dict[str, Any]] = []

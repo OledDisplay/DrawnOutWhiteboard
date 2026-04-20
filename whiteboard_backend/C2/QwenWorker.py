@@ -22,6 +22,7 @@ import logging
 import os
 import re
 import threading
+import time
 import traceback
 from collections import OrderedDict
 from dataclasses import dataclass
@@ -1008,11 +1009,17 @@ class QwenWorker:
         *,
         model: Any = None,
         tokenizer: Any = None,
+        llm: Any = None,
+        backend: Optional[str] = None,
+        stage_io_dir: Optional[str] = None,
     ):
         self.model_name = model_name
         self.max_new_tokens = max_new_tokens
         self.lock = threading.Lock()
         self.logger = logging.getLogger("qwen_worker")
+        self.backend = str(backend or "").strip().lower() or ("vllm" if llm is not None else "transformers")
+        self.llm = llm
+        self.model = None
         self.gpu_gc_every = max(0, int(os.environ.get("QWEN_GPU_GC_EVERY", "0") or 0))
         self._gpu_gc_counter = 0
         self.fast_visual_fallbacks = str(os.environ.get("QWEN_FAST_VISUAL_FALLBACKS", "1")).strip().lower() not in {"0", "false", "no", "off"}
@@ -1020,6 +1027,12 @@ class QwenWorker:
         self.prefix_cache_max_entries = max(0, int(os.environ.get("QWEN_PREFIX_CACHE_MAX_ENTRIES", "8") or 8))
         self.prefix_cache_min_tokens = max(32, int(os.environ.get("QWEN_PREFIX_CACHE_MIN_TOKENS", "96") or 96))
         self.prefix_cache: "OrderedDict[str, PrefixCacheEntry]" = OrderedDict()
+        self.stage_io_dir = str(stage_io_dir or os.environ.get("QWEN_STAGE_IO_DIR", "") or "").strip()
+        self._stage_io_bundle: Dict[str, Any] = {
+            "stage_io_dir": self.stage_io_dir,
+            "model_id": model_name,
+            "backend": self.backend,
+        }
 
         if tokenizer is not None:
             self.tokenizer = tokenizer
@@ -1028,10 +1041,22 @@ class QwenWorker:
             self.logger.info("Loading tokenizer for %s", model_name)
             self.tokenizer = AutoTokenizer.from_pretrained(model_name, trust_remote_code=True)
 
-        if model is not None:
+        if self.backend == "vllm" and self.llm is None:
+            try:
+                import qwentest  # local module
+
+                self.llm = qwentest._build_vllm_text_engine(model_name)
+                self.tokenizer = qwentest._get_vllm_tokenizer(self.llm)
+                self.logger.info("Using vllm backend for %s", model_name)
+            except Exception as e:
+                self.logger.warning("vllm unavailable for %s, falling back to transformers: %s", model_name, e)
+                self.backend = "transformers"
+                self.llm = None
+
+        if self.backend != "vllm" and model is not None:
             self.model = model
             self.logger.info("Using injected model for %s", model_name)
-        else:
+        elif self.backend != "vllm":
             self.logger.info("Loading model for %s", model_name)
             self.model = AutoModelForCausalLM.from_pretrained(
                 model_name,
@@ -1039,18 +1064,58 @@ class QwenWorker:
                 device_map="auto",
                 trust_remote_code=True,
             )
-        self.model.eval()
+        if self.model is not None:
+            self.model.eval()
         if self.tokenizer.pad_token_id is None and self.tokenizer.eos_token_id is not None:
             self.tokenizer.pad_token_id = self.tokenizer.eos_token_id
 
         self.think_close_ids = self._encode_plain_text("</think>")
-        self.logger.info("Model loaded")
+        self.logger.info("Model loaded (backend=%s)", self.backend)
         if self.prefix_cache_enabled and self.prefix_cache_max_entries > 0:
             self.logger.info(
                 "Prefix cache enabled (max_entries=%s, min_tokens=%s)",
                 self.prefix_cache_max_entries,
                 self.prefix_cache_min_tokens,
             )
+
+    def _write_stage_io(
+        self,
+        *,
+        task: str,
+        mode: str,
+        payload: Dict[str, Any],
+        system_prompt: str,
+        user_prompt: str,
+        rendered_input_text: str,
+        raw_text: str,
+        parsed_payload: Any,
+    ) -> None:
+        if not self.stage_io_dir:
+            return
+        try:
+            import qwentest
+
+            qwentest._write_qwen_stage_io_json(
+                self._stage_io_bundle,
+                tokenizer_or_processor=self.tokenizer,
+                debug_label=f"c2_{str(task or 'task').strip()}",
+                job_key=f"{str(task or 'task').strip()}_{int(time.time() * 1000)}",
+                prompt_text=str(user_prompt or ""),
+                raw_text=str(raw_text or ""),
+                parsed_obj={},
+                parsed_payload=parsed_payload,
+                stage_kind="text",
+                rendered_input_text=str(rendered_input_text or ""),
+                system_prompt=str(system_prompt or ""),
+                user_prompt=str(user_prompt or ""),
+                extra={
+                    "mode": str(mode or ""),
+                    "task": str(task or ""),
+                    "job_input": payload if isinstance(payload, dict) else {},
+                },
+            )
+        except Exception:
+            self.logger.exception("Failed to write stage io debug for task=%s", task)
 
     def _task_prompt(self, task: str, payload: Dict[str, Any], mode: str) -> tuple[str, str]:
         if task == "choose_target":
@@ -2331,12 +2396,19 @@ class QwenWorker:
         try:
             task = str(body.get("task", "choose_actions"))
             mode = str(body.get("mode", "normal")).strip().lower()
+            if mode == "thinking":
+                self.logger.info("Thinking mode requested for %s; forcing normal mode", task)
+                mode = "normal"
             payload = body.get("payload", {})
             if not isinstance(payload, dict):
                 raise ValueError("payload must be an object")
             if mode not in {"normal", "thinking"}:
                 raise ValueError("mode must be 'normal' or 'thinking'")
             system_prompt, user_prompt = self._task_prompt(task, payload, mode)
+            rendered_prompt = self._render_chat_prompt(
+                [{"role": "system", "content": system_prompt}, {"role": "user", "content": user_prompt}],
+                thinking_enabled=(mode == "thinking"),
+            )
 
             print(
                 "[AGENT-IN]",
@@ -2353,6 +2425,20 @@ class QwenWorker:
             normalized_parse_text = self._normalize_raw_jsonish_text(raw_parse_text)
             print("[AGENT-OUT-RAW]", normalized_parse_text, flush=True)
 
+            def _finish(result: Dict[str, Any]) -> Dict[str, Any]:
+                self._write_stage_io(
+                    task=task,
+                    mode=mode,
+                    payload=payload,
+                    system_prompt=system_prompt,
+                    user_prompt=user_prompt,
+                    rendered_input_text=rendered_prompt,
+                    raw_text=normalized_parse_text,
+                    parsed_payload=result,
+                )
+                print("[AGENT-OUT-PARSED]", json.dumps(result, ensure_ascii=False, separators=(",", ":")), flush=True)
+                return result
+
             parsed = self._extract_best_json(normalized_parse_text, task=task)
             if parsed is None:
                 if task == "final_review":
@@ -2365,28 +2451,22 @@ class QwenWorker:
             if parsed is None:
                 if task == "final_review":
                     result = self._deterministic_final_review(payload)
-                    print("[AGENT-OUT-PARSED]", json.dumps(result, ensure_ascii=False, separators=(",", ":")), flush=True)
-                    return result
+                    return _finish(result)
                 if task == "choose_actions":
                     result = self._deterministic_choose_actions(payload)
-                    print("[AGENT-OUT-PARSED]", json.dumps(result, ensure_ascii=False, separators=(",", ":")), flush=True)
-                    return result
+                    return _finish(result)
                 if task == "visual_query_refinement":
                     result = self._fallback_visual_query_refinement(payload)
-                    print("[AGENT-OUT-PARSED]", json.dumps(result, ensure_ascii=False, separators=(",", ":")), flush=True)
-                    return result
+                    return _finish(result)
                 if task == "wikipedia_section_select":
                     result = self._fallback_wikipedia_section_select(payload)
-                    print("[AGENT-OUT-PARSED]", json.dumps(result, ensure_ascii=False, separators=(",", ":")), flush=True)
-                    return result
+                    return _finish(result)
                 if task == "wikipedia_visual_extract":
                     result = self._fallback_wikipedia_visual_extract(payload)
-                    print("[AGENT-OUT-PARSED]", json.dumps(result, ensure_ascii=False, separators=(",", ":")), flush=True)
-                    return result
+                    return _finish(result)
                 if task == "visual_description_refinement":
                     result = self._fallback_visual_description_refinement(payload)
-                    print("[AGENT-OUT-PARSED]", json.dumps(result, ensure_ascii=False, separators=(",", ":")), flush=True)
-                    return result
+                    return _finish(result)
                 raise JsonParseError(f"worker produced no valid JSON object for task={task}")
 
             try:
@@ -2410,34 +2490,27 @@ class QwenWorker:
                     salvaged = self._salvage_final_review_output(normalized_parse_text, payload)
                     if salvaged is not None:
                         result = self._validate_final_review(salvaged, payload)
-                        print("[AGENT-OUT-PARSED]", json.dumps(result, ensure_ascii=False, separators=(",", ":")), flush=True)
-                        return result
+                        return _finish(result)
                 repaired = self._repair_json_output(task, payload, normalized_parse_text)
                 if repaired is None:
                     if task == "final_review":
                         result = self._deterministic_final_review(payload)
-                        print("[AGENT-OUT-PARSED]", json.dumps(result, ensure_ascii=False, separators=(",", ":")), flush=True)
-                        return result
+                        return _finish(result)
                     if task == "choose_actions":
                         result = self._deterministic_choose_actions(payload)
-                        print("[AGENT-OUT-PARSED]", json.dumps(result, ensure_ascii=False, separators=(",", ":")), flush=True)
-                        return result
+                        return _finish(result)
                     if task == "visual_query_refinement":
                         result = self._fallback_visual_query_refinement(payload)
-                        print("[AGENT-OUT-PARSED]", json.dumps(result, ensure_ascii=False, separators=(",", ":")), flush=True)
-                        return result
+                        return _finish(result)
                     if task == "wikipedia_section_select":
                         result = self._fallback_wikipedia_section_select(payload)
-                        print("[AGENT-OUT-PARSED]", json.dumps(result, ensure_ascii=False, separators=(",", ":")), flush=True)
-                        return result
+                        return _finish(result)
                     if task == "wikipedia_visual_extract":
                         result = self._fallback_wikipedia_visual_extract(payload)
-                        print("[AGENT-OUT-PARSED]", json.dumps(result, ensure_ascii=False, separators=(",", ":")), flush=True)
-                        return result
+                        return _finish(result)
                     if task == "visual_description_refinement":
                         result = self._fallback_visual_description_refinement(payload)
-                        print("[AGENT-OUT-PARSED]", json.dumps(result, ensure_ascii=False, separators=(",", ":")), flush=True)
-                        return result
+                        return _finish(result)
                     raise
 
                 if task == "choose_target":
@@ -2456,8 +2529,7 @@ class QwenWorker:
                 else:
                     result = self._validate_final_review(repaired, payload)
 
-            print("[AGENT-OUT-PARSED]", json.dumps(result, ensure_ascii=False, separators=(",", ":")), flush=True)
-            return result
+            return _finish(result)
         finally:
             self._gpu_gc()
 
@@ -2477,6 +2549,9 @@ class QwenWorker:
 
         task = next(iter(tasks))
         mode = next(iter(modes))
+        if mode == "thinking":
+            self.logger.info("Thinking batch requested for %s; forcing normal mode", task)
+            mode = "normal"
         if mode != "normal" or task not in {"wikipedia_section_select", "wikipedia_visual_extract", "visual_description_refinement"}:
             return [self.infer(body) for body in bodies]
 
@@ -2593,12 +2668,45 @@ class QwenWorker:
     def _infer_many_batched(self, task: str, mode: str, payloads: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
         thinking_enabled = mode == "thinking"
         prompts: List[str] = []
+        prompt_rows: List[Dict[str, str]] = []
         for payload in payloads:
             system_prompt, user_prompt = self._task_prompt(task, payload, mode)
+            prompt_rows.append({"system_prompt": system_prompt, "user_prompt": user_prompt})
             prompts.append(self._render_chat_prompt(
                 [{"role": "system", "content": system_prompt}, {"role": "user", "content": user_prompt}],
                 thinking_enabled=thinking_enabled,
             ))
+
+        if self.backend == "vllm" and self.llm is not None:
+            import qwentest  # local module
+
+            raws = qwentest._vllm_generate_texts(
+                llm=self.llm,
+                prompts=prompts,
+                temperature=0.0,
+                max_new_tokens=min(96, max(24, int(self._task_budget(task, mode).get("initial", 64)))),
+                thinking_enabled=thinking_enabled,
+                do_sample=False,
+            )
+            results: List[Dict[str, Any]] = []
+            for idx, payload in enumerate(payloads):
+                raw_text = self._normalize_raw_jsonish_text(str(raws[idx] if idx < len(raws) else ""))
+                print("[AGENT-OUT-RAW]", raw_text, flush=True)
+                result = self._parse_or_repair_task_result(task, payload, raw_text)
+                prompt_row = prompt_rows[idx] if idx < len(prompt_rows) else {}
+                self._write_stage_io(
+                    task=task,
+                    mode=mode,
+                    payload=payload,
+                    system_prompt=str(prompt_row.get("system_prompt", "") or ""),
+                    user_prompt=str(prompt_row.get("user_prompt", "") or ""),
+                    rendered_input_text=str(prompts[idx] if idx < len(prompts) else ""),
+                    raw_text=raw_text,
+                    parsed_payload=result,
+                )
+                print("[AGENT-OUT-PARSED]", json.dumps(result, ensure_ascii=False, separators=(",", ":")), flush=True)
+                results.append(result)
+            return results
 
         inputs = None
         input_ids = None
@@ -2633,6 +2741,17 @@ class QwenWorker:
                 raw_text = self._normalize_raw_jsonish_text(self.tokenizer.decode(new_ids, skip_special_tokens=False))
                 print("[AGENT-OUT-RAW]", raw_text, flush=True)
                 result = self._parse_or_repair_task_result(task, payload, raw_text)
+                prompt_row = prompt_rows[idx] if idx < len(prompt_rows) else {}
+                self._write_stage_io(
+                    task=task,
+                    mode=mode,
+                    payload=payload,
+                    system_prompt=str(prompt_row.get("system_prompt", "") or ""),
+                    user_prompt=str(prompt_row.get("user_prompt", "") or ""),
+                    rendered_input_text=str(prompts[idx] if idx < len(prompts) else ""),
+                    raw_text=raw_text,
+                    parsed_payload=result,
+                )
                 print("[AGENT-OUT-PARSED]", json.dumps(result, ensure_ascii=False, separators=(",", ":")), flush=True)
                 results.append(result)
             return results
@@ -2676,6 +2795,26 @@ class QwenWorker:
         ]
         budget = self._task_budget(task, mode)
         thinking_enabled = mode == "thinking"
+
+        if self.backend == "vllm" and self.llm is not None:
+            import qwentest  # local module
+
+            prompt_text = self._render_chat_prompt(messages, thinking_enabled=thinking_enabled)
+            raws = qwentest._vllm_generate_texts(
+                llm=self.llm,
+                prompts=[prompt_text],
+                temperature=0.0 if not thinking_enabled else 0.6,
+                max_new_tokens=int(budget.get("initial", self.max_new_tokens)),
+                thinking_enabled=thinking_enabled,
+                do_sample=False,
+            )
+            raw_text = str(raws[0] if raws else "")
+            split = qwentest._split_vllm_generated_text(raw_text, thinking_enabled=thinking_enabled)
+            parse_text = self._normalize_raw_jsonish_text(
+                self._candidate_parse_text(split, thinking_enabled=thinking_enabled)
+            )
+            split["parse_text"] = parse_text
+            return split
 
         inputs = None
         input_ids = None

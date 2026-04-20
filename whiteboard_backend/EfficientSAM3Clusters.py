@@ -575,7 +575,7 @@ def analyze_cluster_render_with_prompts(
     if prompt_count <= 0:
         keep = False
         decision_reason = "no_prompt_results"
-    elif best_score < 0.013:
+    elif best_score < 0.010:
         keep = False
         decision_reason = "best_prompt_score_below_min_keep"
     elif best_quality > 0.38 and best_score > 0.025:
