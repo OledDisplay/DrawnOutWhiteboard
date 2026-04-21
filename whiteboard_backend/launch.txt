@@ -1,8 +1,11 @@
-Comfy
+Comfy (comfy root)
 python main.py --listen 0.0.0.0 --port 8188 --disable-auto-launch --verbose INFO --use-quad-cross-attention --fast --disable-metadata --dont-upcast-attention --force-channels-last --preview-method none
 
-Timeline Generator
+Timeline Generator (backend root)
 python timeline.py --topic "Eukaryotic cell structure and organells explained" --gpt-cache
 
-Lesson stream (launch first then frontend)
+Lesson stream (launch first then frontend) - backend root
 python lesson_tts_ws_streamer.py --lesson-json lesson_output.json --host 0.0.0.0 --port 8765 --wait-for-client
+
+Qwen server (fresh PowerShell - wsl required)
+wsl bash -lc "source ~/venvs/qwen-vllm/bin/activate && cd /mnt/c/Users/marti/allFolder/code/DrawnOutWhiteboard/whiteboard_backend/LLMstuff && python qwen_vllm_server.py"

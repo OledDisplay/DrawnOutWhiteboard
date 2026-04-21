@@ -26,6 +26,111 @@ class WhiteboardApp extends StatelessWidget {
   }
 }
 
+class WhiteboardDimensionsConfig {
+  const WhiteboardDimensionsConfig({
+    required this.boardWidth,
+    required this.boardHeight,
+    required this.normalizeSize,
+    required this.defaultImageScale,
+    required this.defaultTextScale,
+    required this.textLetterGapPx,
+    required this.textBaseFontSizeRefPx,
+    required this.textSpaceWidthFactor,
+    required this.defaultTextStrokeSlowdown,
+    required this.textStrokeBaseTimeSec,
+    required this.textStrokeCurveExtraFrac,
+    required this.textLetterPauseSec,
+  });
+
+  static const WhiteboardDimensionsConfig defaults = WhiteboardDimensionsConfig(
+    boardWidth: 2000.0,
+    boardHeight: 2000.0,
+    normalizeSize: 1000.0,
+    defaultImageScale: 0.75,
+    defaultTextScale: 0.25,
+    textLetterGapPx: 20.0,
+    textBaseFontSizeRefPx: 200.0,
+    textSpaceWidthFactor: 0.5,
+    defaultTextStrokeSlowdown: 8.0,
+    textStrokeBaseTimeSec: 0.017,
+    textStrokeCurveExtraFrac: 0.25,
+    textLetterPauseSec: 0.0,
+  );
+
+  final double boardWidth;
+  final double boardHeight;
+  final double normalizeSize;
+  final double defaultImageScale;
+  final double defaultTextScale;
+  final double textLetterGapPx;
+  final double textBaseFontSizeRefPx;
+  final double textSpaceWidthFactor;
+  final double defaultTextStrokeSlowdown;
+  final double textStrokeBaseTimeSec;
+  final double textStrokeCurveExtraFrac;
+  final double textLetterPauseSec;
+
+  factory WhiteboardDimensionsConfig.fromJson(Map<dynamic, dynamic> json) {
+    double _readNum(dynamic value, double fallback) {
+      return (value is num) ? value.toDouble() : fallback;
+    }
+
+    final board = json['whiteboard_size_px'];
+    final image = json['image'];
+    final text = json['text'];
+    return WhiteboardDimensionsConfig(
+      boardWidth: _readNum(
+        board is Map ? board['width'] : null,
+        defaults.boardWidth,
+      ),
+      boardHeight: _readNum(
+        board is Map ? board['height'] : null,
+        defaults.boardHeight,
+      ),
+      normalizeSize: _readNum(
+        json['normalize_size_px'],
+        defaults.normalizeSize,
+      ),
+      defaultImageScale: _readNum(
+        image is Map ? image['default_scale'] : null,
+        defaults.defaultImageScale,
+      ),
+      defaultTextScale: _readNum(
+        text is Map ? text['default_scale'] : null,
+        defaults.defaultTextScale,
+      ),
+      textLetterGapPx: _readNum(
+        text is Map ? text['letter_gap_px'] : null,
+        defaults.textLetterGapPx,
+      ),
+      textBaseFontSizeRefPx: _readNum(
+        text is Map ? text['base_font_size_ref_px'] : null,
+        defaults.textBaseFontSizeRefPx,
+      ),
+      textSpaceWidthFactor: _readNum(
+        text is Map ? text['space_width_factor'] : null,
+        defaults.textSpaceWidthFactor,
+      ),
+      defaultTextStrokeSlowdown: _readNum(
+        text is Map ? text['default_stroke_slowdown'] : null,
+        defaults.defaultTextStrokeSlowdown,
+      ),
+      textStrokeBaseTimeSec: _readNum(
+        text is Map ? text['stroke_base_time_sec'] : null,
+        defaults.textStrokeBaseTimeSec,
+      ),
+      textStrokeCurveExtraFrac: _readNum(
+        text is Map ? text['stroke_curve_extra_frac'] : null,
+        defaults.textStrokeCurveExtraFrac,
+      ),
+      textLetterPauseSec: _readNum(
+        text is Map ? text['letter_pause_sec'] : null,
+        defaults.textLetterPauseSec,
+      ),
+    );
+  }
+}
+
 class VectorViewerScreen extends StatefulWidget {
   const VectorViewerScreen({super.key});
 
@@ -39,18 +144,15 @@ class _VectorViewerScreenState extends State<VectorViewerScreen>
 
   static String get _fontVectorsFolder => _resolveBackendSubdir('Font');
 
-  static String get _fontMetricsPath => '${_fontVectorsFolder}\\font_metrics.json';
+  static String get _fontMetricsPath =>
+      '${_fontVectorsFolder}\\font_metrics.json';
 
   static String get _clustersFolder =>
       _resolveBackendSubdir(r'PipelineOutputs\_diagram_part_stroke_maps');
 
   static const String _lessonWsUrl = 'ws://127.0.0.1:8765';
 
-  static const double _targetResolution = 2000.0;
-  static const double _defaultImageObjectScale = 0.75;
   static const double _basePenWidthPx = 4.0;
-  static const double _boardWidth = _targetResolution;
-  static const double _boardHeight = _targetResolution;
   static const int _maxDisplayPointsPerStroke = 120;
   static const bool _forceMaxObjectAnimationDuration = true;
   static const double _forcedMaxObjectAnimationDurationSec = 5.0;
@@ -91,7 +193,16 @@ class _VectorViewerScreenState extends State<VectorViewerScreen>
   double _minTravelTimeSec = 0.15;
   double _maxTravelTimeSec = 0.35;
   double _globalSpeedMultiplier = 1.0;
-  double _textLetterGapPx = 20.0;
+  WhiteboardDimensionsConfig _dimensionsConfig =
+      WhiteboardDimensionsConfig.defaults;
+  double _targetResolution = WhiteboardDimensionsConfig.defaults.normalizeSize;
+  double _defaultImageObjectScale =
+      WhiteboardDimensionsConfig.defaults.defaultImageScale;
+  double _defaultTextObjectScale =
+      WhiteboardDimensionsConfig.defaults.defaultTextScale;
+  double _boardWidth = WhiteboardDimensionsConfig.defaults.boardWidth;
+  double _boardHeight = WhiteboardDimensionsConfig.defaults.boardHeight;
+  double _textLetterGapPx = WhiteboardDimensionsConfig.defaults.textLetterGapPx;
   double _strokeSpeedStartPct = 0.08;
   double _strokeSpeedEndPct = 0.25;
   double _strokeSpeedPeakMult = 2.50;
@@ -103,8 +214,9 @@ class _VectorViewerScreenState extends State<VectorViewerScreen>
       TextEditingController(text: '0');
   final TextEditingController _posYController =
       TextEditingController(text: '0');
-  final TextEditingController _scaleController =
-      TextEditingController(text: _defaultImageObjectScale.toString());
+  final TextEditingController _scaleController = TextEditingController(
+    text: WhiteboardDimensionsConfig.defaults.defaultImageScale.toString(),
+  );
 
   final List<String> _drawnJsonNames = [];
   String? _selectedEraseName;
@@ -114,12 +226,16 @@ class _VectorViewerScreenState extends State<VectorViewerScreen>
   double? _fontImageHeightPx;
 
   bool _animIsText = false;
-  static const double _defaultTextStrokeSlowdown = 8.0;
-  double _textStrokeSlowdown = _defaultTextStrokeSlowdown;
-  double _textStrokeBaseTimeSec = 0.017;
-  double _textStrokeCurveExtraFrac = 0.25;
-  double _textLetterPauseSec = 0.0;
-  double _textBaseFontSizeRef = 200.0;
+  double _textStrokeSlowdown =
+      WhiteboardDimensionsConfig.defaults.defaultTextStrokeSlowdown;
+  double _textStrokeBaseTimeSec =
+      WhiteboardDimensionsConfig.defaults.textStrokeBaseTimeSec;
+  double _textStrokeCurveExtraFrac =
+      WhiteboardDimensionsConfig.defaults.textStrokeCurveExtraFrac;
+  double _textLetterPauseSec =
+      WhiteboardDimensionsConfig.defaults.textLetterPauseSec;
+  double _textBaseFontSizeRef =
+      WhiteboardDimensionsConfig.defaults.textBaseFontSizeRefPx;
 
   final TextEditingController _textPromptController =
       TextEditingController(text: 'Hello, world');
@@ -127,10 +243,14 @@ class _VectorViewerScreenState extends State<VectorViewerScreen>
       TextEditingController(text: '0');
   final TextEditingController _textYController =
       TextEditingController(text: '0');
-  final TextEditingController _textSizeController =
-      TextEditingController(text: '180');
-  final TextEditingController _textGapController =
-      TextEditingController(text: '20');
+  final TextEditingController _textSizeController = TextEditingController(
+    text: (WhiteboardDimensionsConfig.defaults.textBaseFontSizeRefPx *
+            WhiteboardDimensionsConfig.defaults.defaultTextScale)
+        .toString(),
+  );
+  final TextEditingController _textGapController = TextEditingController(
+    text: WhiteboardDimensionsConfig.defaults.textLetterGapPx.toString(),
+  );
 
   final Map<String, BoardObjectRecord> _boardObjectsById = {};
   final Map<String, Set<String>> _boardObjectIdsByAlias = {};
@@ -148,7 +268,8 @@ class _VectorViewerScreenState extends State<VectorViewerScreen>
   final Map<String, int> _highlightRefCountsByClusterRef = {};
   final Map<String, double> _diagramNonFocusSaturationByObjectId = {};
   final Map<String, VectorBlueprint> _vectorBlueprintCache = {};
-  final Map<String, List<DiagramLabelAnchor>> _labelAnchorCacheByProcessedId = {};
+  final Map<String, List<DiagramLabelAnchor>> _labelAnchorCacheByProcessedId =
+      {};
   final Map<int, ActiveLessonAction> _activeLessonActionsByGlobalIndex = {};
   final Set<String> _processedSilenceEventKeys = <String>{};
   Future<void> _lessonActionQueue = Future<void>.value();
@@ -231,9 +352,7 @@ class _VectorViewerScreenState extends State<VectorViewerScreen>
           }
         }
       });
-
-    _loadObjectsFromBackend();
-    unawaited(_lessonStreamAccepter.connect());
+    unawaited(_initializeSizingAndBackendState());
   }
 
   @override
@@ -316,6 +435,54 @@ class _VectorViewerScreenState extends State<VectorViewerScreen>
     );
   }
 
+  Future<void> _initializeSizingAndBackendState() async {
+    await _loadDimensionsConfig();
+    await _loadObjectsFromBackend();
+    unawaited(_lessonStreamAccepter.connect());
+  }
+
+  Future<void> _loadDimensionsConfig() async {
+    try {
+      final file = File(_dimensionsConfigPath);
+      if (!file.existsSync()) {
+        _applyDimensionsConfig(WhiteboardDimensionsConfig.defaults);
+        return;
+      }
+      final raw = await file.readAsString();
+      final decoded = json.decode(raw);
+      if (decoded is Map) {
+        _applyDimensionsConfig(WhiteboardDimensionsConfig.fromJson(decoded));
+        return;
+      }
+    } catch (_) {}
+    _applyDimensionsConfig(WhiteboardDimensionsConfig.defaults);
+  }
+
+  void _applyDimensionsConfig(WhiteboardDimensionsConfig config) {
+    _dimensionsConfig = config;
+    _targetResolution = config.normalizeSize;
+    _defaultImageObjectScale = config.defaultImageScale;
+    _defaultTextObjectScale = config.defaultTextScale;
+    _boardWidth = config.boardWidth;
+    _boardHeight = config.boardHeight;
+    _textLetterGapPx = config.textLetterGapPx;
+    _textBaseFontSizeRef = config.textBaseFontSizeRefPx;
+    _textStrokeSlowdown = config.defaultTextStrokeSlowdown;
+    _textStrokeBaseTimeSec = config.textStrokeBaseTimeSec;
+    _textStrokeCurveExtraFrac = config.textStrokeCurveExtraFrac;
+    _textLetterPauseSec = config.textLetterPauseSec;
+    _fontLineHeightPx = null;
+    _fontImageHeightPx = null;
+    _glyphCache.clear();
+    _scaleController.text = _defaultImageObjectScale.toString();
+    _textSizeController.text =
+        (_textBaseFontSizeRef * _defaultTextObjectScale).toString();
+    _textGapController.text = _textLetterGapPx.toString();
+    if (mounted) {
+      setState(() {});
+    }
+  }
+
   int _coerceInt(dynamic value, [int fallback = 0]) {
     if (value is int) {
       return value;
@@ -355,21 +522,18 @@ class _VectorViewerScreenState extends State<VectorViewerScreen>
       protectedRootIds.addAll(_resolveObjectIds(name));
     }
 
-    final candidates = _boardObjectsById.values
-        .where((record) {
-          if (protectedRootIds.contains(record.objectId)) {
-            return false;
-          }
+    final candidates = _boardObjectsById.values.where((record) {
+      if (protectedRootIds.contains(record.objectId)) {
+        return false;
+      }
 
-          final ownerDiagramId = record.ownerDiagramObjectId;
-          if (ownerDiagramId != null &&
-              protectedRootIds.contains(ownerDiagramId)) {
-            return false;
-          }
+      final ownerDiagramId = record.ownerDiagramObjectId;
+      if (ownerDiagramId != null && protectedRootIds.contains(ownerDiagramId)) {
+        return false;
+      }
 
-          return true;
-        })
-        .toList(growable: false)
+      return true;
+    }).toList(growable: false)
       ..sort((a, b) {
         final aBounds = _objectBounds(a.objectId);
         final bBounds = _objectBounds(b.objectId);
@@ -463,12 +627,15 @@ class _VectorViewerScreenState extends State<VectorViewerScreen>
         }
 
         final attachedIds = _resolveObjectIds(action.target);
-        final attachedToObjectId = attachedIds.isEmpty ? null : attachedIds.first;
+        final attachedToObjectId =
+            attachedIds.isEmpty ? null : attachedIds.first;
 
         await _whiteboardActions.writeText(
           prompt: prompt,
           origin: Offset(action.x ?? 0.0, action.y ?? 0.0),
-          letterSize: _deriveLetterSizeFromScale(action.scale ?? 1.0),
+          letterSize: _deriveLetterSizeFromScale(
+            action.scale ?? _defaultTextObjectScale,
+          ),
           boardObjectId: 'text_action_${packet.globalActionIndex}',
           logicalName: prompt,
           attachedToObjectId: attachedToObjectId,
@@ -544,7 +711,10 @@ class _VectorViewerScreenState extends State<VectorViewerScreen>
       case 'write_label':
         final clusterRef = action.clusterName?.trim();
         final labelText = action.text?.trim();
-        if (clusterRef == null || clusterRef.isEmpty || labelText == null || labelText.isEmpty) {
+        if (clusterRef == null ||
+            clusterRef.isEmpty ||
+            labelText == null ||
+            labelText.isEmpty) {
           return;
         }
         await _startWriteLabelAction(packet, clusterRef, labelText);
@@ -598,7 +768,8 @@ class _VectorViewerScreenState extends State<VectorViewerScreen>
         }
         break;
       case 'highlight_cluster':
-        if (action.primaryClusterRef != null && action.diagramObjectId != null) {
+        if (action.primaryClusterRef != null &&
+            action.diagramObjectId != null) {
           await _removeHighlightClusterRef(
             diagramObjectId: action.diagramObjectId!,
             clusterRef: action.primaryClusterRef!,
@@ -606,7 +777,8 @@ class _VectorViewerScreenState extends State<VectorViewerScreen>
         }
         break;
       case 'zoom_cluster':
-        if (action.primaryClusterRef != null && action.diagramObjectId != null) {
+        if (action.primaryClusterRef != null &&
+            action.diagramObjectId != null) {
           await _deactivateZoom(
             diagramObjectId: action.diagramObjectId!,
             clusterRef: action.primaryClusterRef!,
@@ -617,7 +789,8 @@ class _VectorViewerScreenState extends State<VectorViewerScreen>
         if (action.tempObjectId != null) {
           await _deleteObject(id: action.tempObjectId, silentIfMissing: true);
         }
-        if (action.diagramObjectId != null && action.primaryClusterRef != null) {
+        if (action.diagramObjectId != null &&
+            action.primaryClusterRef != null) {
           await _removeHighlightClusterRef(
             diagramObjectId: action.diagramObjectId!,
             clusterRef: action.primaryClusterRef!,
@@ -642,7 +815,8 @@ class _VectorViewerScreenState extends State<VectorViewerScreen>
   }) async {
     final activeActions = _activeLessonActionsByGlobalIndex.values.toList();
     for (final active in activeActions) {
-      if (!active.isDiagramAction || active.globalActionIndex == incomingActionId) {
+      if (!active.isDiagramAction ||
+          active.globalActionIndex == incomingActionId) {
         continue;
       }
 
@@ -707,7 +881,8 @@ class _VectorViewerScreenState extends State<VectorViewerScreen>
       awaitAnimation: true,
     );
 
-    _activeLessonActionsByGlobalIndex[packet.globalActionIndex] = ActiveLessonAction(
+    _activeLessonActionsByGlobalIndex[packet.globalActionIndex] =
+        ActiveLessonAction(
       globalActionIndex: packet.globalActionIndex,
       type: 'link_to_image',
       tempObjectId: connectorId,
@@ -755,7 +930,8 @@ class _VectorViewerScreenState extends State<VectorViewerScreen>
     );
 
     await _highlightCluster(clusterRef: clusterRef, resolved: resolved);
-    _activeLessonActionsByGlobalIndex[packet.globalActionIndex] = ActiveLessonAction(
+    _activeLessonActionsByGlobalIndex[packet.globalActionIndex] =
+        ActiveLessonAction(
       globalActionIndex: packet.globalActionIndex,
       type: 'highlight_cluster',
       diagramObjectId: resolved.diagram.objectId,
@@ -783,7 +959,8 @@ class _VectorViewerScreenState extends State<VectorViewerScreen>
     );
 
     await _zoomCluster(clusterRef: clusterRef, resolved: resolved);
-    _activeLessonActionsByGlobalIndex[packet.globalActionIndex] = ActiveLessonAction(
+    _activeLessonActionsByGlobalIndex[packet.globalActionIndex] =
+        ActiveLessonAction(
       globalActionIndex: packet.globalActionIndex,
       type: 'zoom_cluster',
       diagramObjectId: resolved.diagram.objectId,
@@ -878,11 +1055,15 @@ class _VectorViewerScreenState extends State<VectorViewerScreen>
       isTemporary: true,
       ownerDiagramObjectId: fromResolved.diagram.objectId,
       syncWithBackend: false,
-      aliases: <String>{connectorId, 'diagram_connect_${packet.globalActionIndex}'},
+      aliases: <String>{
+        connectorId,
+        'diagram_connect_${packet.globalActionIndex}'
+      },
       awaitAnimation: true,
     );
 
-    _activeLessonActionsByGlobalIndex[packet.globalActionIndex] = ActiveLessonAction(
+    _activeLessonActionsByGlobalIndex[packet.globalActionIndex] =
+        ActiveLessonAction(
       globalActionIndex: packet.globalActionIndex,
       type: 'connect_cluster_to_cluster',
       diagramObjectId: fromResolved.diagram.objectId,
@@ -979,7 +1160,8 @@ class _VectorViewerScreenState extends State<VectorViewerScreen>
     return null;
   }
 
-  String _bestDeleteTarget(LessonActionPacket packet, LessonBoardAction action) {
+  String _bestDeleteTarget(
+      LessonActionPacket packet, LessonBoardAction action) {
     final rawTarget = (action.target ?? '').trim();
     if (rawTarget.isNotEmpty) {
       return rawTarget;
@@ -991,8 +1173,56 @@ class _VectorViewerScreenState extends State<VectorViewerScreen>
   }
 
   double _deriveLetterSizeFromScale(double scale) {
-    final safeScale = scale <= 0 ? 1.0 : scale;
+    final safeScale = scale <= 0 ? _defaultTextObjectScale : scale;
     return _textBaseFontSizeRef * safeScale;
+  }
+
+  Future<void> _printEffectiveSizingSummary() async {
+    await _ensureFontMetricsLoaded();
+
+    final imageScale = double.tryParse(_scaleController.text.trim()) ??
+        _defaultImageObjectScale;
+    final safeImageScale = imageScale <= 0 ? 1.0 : imageScale;
+    final imageLongSide = _targetResolution * safeImageScale;
+    final imageShortSideFactor =
+        _targetResolution > 0 ? imageLongSide / _targetResolution : 1.0;
+
+    final letterSize = double.tryParse(_textSizeController.text.trim()) ??
+        _textBaseFontSizeRef;
+    final safeLetterSize = letterSize <= 0 ? _textBaseFontSizeRef : letterSize;
+    final lineHeight = _fontLineHeightPx ?? _targetResolution * 0.5;
+    final imageHeight = _fontImageHeightPx ?? _targetResolution;
+    final textScale = safeLetterSize / lineHeight;
+    final effectiveGlyphHeight = imageHeight * textScale;
+    final effectiveBaselineOffset = (imageHeight / 2.0) * textScale;
+
+    final summary = [
+      'Effective whiteboard sizing',
+      'Board: ${_boardWidth.toStringAsFixed(0)} x ${_boardHeight.toStringAsFixed(0)} px '
+          '(world space, center at 0,0)',
+      'Board diagonal: ${math.sqrt(_boardWidth * _boardWidth + _boardHeight * _boardHeight).toStringAsFixed(1)} px',
+      'Image scaling:',
+      '  target normalize: longest source side -> ${_targetResolution.toStringAsFixed(0)} px at scale 1.0',
+      '  current UI scale: ${safeImageScale.toStringAsFixed(3)}',
+      '  effective longest side on board: ${imageLongSide.toStringAsFixed(1)} px',
+      '  effective shorter side: sourceAspect * ${imageLongSide.toStringAsFixed(1)} px',
+      '  default image scale: ${_defaultImageObjectScale.toStringAsFixed(2)} '
+          '-> ${(_targetResolution * _defaultImageObjectScale).toStringAsFixed(1)} px longest side',
+      'Text sizing:',
+      '  base text reference size: ${_textBaseFontSizeRef.toStringAsFixed(1)} px',
+      '  current UI letter size: ${safeLetterSize.toStringAsFixed(1)} px on board',
+      '  font metrics line height: ${lineHeight.toStringAsFixed(1)} px',
+      '  font metrics image height: ${imageHeight.toStringAsFixed(1)} px',
+      '  effective text scale: ${textScale.toStringAsFixed(4)}',
+      '  effective glyph image height on board: ${effectiveGlyphHeight.toStringAsFixed(1)} px',
+      '  baseline offset used: ${effectiveBaselineOffset.toStringAsFixed(1)} px',
+      '  letter gap: ${_textLetterGapPx.toStringAsFixed(1)} px',
+    ].join('\n');
+
+    debugPrint(summary);
+    setState(() {
+      _status = summary;
+    });
   }
 
   String _stemWithoutJson(String value) {
@@ -1026,7 +1256,8 @@ class _VectorViewerScreenState extends State<VectorViewerScreen>
 
     for (final alias in record.aliases) {
       for (final key in _aliasLookupKeys(alias)) {
-        final bucket = _boardObjectIdsByAlias.putIfAbsent(key, () => <String>{});
+        final bucket =
+            _boardObjectIdsByAlias.putIfAbsent(key, () => <String>{});
         bucket.add(record.objectId);
       }
     }
@@ -1082,21 +1313,24 @@ class _VectorViewerScreenState extends State<VectorViewerScreen>
 
     _diagramConnections.removeWhere(
       (connection) =>
-          connection.fromObjectId == objectId || connection.toObjectId == objectId,
+          connection.fromObjectId == objectId ||
+          connection.toObjectId == objectId,
     );
     _activeLessonActionsByGlobalIndex.removeWhere(
       (_, action) => action.tempObjectId == objectId,
     );
 
     if (!record.isTemporary) {
-      final stillUsedDisplayName = _boardObjectsById.values
-          .any((candidate) => !candidate.isTemporary && candidate.displayName == record.displayName);
+      final stillUsedDisplayName = _boardObjectsById.values.any((candidate) =>
+          !candidate.isTemporary &&
+          candidate.displayName == record.displayName);
       if (!stillUsedDisplayName) {
         _drawnJsonNames.remove(record.displayName);
       }
 
       if (_selectedEraseName == record.displayName) {
-        _selectedEraseName = _drawnJsonNames.isEmpty ? null : _drawnJsonNames.last;
+        _selectedEraseName =
+            _drawnJsonNames.isEmpty ? null : _drawnJsonNames.last;
       }
     }
   }
@@ -1206,8 +1440,10 @@ class _VectorViewerScreenState extends State<VectorViewerScreen>
 
     final deletedRecords = <BoardObjectRecord>[];
     setState(() {
-      _staticStrokes = _staticStrokes.where((s) => !ids.contains(s.jsonName)).toList();
-      _animStrokes = _animStrokes.where((s) => !ids.contains(s.jsonName)).toList();
+      _staticStrokes =
+          _staticStrokes.where((s) => !ids.contains(s.jsonName)).toList();
+      _animStrokes =
+          _animStrokes.where((s) => !ids.contains(s.jsonName)).toList();
       _drawableStrokes = [..._staticStrokes, ..._animStrokes];
 
       for (final objectId in ids) {
@@ -1280,14 +1516,16 @@ class _VectorViewerScreenState extends State<VectorViewerScreen>
       final removeNow = <DrawableStroke>[];
       for (final stroke in remaining) {
         if ((stroke.centroid - eraser).distance <= radius ||
-            stroke.bounds.overlaps(Rect.fromCircle(center: eraser, radius: radius))) {
+            stroke.bounds
+                .overlaps(Rect.fromCircle(center: eraser, radius: radius))) {
           removeNow.add(stroke);
         }
       }
       if (removeNow.isEmpty && remaining.isNotEmpty) {
         remaining.sort(
-          (a, b) =>
-              (a.centroid - eraser).distance.compareTo((b.centroid - eraser).distance),
+          (a, b) => (a.centroid - eraser)
+              .distance
+              .compareTo((b.centroid - eraser).distance),
         );
         removeNow.add(remaining.first);
       }
@@ -1295,8 +1533,12 @@ class _VectorViewerScreenState extends State<VectorViewerScreen>
       remaining.removeWhere(removeNow.contains);
       if (mounted) {
         setState(() {
-          _staticStrokes = _staticStrokes.where((stroke) => !removeNow.contains(stroke)).toList(growable: false);
-          _animStrokes = _animStrokes.where((stroke) => !removeNow.contains(stroke)).toList(growable: false);
+          _staticStrokes = _staticStrokes
+              .where((stroke) => !removeNow.contains(stroke))
+              .toList(growable: false);
+          _animStrokes = _animStrokes
+              .where((stroke) => !removeNow.contains(stroke))
+              .toList(growable: false);
           _drawableStrokes = [..._staticStrokes, ..._animStrokes];
         });
       }
@@ -1341,7 +1583,8 @@ class _VectorViewerScreenState extends State<VectorViewerScreen>
         if (currentRecord == null) {
           continue;
         }
-        final desiredOrigin = Offset.lerp(entry.value, newOrigin, eased) ?? newOrigin;
+        final desiredOrigin =
+            Offset.lerp(entry.value, newOrigin, eased) ?? newOrigin;
         deltas[entry.key] = desiredOrigin - currentRecord.origin;
         currentRecord.origin = desiredOrigin;
       }
@@ -1361,7 +1604,8 @@ class _VectorViewerScreenState extends State<VectorViewerScreen>
 
     if (mounted) {
       setState(() {
-        _status = 'Moved ${ids.length} object(s) to (${newOrigin.dx}, ${newOrigin.dy}).';
+        _status =
+            'Moved ${ids.length} object(s) to (${newOrigin.dx}, ${newOrigin.dy}).';
       });
     }
   }
@@ -1596,7 +1840,8 @@ class _VectorViewerScreenState extends State<VectorViewerScreen>
 
     setState(() {
       resolved!.cluster.lastWrittenLabel = text;
-      _diagramLabelsByClusterRef[resolved.cluster.clusterRef] = DiagramPlacedLabel(
+      _diagramLabelsByClusterRef[resolved.cluster.clusterRef] =
+          DiagramPlacedLabel(
         objectId: resolved.diagram.objectId,
         clusterRef: resolved.cluster.clusterRef,
         text: text,
@@ -1695,7 +1940,8 @@ class _VectorViewerScreenState extends State<VectorViewerScreen>
             continue;
           }
 
-          final strokeIndexes = _coerceStrokeIndexes(labelEntry['stroke_indexes']);
+          final strokeIndexes =
+              _coerceStrokeIndexes(labelEntry['stroke_indexes']);
           if (strokeIndexes.isEmpty) {
             continue;
           }
@@ -1706,9 +1952,8 @@ class _VectorViewerScreenState extends State<VectorViewerScreen>
             label: matchedLabel,
             normalizedLabel: _normalizeLookupKey(matchedLabel),
             strokeIndexes: strokeIndexes,
-            targetKey:
-                (labelEntry['source_key'] ?? labelEntry['target_key'])
-                    ?.toString(),
+            targetKey: (labelEntry['source_key'] ?? labelEntry['target_key'])
+                ?.toString(),
           );
 
           diagramState.addCluster(cluster);
@@ -1726,7 +1971,8 @@ class _VectorViewerScreenState extends State<VectorViewerScreen>
             continue;
           }
 
-          final strokeIndexes = _coerceStrokeIndexes(labelEntry['stroke_indexes']);
+          final strokeIndexes =
+              _coerceStrokeIndexes(labelEntry['stroke_indexes']);
           if (strokeIndexes.isEmpty) {
             continue;
           }
@@ -1836,7 +2082,8 @@ class _VectorViewerScreenState extends State<VectorViewerScreen>
 
     final refs = _activeHighlightRefsByDiagramId[diagramObjectId];
     if (refs != null) {
-      final stillAnyForRef = (_highlightRefCountsByClusterRef[clusterRef] ?? 0) > 0;
+      final stillAnyForRef =
+          (_highlightRefCountsByClusterRef[clusterRef] ?? 0) > 0;
       if (!stillAnyForRef) {
         refs.remove(clusterRef);
       }
@@ -1863,7 +2110,8 @@ class _VectorViewerScreenState extends State<VectorViewerScreen>
     _zoomedClusterRef = clusterRef;
     final startScale = _boardZoomScale;
     final startFocus = _boardZoomWorldCenter;
-    final startSat = _diagramNonFocusSaturationByObjectId[diagramObjectId] ?? 1.0;
+    final startSat =
+        _diagramNonFocusSaturationByObjectId[diagramObjectId] ?? 1.0;
     const targetScale = 1.5;
     const targetSat = 0.0;
     const steps = 20;
@@ -1884,19 +2132,22 @@ class _VectorViewerScreenState extends State<VectorViewerScreen>
     required String diagramObjectId,
     required String clusterRef,
   }) async {
-    if (_zoomedDiagramObjectId != diagramObjectId || _zoomedClusterRef != clusterRef) {
+    if (_zoomedDiagramObjectId != diagramObjectId ||
+        _zoomedClusterRef != clusterRef) {
       return;
     }
     final startScale = _boardZoomScale;
     final startFocus = _boardZoomWorldCenter;
-    final startSat = _diagramNonFocusSaturationByObjectId[diagramObjectId] ?? 0.0;
+    final startSat =
+        _diagramNonFocusSaturationByObjectId[diagramObjectId] ?? 0.0;
     const steps = 18;
     for (int i = 1; i <= steps; i++) {
       final t = _smoothMotion(i / steps);
       if (!mounted) break;
       setState(() {
         _boardZoomScale = lerpDouble(startScale, 1.0, t) ?? 1.0;
-        _boardZoomWorldCenter = Offset.lerp(startFocus, Offset.zero, t) ?? Offset.zero;
+        _boardZoomWorldCenter =
+            Offset.lerp(startFocus, Offset.zero, t) ?? Offset.zero;
         _diagramNonFocusSaturationByObjectId[diagramObjectId] =
             lerpDouble(startSat, 1.0, t) ?? 1.0;
       });
@@ -1937,7 +2188,8 @@ class _VectorViewerScreenState extends State<VectorViewerScreen>
       final t = _smoothMotion(i / steps);
       if (!mounted) break;
       setState(() {
-        _objectSaturationById[objectId] = lerpDouble(start, target, t) ?? target;
+        _objectSaturationById[objectId] =
+            lerpDouble(start, target, t) ?? target;
       });
       await Future<void>.delayed(const Duration(milliseconds: 16));
     }
@@ -2191,11 +2443,13 @@ class _VectorViewerScreenState extends State<VectorViewerScreen>
     }
     final unit = Offset(dir.dx / len, dir.dy / len);
     final start = _lineExitPoint(fromBounds, fromCenter, unit, extraGap);
-    final end = _lineExitPoint(toBounds, toCenter, Offset(-unit.dx, -unit.dy), extraGap);
+    final end = _lineExitPoint(
+        toBounds, toCenter, Offset(-unit.dx, -unit.dy), extraGap);
     return (start, end);
   }
 
-  Offset _lineExitPoint(Rect bounds, Offset center, Offset direction, double extraGap) {
+  Offset _lineExitPoint(
+      Rect bounds, Offset center, Offset direction, double extraGap) {
     final dir = direction;
     final candidates = <double>[];
     if (dir.dx.abs() > 1e-6) {
@@ -2263,10 +2517,14 @@ class _VectorViewerScreenState extends State<VectorViewerScreen>
             if (seg is List && seg.length >= 8) {
               segs.add(
                 CubicSegment(
-                  p0: Offset((seg[0] as num).toDouble(), (seg[1] as num).toDouble()),
-                  c1: Offset((seg[2] as num).toDouble(), (seg[3] as num).toDouble()),
-                  c2: Offset((seg[4] as num).toDouble(), (seg[5] as num).toDouble()),
-                  p1: Offset((seg[6] as num).toDouble(), (seg[7] as num).toDouble()),
+                  p0: Offset(
+                      (seg[0] as num).toDouble(), (seg[1] as num).toDouble()),
+                  c1: Offset(
+                      (seg[2] as num).toDouble(), (seg[3] as num).toDouble()),
+                  c2: Offset(
+                      (seg[4] as num).toDouble(), (seg[5] as num).toDouble()),
+                  p1: Offset(
+                      (seg[6] as num).toDouble(), (seg[7] as num).toDouble()),
                 ),
               );
             }
@@ -2283,11 +2541,13 @@ class _VectorViewerScreenState extends State<VectorViewerScreen>
           final points = <Offset>[];
           for (final p in s['points'] as List) {
             if (p is List && p.length >= 2) {
-              points.add(Offset((p[0] as num).toDouble(), (p[1] as num).toDouble()));
+              points.add(
+                  Offset((p[0] as num).toDouble(), (p[1] as num).toDouble()));
             }
           }
           if (points.length >= 2) {
-            poly.add(StrokePolyline(points, color: color, sourceStrokeIndex: i));
+            poly.add(
+                StrokePolyline(points, color: color, sourceStrokeIndex: i));
           }
         }
       }
@@ -2308,7 +2568,8 @@ class _VectorViewerScreenState extends State<VectorViewerScreen>
     }
   }
 
-  Future<List<DiagramLabelAnchor>> _loadDiagramLabelAnchors(String processedId) async {
+  Future<List<DiagramLabelAnchor>> _loadDiagramLabelAnchors(
+      String processedId) async {
     final cached = _labelAnchorCacheByProcessedId[processedId];
     if (cached != null) {
       return cached;
@@ -2316,14 +2577,16 @@ class _VectorViewerScreenState extends State<VectorViewerScreen>
     final path = '$_processedImagesFolder\\$processedId.json';
     final file = File(path);
     if (!file.existsSync()) {
-      _labelAnchorCacheByProcessedId[processedId] = const <DiagramLabelAnchor>[];
+      _labelAnchorCacheByProcessedId[processedId] =
+          const <DiagramLabelAnchor>[];
       return const <DiagramLabelAnchor>[];
     }
     try {
       final raw = await file.readAsString();
       final decoded = json.decode(raw);
       if (decoded is! Map || decoded['words'] is! List) {
-        _labelAnchorCacheByProcessedId[processedId] = const <DiagramLabelAnchor>[];
+        _labelAnchorCacheByProcessedId[processedId] =
+            const <DiagramLabelAnchor>[];
         return const <DiagramLabelAnchor>[];
       }
       final anchors = <DiagramLabelAnchor>[];
@@ -2360,7 +2623,8 @@ class _VectorViewerScreenState extends State<VectorViewerScreen>
       _labelAnchorCacheByProcessedId[processedId] = anchors;
       return anchors;
     } catch (_) {
-      _labelAnchorCacheByProcessedId[processedId] = const <DiagramLabelAnchor>[];
+      _labelAnchorCacheByProcessedId[processedId] =
+          const <DiagramLabelAnchor>[];
       return const <DiagramLabelAnchor>[];
     }
   }
@@ -2384,7 +2648,8 @@ class _VectorViewerScreenState extends State<VectorViewerScreen>
     }
 
     if (matched != null && diagramRecord.sourceBounds != null) {
-      final worldRect = _mapSourceRectToWorld(diagramRecord, matched.sourceRect);
+      final worldRect =
+          _mapSourceRectToWorld(diagramRecord, matched.sourceRect);
       return DiagramWriteTarget(
         origin: Offset(worldRect.left, worldRect.center.dy),
         letterSize: math.max(26.0, worldRect.height * 0.8),
@@ -2410,14 +2675,16 @@ class _VectorViewerScreenState extends State<VectorViewerScreen>
 
   Rect _mapSourceRectToWorld(BoardObjectRecord record, Rect sourceRect) {
     final worldTopLeft = _mapSourcePointToWorld(record, sourceRect.topLeft);
-    final worldBottomRight = _mapSourcePointToWorld(record, sourceRect.bottomRight);
+    final worldBottomRight =
+        _mapSourcePointToWorld(record, sourceRect.bottomRight);
     return Rect.fromPoints(worldTopLeft, worldBottomRight);
   }
 
   Offset _mapSourcePointToWorld(BoardObjectRecord record, Offset sourcePoint) {
     final sourceWidth = record.sourceWidth ?? 1000.0;
     final sourceHeight = record.sourceHeight ?? 1000.0;
-    final sourceBounds = record.sourceBounds ?? Rect.fromLTWH(0, 0, sourceWidth, sourceHeight);
+    final sourceBounds =
+        record.sourceBounds ?? Rect.fromLTWH(0, 0, sourceWidth, sourceHeight);
     final srcMax = math.max(sourceWidth, sourceHeight);
     final baseUpscale = srcMax > 0 ? _targetResolution / srcMax : 1.0;
     final scale = record.scale <= 0 ? 1.0 : record.scale;
@@ -2432,6 +2699,7 @@ class _VectorViewerScreenState extends State<VectorViewerScreen>
       scaled.dy - centerScaled.dy + record.origin.dy,
     );
   }
+
   Future<void> _ensureFontMetricsLoaded() async {
     if (_fontLineHeightPx != null && _fontImageHeightPx != null) return;
     try {
@@ -2446,8 +2714,14 @@ class _VectorViewerScreenState extends State<VectorViewerScreen>
       if (decoded is Map) {
         final lh = (decoded['line_height_px'] as num?)?.toDouble();
         final ih = (decoded['image_height'] as num?)?.toDouble();
-        if (lh != null && lh > 0) _fontLineHeightPx = lh;
-        if (ih != null && ih > 0) _fontImageHeightPx = ih;
+        if (lh != null && lh > 0 && ih != null && ih > 0) {
+          final normalizeScale = _targetResolution / ih;
+          _fontLineHeightPx = lh * normalizeScale;
+          _fontImageHeightPx = _targetResolution;
+        } else {
+          if (lh != null && lh > 0) _fontLineHeightPx = lh;
+          if (ih != null && ih > 0) _fontImageHeightPx = ih;
+        }
       }
       _fontLineHeightPx ??= _targetResolution * 0.5;
       _fontImageHeightPx ??= _targetResolution;
@@ -2565,8 +2839,8 @@ class _VectorViewerScreenState extends State<VectorViewerScreen>
             aliases: <String>{name, _stemWithoutJson(name)},
           );
         } else if (kind == 'text') {
-          final letterSize =
-              (o['letter_size'] as num?)?.toDouble() ?? _textBaseFontSizeRef;
+          final letterSize = (o['letter_size'] as num?)?.toDouble() ??
+              (_textBaseFontSizeRef * _defaultTextObjectScale);
           final letterGap =
               (o['letter_gap'] as num?)?.toDouble() ?? _textLetterGapPx;
           _textLetterGapPx = letterGap;
@@ -2626,8 +2900,9 @@ class _VectorViewerScreenState extends State<VectorViewerScreen>
       return Color.fromARGB(255, ri, gi, bi);
     }
 
-    final hex =
-        strokeJson['color_hex'] ?? strokeJson['colour_hex'] ?? strokeJson['hex'];
+    final hex = strokeJson['color_hex'] ??
+        strokeJson['colour_hex'] ??
+        strokeJson['hex'];
     if (hex is String && hex.isNotEmpty) {
       var s = hex.trim();
       if (s.startsWith('#')) s = s.substring(1);
@@ -2657,8 +2932,7 @@ class _VectorViewerScreenState extends State<VectorViewerScreen>
 
     final x = double.tryParse(_posXController.text.trim()) ?? 0.0;
     final y = double.tryParse(_posYController.text.trim()) ?? 0.0;
-    final scale =
-        double.tryParse(_scaleController.text.trim()) ??
+    final scale = double.tryParse(_scaleController.text.trim()) ??
         _defaultImageObjectScale;
 
     await _whiteboardActions.drawImage(
@@ -2902,14 +3176,13 @@ class _VectorViewerScreenState extends State<VectorViewerScreen>
     }
   }
 
-  static String _resolveBackendSubdir(String subdir) {
+  static String _resolveProjectRoot() {
     var dir = Directory.current;
 
     for (int i = 0; i < 10; i++) {
       final candidate = Directory('${dir.path}\\whiteboard_backend');
       if (candidate.existsSync()) {
-        if (subdir.isEmpty) return candidate.path;
-        return '${candidate.path}\\$subdir';
+        return dir.path;
       }
 
       final parent = dir.parent;
@@ -2919,8 +3192,25 @@ class _VectorViewerScreenState extends State<VectorViewerScreen>
       dir = parent;
     }
 
-    return '${Directory.current.path}\\whiteboard_backend\\$subdir';
+    return Directory.current.path;
   }
+
+  static String _resolveBackendSubdir(String subdir) {
+    final root = _resolveProjectRoot();
+    final backendPath = '$root\\whiteboard_backend';
+    if (subdir.isEmpty) return backendPath;
+    return '$backendPath\\$subdir';
+  }
+
+  static String _resolveDimensionsConfigPath() {
+    final root = _resolveProjectRoot();
+    return '$root\\dimentions.json';
+  }
+
+  static String get _dimensionsConfigPathStatic =>
+      _resolveDimensionsConfigPath();
+
+  String get _dimensionsConfigPath => _dimensionsConfigPathStatic;
 
   Future<GlyphData?> _getGlyphForCode(int codeUnit) async {
     if (_glyphCache.containsKey(codeUnit)) {
@@ -2942,8 +3232,15 @@ class _VectorViewerScreenState extends State<VectorViewerScreen>
       }
 
       final strokesJson = decoded['strokes'] as List;
-      final format =
-          (decoded['vector_format'] as String?)?.toLowerCase() ?? 'bezier_cubic';
+      final format = (decoded['vector_format'] as String?)?.toLowerCase() ??
+          'bezier_cubic';
+      final rawWidth =
+          (decoded['width'] as num?)?.toDouble() ?? _targetResolution;
+      final rawHeight =
+          (decoded['height'] as num?)?.toDouble() ?? _targetResolution;
+      final rawLongest = math.max(rawWidth, rawHeight);
+      final normalizeScale =
+          rawLongest > 0 ? (_targetResolution / rawLongest) : 1.0;
 
       final cubics = <StrokeCubic>[];
 
@@ -2955,20 +3252,20 @@ class _VectorViewerScreenState extends State<VectorViewerScreen>
           for (final seg in segsJson) {
             if (seg is List && seg.length >= 8) {
               final p0 = Offset(
-                (seg[0] as num).toDouble(),
-                (seg[1] as num).toDouble(),
+                (seg[0] as num).toDouble() * normalizeScale,
+                (seg[1] as num).toDouble() * normalizeScale,
               );
               final c1 = Offset(
-                (seg[2] as num).toDouble(),
-                (seg[3] as num).toDouble(),
+                (seg[2] as num).toDouble() * normalizeScale,
+                (seg[3] as num).toDouble() * normalizeScale,
               );
               final c2 = Offset(
-                (seg[4] as num).toDouble(),
-                (seg[5] as num).toDouble(),
+                (seg[4] as num).toDouble() * normalizeScale,
+                (seg[5] as num).toDouble() * normalizeScale,
               );
               final p1 = Offset(
-                (seg[6] as num).toDouble(),
-                (seg[7] as num).toDouble(),
+                (seg[6] as num).toDouble() * normalizeScale,
+                (seg[7] as num).toDouble() * normalizeScale,
               );
               segs.add(CubicSegment(p0: p0, c1: c1, c2: c2, p1: p1));
             }
@@ -3228,8 +3525,8 @@ class _VectorViewerScreenState extends State<VectorViewerScreen>
 
     final x = double.tryParse(_textXController.text.trim()) ?? 0.0;
     final y = double.tryParse(_textYController.text.trim()) ?? 0.0;
-    final size =
-        double.tryParse(_textSizeController.text.trim()) ?? _textBaseFontSizeRef;
+    final size = double.tryParse(_textSizeController.text.trim()) ??
+        _textBaseFontSizeRef;
 
     final gapParsed =
         double.tryParse(_textGapController.text.trim()) ?? _textLetterGapPx;
@@ -3312,10 +3609,10 @@ class _VectorViewerScreenState extends State<VectorViewerScreen>
     }
 
     if (letterSize <= 0) {
-      letterSize = _textBaseFontSizeRef;
+      letterSize = _textBaseFontSizeRef * _defaultTextObjectScale;
     }
     final effectiveStrokeSlowdown =
-        (strokeSlowdown ?? _defaultTextStrokeSlowdown)
+        (strokeSlowdown ?? _dimensionsConfig.defaultTextStrokeSlowdown)
             .clamp(0.1, 100.0)
             .toDouble();
 
@@ -3335,8 +3632,9 @@ class _VectorViewerScreenState extends State<VectorViewerScreen>
     final diagBoard =
         math.sqrt(_boardWidth * _boardWidth + _boardHeight * _boardHeight);
 
-    final objectId =
-        (boardObjectId?.trim().isNotEmpty == true) ? boardObjectId!.trim() : prompt;
+    final objectId = (boardObjectId?.trim().isNotEmpty == true)
+        ? boardObjectId!.trim()
+        : prompt;
     final displayName =
         (logicalName?.trim().isNotEmpty == true) ? logicalName!.trim() : prompt;
 
@@ -3348,7 +3646,7 @@ class _VectorViewerScreenState extends State<VectorViewerScreen>
     final baselineGlyphScaled = baselineGlyph * scale;
 
     final letterGapPx = _textLetterGapPx;
-    const spaceWidthFactor = 0.5;
+    final spaceWidthFactor = _dimensionsConfig.textSpaceWidthFactor;
 
     for (int i = 0; i < prompt.length; i++) {
       final ch = prompt[i];
@@ -3462,7 +3760,8 @@ class _VectorViewerScreenState extends State<VectorViewerScreen>
                   speedEndPct: _strokeSpeedEndPct,
                   speedPeakMult: _strokeSpeedPeakMult,
                   speedPeakTime: _strokeSpeedPeakTime,
-                  diagramStatesByObjectId: Map<String, DiagramRuntimeState>.from(
+                  diagramStatesByObjectId:
+                      Map<String, DiagramRuntimeState>.from(
                     _diagramStatesByObjectId,
                   ),
                   highlightedClusterRefs: Set<String>.from(
@@ -3477,9 +3776,10 @@ class _VectorViewerScreenState extends State<VectorViewerScreen>
                   zoomedClusterRef: _zoomedClusterRef,
                   objectSaturationByObjectId:
                       Map<String, double>.from(_objectSaturationById),
-                  diagramNonFocusSaturationByObjectId:
-                      Map<String, double>.from(_diagramNonFocusSaturationByObjectId),
-                  activeHighlightRefsByDiagramId: _activeHighlightRefsByDiagramId.map(
+                  diagramNonFocusSaturationByObjectId: Map<String, double>.from(
+                      _diagramNonFocusSaturationByObjectId),
+                  activeHighlightRefsByDiagramId:
+                      _activeHighlightRefsByDiagramId.map(
                     (key, value) => MapEntry(key, Set<String>.from(value)),
                   ),
                   zoomedDiagramObjectId: _zoomedDiagramObjectId,
@@ -3531,8 +3831,7 @@ class _VectorViewerScreenState extends State<VectorViewerScreen>
                     _stepMode
                         ? 'Mode: STEP  | shown: $_stepStrokeCount'
                         : 'Mode: ANIM | t=${_animValue.toStringAsFixed(2)}',
-                    style:
-                        const TextStyle(color: Colors.white54, fontSize: 12),
+                    style: const TextStyle(color: Colors.white54, fontSize: 12),
                   ),
                   const SizedBox(height: 12),
                   const Text(
@@ -3553,8 +3852,7 @@ class _VectorViewerScreenState extends State<VectorViewerScreen>
                   const SizedBox(height: 4),
                   Text(
                     'Folder:\n$_vectorsFolder',
-                    style:
-                        const TextStyle(color: Colors.white38, fontSize: 10),
+                    style: const TextStyle(color: Colors.white38, fontSize: 10),
                   ),
                   const SizedBox(height: 4),
                   TextField(
@@ -3793,6 +4091,11 @@ class _VectorViewerScreenState extends State<VectorViewerScreen>
                     onPressed: _writeTextFromUi,
                     child: const Text('Write text'),
                   ),
+                  const SizedBox(height: 8),
+                  ElevatedButton(
+                    onPressed: _printEffectiveSizingSummary,
+                    child: const Text('Print effective sizing'),
+                  ),
                   const SizedBox(height: 16),
                   const Divider(color: Colors.white24),
                   const SizedBox(height: 8),
@@ -3807,8 +4110,7 @@ class _VectorViewerScreenState extends State<VectorViewerScreen>
                   const SizedBox(height: 4),
                   Text(
                     'Multiplier: ${_globalSpeedMultiplier.toStringAsFixed(2)}x',
-                    style:
-                        const TextStyle(color: Colors.white70, fontSize: 11),
+                    style: const TextStyle(color: Colors.white70, fontSize: 11),
                   ),
                   Slider(
                     value: _globalSpeedMultiplier,
@@ -3841,8 +4143,7 @@ class _VectorViewerScreenState extends State<VectorViewerScreen>
                   const SizedBox(height: 4),
                   Text(
                     'Min stroke time: ${_minStrokeTimeSec.toStringAsFixed(3)} s',
-                    style:
-                        const TextStyle(color: Colors.white70, fontSize: 11),
+                    style: const TextStyle(color: Colors.white70, fontSize: 11),
                   ),
                   Slider(
                     value: _minStrokeTimeSec,
@@ -3863,8 +4164,7 @@ class _VectorViewerScreenState extends State<VectorViewerScreen>
                   ),
                   Text(
                     'Max stroke time: ${_maxStrokeTimeSec.toStringAsFixed(3)} s',
-                    style:
-                        const TextStyle(color: Colors.white70, fontSize: 11),
+                    style: const TextStyle(color: Colors.white70, fontSize: 11),
                   ),
                   Slider(
                     value: _maxStrokeTimeSec,
@@ -3886,8 +4186,7 @@ class _VectorViewerScreenState extends State<VectorViewerScreen>
                   const SizedBox(height: 4),
                   Text(
                     'Length factor: ${_lengthTimePerKPxSec.toStringAsFixed(3)} s per 1000px',
-                    style:
-                        const TextStyle(color: Colors.white70, fontSize: 11),
+                    style: const TextStyle(color: Colors.white70, fontSize: 11),
                   ),
                   Slider(
                     value: _lengthTimePerKPxSec,
@@ -3908,8 +4207,7 @@ class _VectorViewerScreenState extends State<VectorViewerScreen>
                   ),
                   Text(
                     'Max curvature extra: ${_curvatureExtraMaxSec.toStringAsFixed(3)} s',
-                    style:
-                        const TextStyle(color: Colors.white70, fontSize: 11),
+                    style: const TextStyle(color: Colors.white70, fontSize: 11),
                   ),
                   Slider(
                     value: _curvatureExtraMaxSec,
@@ -3942,8 +4240,7 @@ class _VectorViewerScreenState extends State<VectorViewerScreen>
                   const SizedBox(height: 4),
                   Text(
                     'Profile strength: ${_curvatureProfileFactor.toStringAsFixed(2)}x',
-                    style:
-                        const TextStyle(color: Colors.white70, fontSize: 11),
+                    style: const TextStyle(color: Colors.white70, fontSize: 11),
                   ),
                   Slider(
                     value: _curvatureProfileFactor,
@@ -3964,8 +4261,7 @@ class _VectorViewerScreenState extends State<VectorViewerScreen>
                   ),
                   Text(
                     'Angle scale: ${_curvatureAngleScale.toStringAsFixed(0)}°',
-                    style:
-                        const TextStyle(color: Colors.white70, fontSize: 11),
+                    style: const TextStyle(color: Colors.white70, fontSize: 11),
                   ),
                   Slider(
                     value: _curvatureAngleScale,
@@ -3998,8 +4294,7 @@ class _VectorViewerScreenState extends State<VectorViewerScreen>
                   const SizedBox(height: 4),
                   Text(
                     'Start ease: ${(_strokeSpeedStartPct * 100).toStringAsFixed(0)}%',
-                    style:
-                        const TextStyle(color: Colors.white70, fontSize: 11),
+                    style: const TextStyle(color: Colors.white70, fontSize: 11),
                   ),
                   Slider(
                     value: _strokeSpeedStartPct,
@@ -4020,8 +4315,7 @@ class _VectorViewerScreenState extends State<VectorViewerScreen>
                   ),
                   Text(
                     'End ease: ${(_strokeSpeedEndPct * 100).toStringAsFixed(0)}%',
-                    style:
-                        const TextStyle(color: Colors.white70, fontSize: 11),
+                    style: const TextStyle(color: Colors.white70, fontSize: 11),
                   ),
                   Slider(
                     value: _strokeSpeedEndPct,
@@ -4042,8 +4336,7 @@ class _VectorViewerScreenState extends State<VectorViewerScreen>
                   ),
                   Text(
                     'Peak speed: ${_strokeSpeedPeakMult.toStringAsFixed(2)}x',
-                    style:
-                        const TextStyle(color: Colors.white70, fontSize: 11),
+                    style: const TextStyle(color: Colors.white70, fontSize: 11),
                   ),
                   Slider(
                     value: _strokeSpeedPeakMult,
@@ -4064,8 +4357,7 @@ class _VectorViewerScreenState extends State<VectorViewerScreen>
                   ),
                   Text(
                     'Peak time: ${_strokeSpeedPeakTime.toStringAsFixed(2)}',
-                    style:
-                        const TextStyle(color: Colors.white70, fontSize: 11),
+                    style: const TextStyle(color: Colors.white70, fontSize: 11),
                   ),
                   Slider(
                     value: _strokeSpeedPeakTime,
@@ -4095,8 +4387,7 @@ class _VectorViewerScreenState extends State<VectorViewerScreen>
                   const SizedBox(height: 4),
                   Text(
                     'Base travel: ${_baseTravelTimeSec.toStringAsFixed(3)} s',
-                    style:
-                        const TextStyle(color: Colors.white70, fontSize: 11),
+                    style: const TextStyle(color: Colors.white70, fontSize: 11),
                   ),
                   Slider(
                     value: _baseTravelTimeSec,
@@ -4117,8 +4408,7 @@ class _VectorViewerScreenState extends State<VectorViewerScreen>
                   ),
                   Text(
                     'Distance factor: ${_travelTimePerKPxSec.toStringAsFixed(3)} s per 1000px',
-                    style:
-                        const TextStyle(color: Colors.white70, fontSize: 11),
+                    style: const TextStyle(color: Colors.white70, fontSize: 11),
                   ),
                   Slider(
                     value: _travelTimePerKPxSec,
@@ -4139,8 +4429,7 @@ class _VectorViewerScreenState extends State<VectorViewerScreen>
                   ),
                   Text(
                     'Travel clamp min: ${_minTravelTimeSec.toStringAsFixed(3)} s',
-                    style:
-                        const TextStyle(color: Colors.white70, fontSize: 11),
+                    style: const TextStyle(color: Colors.white70, fontSize: 11),
                   ),
                   Slider(
                     value: _minTravelTimeSec,
@@ -4161,8 +4450,7 @@ class _VectorViewerScreenState extends State<VectorViewerScreen>
                   ),
                   Text(
                     'Travel clamp max: ${_maxTravelTimeSec.toStringAsFixed(3)} s',
-                    style:
-                        const TextStyle(color: Colors.white70, fontSize: 11),
+                    style: const TextStyle(color: Colors.white70, fontSize: 11),
                   ),
                   Slider(
                     value: _maxTravelTimeSec,
@@ -4357,15 +4645,13 @@ class _VectorViewerScreenState extends State<VectorViewerScreen>
     final centerScaled = Offset(srcCenter.dx * upscale, srcCenter.dy * upscale);
 
     for (final s in polylines) {
-      final pts = s.points
-          .map((p) {
-            final scaled = Offset(p.dx * upscale, p.dy * upscale);
-            return Offset(
-              scaled.dx - centerScaled.dx + origin.dx,
-              scaled.dy - centerScaled.dy + origin.dy,
-            );
-          })
-          .toList(growable: false);
+      final pts = s.points.map((p) {
+        final scaled = Offset(p.dx * upscale, p.dy * upscale);
+        return Offset(
+          scaled.dx - centerScaled.dx + origin.dx,
+          scaled.dy - centerScaled.dy + origin.dy,
+        );
+      }).toList(growable: false);
 
       if (pts.length < 2) continue;
 
@@ -5227,10 +5513,10 @@ class WhiteboardPainter extends CustomPainter {
       path.lineTo(pts[i].dx, pts[i].dy);
     }
 
-    final double penW = ((basePenWidth * stroke.strokeWidthMultiplier) /
-            viewScale)
-        .clamp(0.35, 10.0)
-        .toDouble();
+    final double penW =
+        ((basePenWidth * stroke.strokeWidthMultiplier) / viewScale)
+            .clamp(0.35, 10.0)
+            .toDouble();
 
     final paintLine = Paint()
       ..color = _effectiveStrokeColor(stroke)
@@ -5246,7 +5532,8 @@ class WhiteboardPainter extends CustomPainter {
     double saturation = objectSaturationByObjectId[stroke.jsonName] ?? 1.0;
     final diagram = diagramStatesByObjectId[stroke.jsonName];
     if (diagram != null) {
-      final activeHighlights = activeHighlightRefsByDiagramId[diagram.objectId] ?? const <String>{};
+      final activeHighlights =
+          activeHighlightRefsByDiagramId[diagram.objectId] ?? const <String>{};
       if (activeHighlights.isNotEmpty) {
         final isFocused = activeHighlights.any((clusterRef) {
           final cluster = diagram.clustersByCanonicalRef[clusterRef];
@@ -5256,22 +5543,30 @@ class WhiteboardPainter extends CustomPainter {
           return cluster.strokeIndexes.contains(stroke.sourceStrokeIndex);
         });
         if (!isFocused) {
-          saturation *= diagramNonFocusSaturationByObjectId[diagram.objectId] ?? 0.5;
+          saturation *=
+              diagramNonFocusSaturationByObjectId[diagram.objectId] ?? 0.5;
         }
-      } else if (zoomedDiagramObjectId == diagram.objectId && zoomedClusterRef != null) {
+      } else if (zoomedDiagramObjectId == diagram.objectId &&
+          zoomedClusterRef != null) {
         final zoomCluster = diagram.clustersByCanonicalRef[zoomedClusterRef!];
-        final isFocused = zoomCluster?.strokeIndexes.contains(stroke.sourceStrokeIndex) ?? false;
+        final isFocused =
+            zoomCluster?.strokeIndexes.contains(stroke.sourceStrokeIndex) ??
+                false;
         if (!isFocused) {
-          saturation *= diagramNonFocusSaturationByObjectId[diagram.objectId] ?? 0.0;
+          saturation *=
+              diagramNonFocusSaturationByObjectId[diagram.objectId] ?? 0.0;
         }
       }
     }
-    return _applySaturation(stroke.color, saturation.clamp(0.0, 1.0).toDouble());
+    return _applySaturation(
+        stroke.color, saturation.clamp(0.0, 1.0).toDouble());
   }
 
   Color _applySaturation(Color color, double factor) {
     final hsl = HSLColor.fromColor(color);
-    return hsl.withSaturation((hsl.saturation * factor).clamp(0.0, 1.0)).toColor();
+    return hsl
+        .withSaturation((hsl.saturation * factor).clamp(0.0, 1.0))
+        .toColor();
   }
 
   double _warpStrokePhase(double t) {
@@ -5429,7 +5724,8 @@ class WhiteboardPainter extends CustomPainter {
           continue;
         }
 
-        final double penW = (basePenWidth * 2.2 / viewScale).clamp(0.8, 16.0).toDouble();
+        final double penW =
+            (basePenWidth * 2.2 / viewScale).clamp(0.8, 16.0).toDouble();
         final overlay = Paint()
           ..color = const Color(0xFFFFC107)
           ..style = PaintingStyle.stroke
@@ -5465,7 +5761,8 @@ class WhiteboardPainter extends CustomPainter {
         final zoomPaint = Paint()
           ..color = const Color(0xFF7E57C2)
           ..style = PaintingStyle.stroke
-          ..strokeWidth = (basePenWidth * 1.4 / viewScale).clamp(0.8, 12.0).toDouble();
+          ..strokeWidth =
+              (basePenWidth * 1.4 / viewScale).clamp(0.8, 12.0).toDouble();
         canvas.drawRect(bounds.inflate(20.0), zoomPaint);
       }
     }
@@ -5518,7 +5815,8 @@ class WhiteboardPainter extends CustomPainter {
     final paint = Paint()
       ..color = const Color(0xFF26A69A)
       ..style = PaintingStyle.stroke
-      ..strokeWidth = (basePenWidth * 1.3 / viewScale).clamp(0.7, 10.0).toDouble();
+      ..strokeWidth =
+          (basePenWidth * 1.3 / viewScale).clamp(0.7, 10.0).toDouble();
 
     for (final connection in diagramConnections) {
       final fromDiagram = diagramStatesByObjectId[connection.fromObjectId];
@@ -5529,7 +5827,8 @@ class WhiteboardPainter extends CustomPainter {
 
       final fromCluster =
           fromDiagram.clustersByCanonicalRef[connection.fromClusterRef];
-      final toCluster = toDiagram.clustersByCanonicalRef[connection.toClusterRef];
+      final toCluster =
+          toDiagram.clustersByCanonicalRef[connection.toClusterRef];
       if (fromCluster == null || toCluster == null) {
         continue;
       }

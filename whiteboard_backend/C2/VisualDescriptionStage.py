@@ -24,11 +24,19 @@ try:
 except Exception:  # pragma: no cover - optional dependency at runtime
     DDGS = None
 
+try:
+    from .QwenWorker import ServerQwenWorker
+except Exception:
+    from QwenWorker import ServerQwenWorker
+
 
 WIKIDATA_API = "https://www.wikidata.org/w/api.php"
 WIKIPEDIA_API = "https://en.wikipedia.org/w/api.php"
 WIKIMEDIA_API = "https://commons.wikimedia.org/w/api.php"
-DEFAULT_WORKER = os.environ.get("QWEN_WORKER_URL", "http://127.0.0.1:8090/infer")
+DEFAULT_WORKER = str(
+    os.environ.get("QWEN_VLLM_SERVER_URL", os.environ.get("QWEN_WORKER_URL", "http://127.0.0.1:8009"))
+    or "http://127.0.0.1:8009"
+).strip().rstrip("/")
 DEFAULT_OUTPUT_ROOT = os.environ.get("VISUAL_STAGE_OUTPUT_ROOT", ".dist")
 USER_AGENT = os.environ.get(
     "VISUAL_STAGE_UA",
@@ -73,56 +81,34 @@ def _sentence_chunks(text: str, take: int = 2, from_end: bool = False) -> str:
     return " ".join(selected)[:320].strip()
 
 
+def _component_key(label: str, qid: str) -> str:
+    base = _slugify(label or qid, qid or "component", limit=64)
+    if qid:
+        return f"{qid}:{base}"
+    return base
+
+
 class WorkerClient:
     def __init__(self, url: str, timeout: int = 240):
-        self.url = url
-        self.batch_url = url[:-6] + "/infer_batch" if url.endswith("/infer") else url.rstrip("/") + "/infer_batch"
-        self.timeout = timeout
-        self.session = requests.Session()
-        adapter = HTTPAdapter(pool_connections=16, pool_maxsize=16)
-        self.session.mount("http://", adapter)
-        self.session.mount("https://", adapter)
+        self.url = str(url or DEFAULT_WORKER).rstrip("/")
+        self.timeout = int(timeout)
+        self.worker = ServerQwenWorker(
+            model_name=str(os.environ.get("QWEN_TEXT_MODEL_ID", os.environ.get("QWEN_MODEL", "cyankiwi/Qwen3.5-4B-AWQ-4bit")) or "cyankiwi/Qwen3.5-4B-AWQ-4bit"),
+            max_new_tokens=max(96, int(os.environ.get("C2_QWEN_MAX_NEW_TOKENS", "256") or 256)),
+            server_base_url=self.url,
+            stage_io_dir=str(os.environ.get("QWEN_STAGE_IO_DIR", "") or ""),
+        )
 
     def infer(self, task: str, mode: str, payload: Dict[str, Any]) -> Dict[str, Any]:
-        response = self.session.post(
-            self.url,
-            json={"task": task, "mode": mode, "payload": payload},
-            timeout=self.timeout,
-        )
-        response.raise_for_status()
-        data = response.json()
-        if not data.get("ok"):
-            raise RuntimeError(data.get("error", "worker error"))
-        return data["result"]
+        return self.worker.infer({"task": task, "mode": mode, "payload": payload})
 
     def infer_many(self, task: str, mode: str, payloads: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
-        if not payloads:
-            return []
-        if len(payloads) == 1:
-            return [self.infer(task=task, mode=mode, payload=payloads[0])]
-        body = {
-            "items": [
+        return self.worker.infer_many(
+            [
                 {"task": task, "mode": mode, "payload": payload}
-                for payload in payloads
+                for payload in (payloads or [])
             ]
-        }
-        try:
-            response = self.session.post(self.batch_url, json=body, timeout=self.timeout)
-            response.raise_for_status()
-            data = response.json()
-            if not data.get("ok"):
-                raise RuntimeError(data.get("error", "worker batch error"))
-            results = data.get("results", [])
-            if not isinstance(results, list) or len(results) != len(payloads):
-                raise RuntimeError("worker batch response size mismatch")
-            return results
-        except Exception:
-            if len(payloads) <= 2:
-                return [self.infer(task=task, mode=mode, payload=payload) for payload in payloads]
-            mid = max(1, len(payloads) // 2)
-            left = self.infer_many(task=task, mode=mode, payloads=payloads[:mid])
-            right = self.infer_many(task=task, mode=mode, payloads=payloads[mid:])
-            return left + right
+        )
 
 
 class ReferenceClient:
@@ -570,6 +556,7 @@ class VisualDescriptionStage:
                     "component": component,
                     "qid": qid,
                     "label": label,
+                    "component_key": _component_key(label, qid),
                     "component_dir": component_dir,
                     "search_query": query_overrides.get(qid) or label or qid,
                     "profile": {},
@@ -865,6 +852,7 @@ class VisualDescriptionStage:
             payload = {
                 "target_prompt": original_prompt,
                 "component": state["component"],
+                "component_key": state.get("component_key", ""),
                 "error": state["skipped_reason"],
             }
             with open(error_path, "w", encoding="utf-8") as handle:
@@ -873,6 +861,7 @@ class VisualDescriptionStage:
                 "qid": state.get("qid", ""),
                 "label": state.get("label", ""),
                 "component": dict(state.get("component") or {}),
+                "component_key": str(state.get("component_key", "") or ""),
                 "component_dir": os.path.abspath(state["component_dir"]),
                 "json_path": os.path.abspath(error_path),
                 "search_query": state.get("search_query", ""),
@@ -888,6 +877,7 @@ class VisualDescriptionStage:
             error_payload = {
                 "target_prompt": original_prompt,
                 "component": state["component"],
+                "component_key": state.get("component_key", ""),
                 "error": state["error"],
             }
             with open(error_path, "w", encoding="utf-8") as handle:
@@ -896,6 +886,7 @@ class VisualDescriptionStage:
                 "qid": state.get("qid", ""),
                 "label": state.get("label", ""),
                 "component": dict(state.get("component") or {}),
+                "component_key": str(state.get("component_key", "") or ""),
                 "component_dir": os.path.abspath(state["component_dir"]),
                 "json_path": os.path.abspath(error_path),
                 "search_query": state.get("search_query", ""),
@@ -1285,6 +1276,10 @@ class VisualDescriptionStage:
         payload = {
             "target_prompt": original_prompt,
             "target": target,
+            "component_key": _component_key(
+                str(component.get("label", "") or ""),
+                str(component.get("qid", "") or ""),
+            ),
             "component": {
                 "qid": component.get("qid", ""),
                 "label": component.get("label", ""),
@@ -1304,6 +1299,7 @@ class VisualDescriptionStage:
         return {
             "qid": component.get("qid", ""),
             "label": component.get("label", ""),
+            "component_key": payload.get("component_key", ""),
             "component": payload.get("component", {}),
             "component_dir": os.path.abspath(component_dir),
             "json_path": os.path.abspath(json_path),

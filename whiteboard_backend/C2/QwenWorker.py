@@ -28,6 +28,7 @@ from collections import OrderedDict
 from dataclasses import dataclass
 from http import HTTPStatus
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+from pathlib import Path
 from typing import Any, Dict, List, Optional, Set
 
 os.environ.setdefault("PYTORCH_CUDA_ALLOC_CONF", "garbage_collection_threshold:0.8,max_split_size_mb:128")
@@ -35,10 +36,15 @@ os.environ.setdefault("PYTORCH_CUDA_ALLOC_CONF", "garbage_collection_threshold:0
 import torch
 from transformers import AutoModelForCausalLM, AutoTokenizer
 
+from LLMstuff.qwen_vllm_server import QwenServerClient
+
 
 DEFAULT_MODEL = os.environ.get("QWEN_MODEL", "Qwen/Qwen3.5-0.8B")
 DEFAULT_HOST = os.environ.get("QWEN_WORKER_HOST", "127.0.0.1")
 DEFAULT_PORT = int(os.environ.get("QWEN_WORKER_PORT", "8090"))
+DEFAULT_SERVER_BASE_URL = str(
+    os.environ.get("QWEN_VLLM_SERVER_URL", "http://127.0.0.1:8009") or "http://127.0.0.1:8009"
+).strip().rstrip("/")
 
 
 AGENT_SYSTEM_PROMPT = """
@@ -3693,6 +3699,330 @@ class QwenWorker:
         bucketed = set(result["accept"]) | set(result["reject"])
         result["notes"] = {rid: note for rid, note in clean_notes.items() if rid in bucketed}
         return result
+
+
+@dataclass
+class _QueuedInference:
+    body: Dict[str, Any]
+    event: threading.Event
+    result: Optional[Dict[str, Any]] = None
+    error: Optional[Exception] = None
+
+
+class ServerQwenWorker(QwenWorker):
+    """
+    C2 worker that preserves the existing prompt + validation surface while sending
+    all generations through the shared vLLM server.
+    """
+
+    def __init__(
+        self,
+        model_name: str = DEFAULT_MODEL,
+        max_new_tokens: int = 256,
+        *,
+        server_base_url: Optional[str] = None,
+        stage_io_dir: Optional[str] = None,
+        batch_window_ms: Optional[int] = None,
+        max_batch_size: Optional[int] = None,
+    ) -> None:
+        self.model_name = str(model_name or DEFAULT_MODEL)
+        self.max_new_tokens = int(max_new_tokens or 256)
+        self.lock = threading.Lock()
+        self.logger = logging.getLogger("qwen_worker.server")
+        self.backend = "server"
+        self.llm = None
+        self.model = None
+        self.tokenizer = None
+        self.gpu_gc_every = 0
+        self._gpu_gc_counter = 0
+        self.fast_visual_fallbacks = str(os.environ.get("QWEN_FAST_VISUAL_FALLBACKS", "1")).strip().lower() not in {"0", "false", "no", "off"}
+        self.prefix_cache_enabled = False
+        self.prefix_cache_max_entries = 0
+        self.prefix_cache_min_tokens = 0
+        self.prefix_cache = OrderedDict()
+        self.stage_io_dir = str(stage_io_dir or os.environ.get("QWEN_STAGE_IO_DIR", "") or "").strip()
+        self._stage_io_bundle: Dict[str, Any] = {
+            "stage_io_dir": self.stage_io_dir,
+            "model_id": self.model_name,
+            "backend": self.backend,
+        }
+        self.server_base_url = str(server_base_url or DEFAULT_SERVER_BASE_URL).rstrip("/")
+        self.server_client = QwenServerClient(self.server_base_url)
+        self.batch_window_ms = max(0, int(batch_window_ms or os.environ.get("C2_QWEN_BATCH_WINDOW_MS", "35") or 35))
+        self.max_batch_size = max(1, int(max_batch_size or os.environ.get("C2_QWEN_MAX_BATCH_SIZE", "24") or 24))
+        self._queue_lock = threading.Lock()
+        self._pending: Dict[tuple[str, str], List[_QueuedInference]] = {}
+        self._timers: Dict[tuple[str, str], threading.Timer] = {}
+        self._stage_io_counter = 0
+
+    def _gpu_gc(self, force: bool = False) -> None:
+        return
+
+    def infer(self, body: Dict[str, Any]) -> Dict[str, Any]:
+        if not isinstance(body, dict):
+            raise ValueError("body must be an object")
+        task = str(body.get("task", "choose_actions") or "choose_actions").strip()
+        mode = str(body.get("mode", "normal") or "normal").strip().lower()
+        if mode == "thinking":
+            mode = "normal"
+            body = dict(body)
+            body["mode"] = "normal"
+        return self._enqueue_for_batch(task=task, mode=mode, body=body)
+
+    def infer_many(self, bodies: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+        if not isinstance(bodies, list):
+            raise ValueError("items must be a list")
+        if not bodies:
+            return []
+
+        tasks = {str((body or {}).get("task", "")).strip() for body in bodies if isinstance(body, dict)}
+        modes = {
+            ("normal" if str((body or {}).get("mode", "normal")).strip().lower() == "thinking" else str((body or {}).get("mode", "normal")).strip().lower())
+            for body in bodies
+            if isinstance(body, dict)
+        }
+        if len(tasks) == 1 and len(modes) == 1 and next(iter(tasks)) != "entity_query_simplify":
+            task = next(iter(tasks))
+            mode = next(iter(modes))
+            payloads: List[Dict[str, Any]] = []
+            normalized_bodies: List[Dict[str, Any]] = []
+            for body in bodies:
+                if not isinstance(body, dict):
+                    raise ValueError("each batch item must be an object")
+                payload = body.get("payload", {})
+                if not isinstance(payload, dict):
+                    raise ValueError("payload must be an object")
+                normalized = dict(body)
+                normalized["mode"] = mode
+                normalized_bodies.append(normalized)
+                payloads.append(payload)
+            return self._infer_many_with_splitting(task=task, mode=mode, payloads=payloads)
+        return [self.infer(body) for body in bodies]
+
+    def _enqueue_for_batch(self, *, task: str, mode: str, body: Dict[str, Any]) -> Dict[str, Any]:
+        key = (task, mode)
+        item = _QueuedInference(body=dict(body), event=threading.Event())
+        flush_now = False
+        with self._queue_lock:
+            batch = self._pending.setdefault(key, [])
+            batch.append(item)
+            if len(batch) >= self.max_batch_size:
+                flush_now = True
+                timer = self._timers.pop(key, None)
+                if timer is not None:
+                    timer.cancel()
+            elif key not in self._timers:
+                timer = threading.Timer(self.batch_window_ms / 1000.0, self._flush_key, args=(key,))
+                timer.daemon = True
+                self._timers[key] = timer
+                timer.start()
+        if flush_now:
+            self._flush_key(key)
+        item.event.wait()
+        if item.error is not None:
+            raise item.error
+        if item.result is None:
+            raise RuntimeError(f"batched infer produced no result for task={task}")
+        return item.result
+
+    def _flush_key(self, key: tuple[str, str]) -> None:
+        with self._queue_lock:
+            timer = self._timers.pop(key, None)
+            if timer is not None:
+                timer.cancel()
+            batch = self._pending.pop(key, [])
+        if not batch:
+            return
+        task, mode = key
+        try:
+            if len(batch) == 1:
+                results = [QwenWorker.infer(self, batch[0].body)]
+            else:
+                payloads = []
+                for item in batch:
+                    payload = item.body.get("payload", {})
+                    if not isinstance(payload, dict):
+                        raise ValueError("payload must be an object")
+                    payloads.append(payload)
+                results = self._infer_many_with_splitting(task=task, mode=mode, payloads=payloads)
+            for item, result in zip(batch, results):
+                item.result = result
+        except Exception as exc:
+            for item in batch:
+                item.error = exc
+        finally:
+            for item in batch:
+                item.event.set()
+
+    def _write_stage_io(
+        self,
+        *,
+        task: str,
+        mode: str,
+        payload: Dict[str, Any],
+        system_prompt: str,
+        user_prompt: str,
+        rendered_input_text: str,
+        raw_text: str,
+        parsed_payload: Any,
+    ) -> None:
+        if not self.stage_io_dir:
+            return
+        try:
+            stage_dir = Path(self.stage_io_dir)
+            stage_dir.mkdir(parents=True, exist_ok=True)
+            with self.lock:
+                self._stage_io_counter += 1
+                index = self._stage_io_counter
+            out_path = stage_dir / f"c2_{index:05d}_{str(task or 'task').strip()}.json"
+            payload_obj = {
+                "task": str(task or "").strip(),
+                "mode": str(mode or "").strip(),
+                "model_name": self.model_name,
+                "backend": self.backend,
+                "server_base_url": self.server_base_url,
+                "request": {
+                    "payload": payload if isinstance(payload, dict) else {},
+                    "system_prompt": str(system_prompt or ""),
+                    "user_prompt": str(user_prompt or ""),
+                    "rendered_input_text": str(rendered_input_text or ""),
+                },
+                "raw_text": str(raw_text or ""),
+                "parsed_payload": parsed_payload,
+            }
+            out_path.write_text(json.dumps(payload_obj, ensure_ascii=False, indent=2), encoding="utf-8")
+        except Exception:
+            self.logger.exception("Failed to write stage io debug for task=%s", task)
+
+    def _task_generation(self, task: str, *, repair: bool = False) -> Dict[str, Any]:
+        initial = int(self._task_budget(task, "normal").get("initial", self.max_new_tokens))
+        max_new_tokens = initial if not repair else max(96, min(256, initial))
+        return {
+            "max_new_tokens": max(32, max_new_tokens),
+            "temperature": 0.0,
+            "top_p": 1.0,
+            "top_k": -1,
+            "repetition_penalty": 1.0,
+            "skip_special_tokens": True,
+        }
+
+    def _server_generate_rows(
+        self,
+        *,
+        task: str,
+        prompts: List[str],
+        system_prompt: str,
+        repair: bool = False,
+    ) -> List[str]:
+        if not prompts:
+            return []
+        result = self.server_client.generate_text_batch(
+            prompts=prompts,
+            system_prompt=system_prompt,
+            generation=self._task_generation(task, repair=repair),
+            use_tqdm=False,
+        )
+        rows = result.get("responses")
+        if not isinstance(rows, list) or len(rows) != len(prompts):
+            raise RuntimeError(f"server batch response mismatch for task={task}")
+        return [self._normalize_raw_jsonish_text(str((row or {}).get("text", "") or "")) for row in rows]
+
+    def _repair_json_output(self, task: str, payload: Dict[str, Any], raw_text: str) -> Optional[Dict[str, Any]]:
+        formatter_prompts = {
+            "choose_target": TARGET_FORMATTER_SYSTEM_PROMPT,
+            "choose_actions": ACTIONS_FORMATTER_SYSTEM_PROMPT,
+            "final_review": FINAL_REVIEW_FORMATTER_SYSTEM_PROMPT,
+            "visual_query_refinement": VISUAL_QUERY_REFINER_FORMATTER_SYSTEM_PROMPT,
+            "wikipedia_section_select": WIKIPEDIA_SECTION_SELECT_FORMATTER_SYSTEM_PROMPT,
+            "wikipedia_visual_extract": WIKIPEDIA_VISUAL_EXTRACT_FORMATTER_SYSTEM_PROMPT,
+            "visual_description_refinement": VISUAL_DESCRIPTION_REFINER_FORMATTER_SYSTEM_PROMPT,
+        }
+        system_prompt = formatter_prompts.get(task)
+        if not system_prompt:
+            return None
+
+        compact_input = json.dumps(self._prompt_payload(task, payload), ensure_ascii=False, separators=(",", ":"))
+        normalized_raw = self._normalize_raw_jsonish_text(raw_text)
+        if len(normalized_raw) > 2400:
+            normalized_raw = normalized_raw[-2400:]
+        user_prompt = (
+            f"TASK={task}\n"
+            f"INPUT={compact_input}\n"
+            f"RAW={normalized_raw}\n"
+            "Convert RAW into ONE valid JSON object only.\n"
+            "Rules:\n"
+            "- preserve the intended decision/classification\n"
+            "- notes values must be single-line short strings\n"
+            "- for choose_actions, decision must be act/fallback/stop\n"
+            "- for choose_actions, actions must be a list of action objects\n"
+            "- for choose_actions, candidate lists must contain alias strings like N1, N2, not nested objects\n"
+            "- no markdown\n"
+            "- no prose outside JSON\n"
+        )
+        try:
+            rows = self._server_generate_rows(
+                task=task,
+                prompts=[user_prompt],
+                system_prompt=system_prompt,
+                repair=True,
+            )
+        except Exception:
+            self.logger.exception("server repair prompt failed for task=%s", task)
+            return None
+        repaired_text = rows[0] if rows else ""
+        return self._extract_best_json(repaired_text, task=task)
+
+    def _generate(self, task: str, system_prompt: str, user_prompt: str, mode: str) -> Dict[str, Any]:
+        normalized_mode = "normal" if str(mode or "normal").strip().lower() == "thinking" else str(mode or "normal").strip().lower()
+        rows = self._server_generate_rows(
+            task=task,
+            prompts=[user_prompt],
+            system_prompt=system_prompt,
+        )
+        raw_text = rows[0] if rows else ""
+        return {
+            "raw_text": raw_text,
+            "thinking_text": "",
+            "final_text": raw_text,
+            "parse_text": raw_text,
+            "saw_close_tag": False,
+            "mode": normalized_mode,
+        }
+
+    def _infer_many_batched(self, task: str, mode: str, payloads: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+        prompts: List[str] = []
+        prompt_rows: List[Dict[str, str]] = []
+        for payload in payloads:
+            system_prompt, user_prompt = self._task_prompt(task, payload, mode)
+            prompt_rows.append({"system_prompt": system_prompt, "user_prompt": user_prompt})
+            prompts.append(user_prompt)
+        if not prompt_rows:
+            return []
+
+        system_prompt = str(prompt_rows[0].get("system_prompt", "") or "")
+        raw_rows = self._server_generate_rows(
+            task=task,
+            prompts=prompts,
+            system_prompt=system_prompt,
+        )
+
+        results: List[Dict[str, Any]] = []
+        for idx, payload in enumerate(payloads):
+            raw_text = str(raw_rows[idx] if idx < len(raw_rows) else "")
+            result = self._parse_or_repair_task_result(task, payload, raw_text)
+            prompt_row = prompt_rows[idx] if idx < len(prompt_rows) else {}
+            self._write_stage_io(
+                task=task,
+                mode=mode,
+                payload=payload,
+                system_prompt=str(prompt_row.get("system_prompt", "") or ""),
+                user_prompt=str(prompt_row.get("user_prompt", "") or ""),
+                rendered_input_text=str(prompts[idx] if idx < len(prompts) else ""),
+                raw_text=raw_text,
+                parsed_payload=result,
+            )
+            results.append(result)
+        return results
 
 
 class WorkerHttpHandler(BaseHTTPRequestHandler):

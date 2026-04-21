@@ -2633,64 +2633,19 @@ def create_c2_local_worker(
     *,
     max_new_tokens: int = 256,
 ):
-    from C2.QwenWorker import QwenWorker
+    from C2.QwenWorker import ServerQwenWorker
+
     model_id = _resolved_text_model_id(model_id)
-
-    if _should_use_vllm_for_text_model(model_id):
-        try:
-            llm = _build_vllm_text_engine(model_id)
-            tokenizer = _get_vllm_tokenizer(llm)
-            return QwenWorker(
-                model_name=model_id,
-                max_new_tokens=max_new_tokens,
-                llm=llm,
-                tokenizer=tokenizer,
-                backend="vllm",
-                stage_io_dir=str(os.getenv("QWEN_STAGE_IO_DIR", "") or ""),
-            )
-        except Exception as e:
-            print(f"[qwen][DBG] c2_local_worker vllm_unavailable fallback err={type(e).__name__}: {e}")
-
-    tokenizer = AutoTokenizer.from_pretrained(model_id, trust_remote_code=True)
-    model = AutoModelForCausalLM.from_pretrained(
-        model_id,
-        torch_dtype="auto",
-        device_map="auto",
-        trust_remote_code=True,
-    )
-    model.eval()
-    if tokenizer.pad_token_id is None and tokenizer.eos_token_id is not None:
-        tokenizer.pad_token_id = tokenizer.eos_token_id
-    return QwenWorker(
+    return ServerQwenWorker(
         model_name=model_id,
         max_new_tokens=max_new_tokens,
-        model=model,
-        tokenizer=tokenizer,
+        server_base_url=str(os.getenv("QWEN_VLLM_SERVER_URL", "http://127.0.0.1:8009") or "http://127.0.0.1:8009").strip(),
         stage_io_dir=str(os.getenv("QWEN_STAGE_IO_DIR", "") or ""),
     )
 
 
 def destroy_c2_local_worker(worker: Any) -> None:
-    if worker is None:
-        return
-    try:
-        setattr(worker, "model", None)
-    except Exception:
-        pass
-    try:
-        setattr(worker, "tokenizer", None)
-    except Exception:
-        pass
-    try:
-        gc.collect()
-    except Exception:
-        pass
-    try:
-        if torch.cuda.is_available():
-            torch.cuda.empty_cache()
-            torch.cuda.ipc_collect()
-    except Exception:
-        pass
+    return
 
 
 # ============================

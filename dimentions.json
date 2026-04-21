@@ -1,0 +1,21 @@
+{
+  "schema": "whiteboard_dimensions_v1",
+  "whiteboard_size_px": {
+    "width": 2000.0,
+    "height": 2000.0
+  },
+  "normalize_size_px": 1000.0,
+  "image": {
+    "default_scale": 0.75
+  },
+  "text": {
+    "default_scale": 0.25,
+    "letter_gap_px": 20.0,
+    "base_font_size_ref_px": 200.0,
+    "space_width_factor": 0.5,
+    "default_stroke_slowdown": 8.0,
+    "stroke_base_time_sec": 0.017,
+    "stroke_curve_extra_frac": 0.25,
+    "letter_pause_sec": 0.0
+  }
+}
