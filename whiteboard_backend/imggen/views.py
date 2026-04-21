@@ -11,10 +11,10 @@ from .models import WhiteboardObject
 from .utils import validate_image_json, validate_text_prompt
 
 from Imageresearcher import research
-from ImagePreproccessor import proccess_images
-from ImageSkeletonizer import skeletonize_images
-from ImageVectorizer import vectorize_images
-from ImageVecOrganizer import organize_images
+# NOTE: The legacy disk-based pipeline (ImagePreprocessor / ImageSkeletonizer /
+# ImageVecOrganizer) was replaced by the in-memory ImagePipeline flow. Those
+# symbols no longer exist, so they are not imported here. The `process_images`
+# view below is kept as a stub so the /preprocess/ URL stays registered.
 
 
 """
@@ -298,40 +298,26 @@ def research_images(request):
 
 @csrf_exempt
 def process_images(request):
-
+    # Legacy disk-based preprocess/skeletonize/vectorize/organize pipeline was
+    # removed in favour of the in-memory ImagePipeline flow (see
+    # whiteboard_backend/ImagePipeline.py -> run_pipeline_blocking). The route
+    # is kept for backwards-compat callers but returns 501 until/unless it is
+    # re-wired to the new pipeline.
     if request.method != "POST":
-        return HttpResponseBadRequest("POST JSON only")
-    
-    ct = request.META.get("CONTENT_TYPE")
-    raw = request.body or b""
+        return HttpResponseNotAllowed(["POST"])
 
-    try:
-        body = json.loads(raw.decode("utf-8"))
-    except json.JSONDecodeError as e:
-        return JsonResponse({
-            "error": "Invalid JSON",
-            "where": {"lineno": e.lineno, "colno": e.colno, "msg": e.msg},
-            "debug": {
-                "content_type": ct,
-                "len": len(raw),
-                "preview": raw[:200].decode("utf-8", errors="replace")
-            }
-        }, status=400)
-
-    inpt = (body.get("inputdir") or "").strip()
-    if not inpt:
-        return HttpResponseBadRequest("Missing 'inpt'")
-    
-    base = Path(__file__).resolve().parent.parent
-    i_dir  = base / inpt
-    
-
-    proccess_images(i_dir)
-    skeletonize_images()
-    vectorize_images()
-    organize_images()
-
-    return JsonResponse({"ok": True})
+    return JsonResponse(
+        {
+            "ok": False,
+            "error": "legacy_pipeline_removed",
+            "detail": (
+                "The /preprocess/ disk pipeline has been replaced by the "
+                "in-memory ImagePipeline flow. Use ImagePipeline."
+                "run_pipeline_blocking(...) instead."
+            ),
+        },
+        status=501,
+    )
 
 @csrf_exempt
 @require_http_methods(["POST"])

@@ -108,21 +108,30 @@ INT8_CPU_OFFLOAD = False
 # ============================
 # BATCHING 
 # ============================
+def _env_int(name: str, default: int, min_value: int = 1) -> int:
+    try:
+        return max(int(min_value), int(os.getenv(name, str(default)) or default))
+    except Exception:
+        return max(int(min_value), int(default))
+
+
 # Set to 1 => strict cluster-by-cluster (lowest VRAM).
 # Set >1 => batching (faster, more VRAM).
-BATCH_SIZE = 8
+BATCH_SIZE = _env_int("QWEN_BATCH_SIZE", 8, 1)
 
 # ============================
 # SPEED / MEMORY LEVERS
 # ============================
 # ONE composite image = two square panels side-by-side.
 # PANEL_EDGE = PROC_LONGEST_EDGE//2
-PROC_LONGEST_EDGE = 600 # composite max side;
+PROC_LONGEST_EDGE = _env_int("QWEN_PROC_LONGEST_EDGE", 600, 128) # composite max side;
 
 SUGGESTION_LIMIT = 40
-MAX_NEW_TOKENS = 70
-CLUSTER_VISUAL_MAX_NEW_TOKENS = 220
-POSTFACTO_MATCH_MAX_NEW_TOKENS = 700
+MAX_NEW_TOKENS = _env_int("QWEN_MAX_NEW_TOKENS", 70, 8)
+CLUSTER_VISUAL_MAX_NEW_TOKENS = _env_int("QWEN_CLUSTER_VISUAL_MAX_NEW_TOKENS", 220, 32)
+DIAGRAM_CLUSTER_VISUAL_MAX_NEW_TOKENS = _env_int("QWEN_DIAGRAM_CLUSTER_VISUAL_MAX_NEW_TOKENS", 420, 64)
+SCHEMATIC_LINE_MATCH_MAX_NEW_TOKENS = _env_int("QWEN_SCHEMATIC_LINE_MATCH_MAX_NEW_TOKENS", 420, 64)
+POSTFACTO_MATCH_MAX_NEW_TOKENS = _env_int("QWEN_POSTFACTO_MATCH_MAX_NEW_TOKENS", 700, 64)
 DO_SAMPLE = False
 
 RECT_THICKNESS_PX = 3
@@ -3437,7 +3446,7 @@ def label_schematic_lines_transformers(
             device=device,
             prompts=prompts,
             temperature=0.10,
-            max_new_tokens=420,
+            max_new_tokens=int(SCHEMATIC_LINE_MATCH_MAX_NEW_TOKENS),
             batch_size=max(1, int(batch_size)),
             debug_label="schematic_line_match",
             stage_io_contexts=[
@@ -5129,7 +5138,7 @@ def describe_diagram_clusters_multimodal_model(
     bundle: Dict[str, Any],
     jobs: List[Dict[str, Any]],
     temperature: float = 0.7,
-    max_new_tokens: int = 420,
+    max_new_tokens: int = DIAGRAM_CLUSTER_VISUAL_MAX_NEW_TOKENS,
     batch_size: int = BATCH_SIZE,
 ) -> Dict[str, Any]:
     return _run_multimodal_json_jobs(

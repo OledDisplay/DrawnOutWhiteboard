@@ -410,11 +410,11 @@ def init_siglip_text_hot(
     gpu_index: int = 0,
     cpu_threads: int = 4,
     warmup: bool = True,
-    prefer_fp8: bool = True,
+    prefer_fp8: bool = False,
 ) -> None:
     """
     Loads only SigLIP text tower for Pinecone text->clip embeddings.
-    Tries CUDA first (FP8 best-effort), then falls back to CPU immediately.
+    Tries CUDA first using BF16/FP16, then falls back to CPU immediately.
     """
     global _SIGLIP_TEXT
 

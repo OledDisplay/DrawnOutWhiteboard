@@ -201,6 +201,8 @@ MAX_WORDS_PER_CHAPTER = 200
 MAX_DIAGRAMS_PER_CHAPTER = 2    
 SPACE_PLANNER_BATCH_SIZE = max(1, int(os.getenv("QWEN_SPACE_BATCH_SIZE", "8") or 4))
 ACTION_PLANNER_BATCH_SIZE = max(1, int(os.getenv("QWEN_ACTION_BATCH_SIZE", "8") or 4))
+CLUSTER_VISUAL_BATCH_SIZE = max(1, int(os.getenv("QWEN_CLUSTER_VISUAL_BATCH_SIZE", os.getenv("QWEN_BATCH_SIZE", "8")) or 8))
+SCHEMATIC_LINE_MATCH_BATCH_SIZE = max(1, int(os.getenv("QWEN_SCHEMATIC_LINE_MATCH_BATCH_SIZE", os.getenv("QWEN_BATCH_SIZE", "8")) or 8))
 SPACE_PLANNER_MAX_NEW_TOKENS = max(64, int(os.getenv("QWEN_SPACE_MAX_NEW_TOKENS", "320") or 320))
 VISUAL_PLANNER_MAX_NEW_TOKENS = max(256, int(os.getenv("QWEN_VISUAL_MAX_NEW_TOKENS", "1400") or 1400))
 QWEN_RELOAD_TIMEOUT_SEC = max(10.0, float(os.getenv("QWEN_RELOAD_TIMEOUT_SEC", "180") or 180))
@@ -2902,7 +2904,7 @@ class LessonTimeline:
                     gpu_index=self.gpu_index,
                     cpu_threads=self.cpu_threads,
                     warmup=bool(warmup),
-                    prefer_fp8=True,
+                    prefer_fp8=False,
                 )
 
         t = threading.Thread(target=_loader, name=f"{label}_thread", daemon=False)
@@ -2933,7 +2935,7 @@ class LessonTimeline:
             with self._timed("models.load_minilm", gpu_index=self.gpu_index, cpu_threads=self.cpu_threads):
                 init_minilm_hot(gpu_index=self.gpu_index, cpu_threads=self.cpu_threads, warmup=True)
             with self._timed("models.load_siglip_text", gpu_index=self.gpu_index, cpu_threads=self.cpu_threads):
-                init_siglip_text_hot(gpu_index=self.gpu_index, cpu_threads=self.cpu_threads, warmup=True, prefer_fp8=True)
+                init_siglip_text_hot(gpu_index=self.gpu_index, cpu_threads=self.cpu_threads, warmup=True, prefer_fp8=False)
 
         t = threading.Thread(target=_loader, name="load_siglip_minilm", daemon=False)
         t.start()
@@ -4059,7 +4061,7 @@ class LessonTimeline:
         self._dbg("Image orchestration start", data={"requests": len(all_image_requests)})
 
         import PineconeFetch
-        import ImageResearcher
+        import Imageresearcher as ImageResearcher
         import ImagePipeline
         import ComfyFluxClient
 
@@ -4084,7 +4086,7 @@ class LessonTimeline:
                     gpu_index=self.gpu_index,
                     cpu_threads=self.cpu_threads,
                     warmup=True,
-                    prefer_fp8=True,
+                    prefer_fp8=False,
                 )
 
         PineconeFetch.configure_hot_models(
@@ -6345,7 +6347,8 @@ class LessonTimeline:
             bundle=text_bundle,
             jobs=cluster_jobs,
             temperature=0.7,
-            max_new_tokens=420,
+            max_new_tokens=int(os.getenv("QWEN_DIAGRAM_CLUSTER_VISUAL_MAX_NEW_TOKENS", "420") or 420),
+            batch_size=int(CLUSTER_VISUAL_BATCH_SIZE),
         )
         canonical_results = qwentest.describe_canonical_parts_multimodal_model(
             bundle=text_bundle,
@@ -6735,7 +6738,7 @@ class LessonTimeline:
                         model=qb.model,
                         processor=qb.processor,
                         device=qb.device,
-                        batch_size=8,
+                        batch_size=int(CLUSTER_VISUAL_BATCH_SIZE),
                     )
                     descriptor_source = "cluster_renders_zero_shot"
                 except Exception as e:
@@ -6803,7 +6806,7 @@ class LessonTimeline:
                 model=qb.model,
                 processor=qb.processor,
                 device=qb.device,
-                batch_size=8,
+                batch_size=int(SCHEMATIC_LINE_MATCH_BATCH_SIZE),
                 save_outputs=True,
                 skip_existing_labels=False,
             )
