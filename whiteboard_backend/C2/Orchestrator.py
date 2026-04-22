@@ -2967,13 +2967,26 @@ def run_orchestrator_bundle(
     skip_visual_stage: bool = False,
     max_workers: Optional[int] = None,
 ) -> Dict[str, Any]:
+    logger = logging.getLogger("orchestrator.bundle")
     prompt_rows = [row for row in (prompts or []) if isinstance(row, dict)]
     if not prompt_rows:
+        logger.info("C2 bundle skipped: no prompt rows")
         return {"ok": True, "prompts": {}, "errors": {}, "count": 0}
 
     shared_worker = worker_client or WorkerClient(worker_url, timeout=max(60, int(timeout) * 4))
     default_bundle_workers = max(1, int(os.environ.get("C2_DIAGRAM_BUNDLE_WORKERS", "6") or 6))
     worker_count = max_workers if max_workers is not None else max(1, min(len(prompt_rows), default_bundle_workers))
+    logger.info(
+        "C2 bundle start prompts=%s workers=%s worker_url=%s mode=%s steps=%s limit=%s skip_visual_stage=%s output_root=%s",
+        len(prompt_rows),
+        worker_count,
+        worker_url,
+        mode,
+        steps,
+        limit,
+        skip_visual_stage,
+        output_root,
+    )
     reports_by_prompt: Dict[str, Dict[str, Any]] = {}
     errors_by_prompt: Dict[str, str] = {}
 
@@ -2985,6 +2998,12 @@ def run_orchestrator_bundle(
         requested_components = row.get("requested_components") or row.get("diagram_required_objects") or []
         if not isinstance(requested_components, list):
             requested_components = []
+        logger.info(
+            "C2 prompt start prompt=%r chars=%s requested_components=%s",
+            prompt[:160],
+            len(prompt),
+            [str(x) for x in requested_components[:40]],
+        )
 
         wikidata = WikidataClient(timeout=timeout)
         orchestrator = ComponentAgentOrchestrator(
@@ -2996,8 +3015,24 @@ def run_orchestrator_bundle(
             limit=limit,
             qid=(str(row.get("qid", "") or "").strip() or None),
         )
+        t0 = time.perf_counter()
         report = orchestrator.run()
+        logger.info(
+            "C2 stage1 complete prompt=%r elapsed_s=%.3f accepted=%s target=%s",
+            prompt[:120],
+            time.perf_counter() - t0,
+            len(report.get("accepted_components") or []) if isinstance(report, dict) else None,
+            (report.get("target") or {}).get("label") if isinstance(report.get("target"), dict) else None,
+        )
+        t_req = time.perf_counter()
         requested_rows = orchestrator.resolve_requested_components(requested_components)
+        logger.info(
+            "C2 requested component resolution complete prompt=%r elapsed_s=%.3f input=%s resolved=%s",
+            prompt[:120],
+            time.perf_counter() - t_req,
+            len(requested_components),
+            len(requested_rows),
+        )
         report = orchestrator.merge_requested_components_into_report(report, requested_rows)
         report["requested_components_input"] = [
             str(item).strip()
@@ -3005,6 +3040,7 @@ def run_orchestrator_bundle(
             if str(item).strip()
         ]
         if skip_visual_stage:
+            logger.info("C2 visual stage skipped prompt=%r", prompt[:120])
             report["visual_stage"] = {
                 "prompt_dir": "",
                 "manifest_path": "",
@@ -3013,6 +3049,13 @@ def run_orchestrator_bundle(
                 "error": "skipped by flag",
             }
         else:
+            logger.info(
+                "C2 visual stage start prompt=%r accepted=%s batch_size=%s",
+                prompt[:120],
+                len(report.get("accepted_components") or []),
+                visual_component_batch_size,
+            )
+            t_visual = time.perf_counter()
             report["visual_stage"] = run_visual_description_stage(
                 stage1_report=report,
                 original_prompt=prompt,
@@ -3023,6 +3066,15 @@ def run_orchestrator_bundle(
                 component_batch_size=visual_component_batch_size,
                 worker_timeout=max(60, int(timeout) * 4),
                 http_timeout=timeout,
+            )
+            visual_stage = report.get("visual_stage") if isinstance(report.get("visual_stage"), dict) else {}
+            logger.info(
+                "C2 visual stage complete prompt=%r elapsed_s=%.3f components=%s error=%s manifest=%s",
+                prompt[:120],
+                time.perf_counter() - t_visual,
+                len(visual_stage.get("components") or []),
+                visual_stage.get("error"),
+                visual_stage.get("manifest_path"),
             )
         return prompt, report
 
@@ -3038,6 +3090,7 @@ def run_orchestrator_bundle(
                 reports_by_prompt[key] = report
             except Exception as exc:
                 errors_by_prompt[prompt] = f"{type(exc).__name__}: {exc}"
+                logger.exception("C2 prompt failed prompt=%r", prompt[:160])
                 reports_by_prompt[prompt] = {
                     "input_prompt": prompt,
                     "accepted_components": [],
@@ -3052,6 +3105,7 @@ def run_orchestrator_bundle(
                     },
                 }
 
+    logger.info("C2 bundle complete ok=%s reports=%s errors=%s", not bool(errors_by_prompt), len(reports_by_prompt), errors_by_prompt)
     return {
         "ok": not bool(errors_by_prompt),
         "prompts": reports_by_prompt,

@@ -9,6 +9,9 @@ import gc
 import itertools
 import logging
 import threading
+import base64
+import html as html_lib
+from io import BytesIO
 from difflib import SequenceMatcher
 from contextlib import contextmanager
 from pathlib import Path
@@ -2000,6 +2003,157 @@ def _build_clean_cluster_labels_output(
     }
 
 
+def _image_path_to_data_uri(path: Any) -> str:
+    p = Path(str(path or ""))
+    if not p.is_file():
+        return ""
+    suffix = p.suffix.lower().lstrip(".")
+    mime = "image/png"
+    if suffix in {"jpg", "jpeg"}:
+        mime = "image/jpeg"
+    elif suffix == "webp":
+        mime = "image/webp"
+    try:
+        encoded = base64.b64encode(p.read_bytes()).decode("ascii")
+    except Exception:
+        return ""
+    return f"data:{mime};base64,{encoded}"
+
+
+def _rgb_array_to_png_data_uri(value: Any) -> str:
+    arr = _as_rgb_uint8(value)
+    if arr is None:
+        return ""
+    try:
+        buf = BytesIO()
+        Image.fromarray(arr, mode="RGB").save(buf, format="PNG")
+        encoded = base64.b64encode(buf.getvalue()).decode("ascii")
+    except Exception:
+        return ""
+    return f"data:image/png;base64,{encoded}"
+
+
+def _cluster_report_visual_text(visual: Any) -> str:
+    if not isinstance(visual, dict):
+        return ""
+    parts: List[str] = []
+    label_guess = str(visual.get("label_guess", "") or "").strip()
+    if label_guess:
+        parts.append(f"stage1 guess: {label_guess}")
+    full_visual = str(visual.get("full_visual_LEFT", "") or visual.get("visual_summary", "") or "").strip()
+    if full_visual:
+        parts.append(full_visual)
+    surroundings = str(visual.get("LEFT_SURROUNDINGS", "") or visual.get("neighbor_context", "") or "").strip()
+    if surroundings:
+        parts.append(f"context: {surroundings}")
+    keywords = visual.get("geometry_keywords")
+    if isinstance(keywords, list):
+        clean = [str(x).strip() for x in keywords if str(x).strip()]
+        if clean:
+            parts.append("keywords: " + ", ".join(clean[:12]))
+    return " | ".join(parts)
+
+
+def _write_cluster_label_visual_report(
+    *,
+    report_path: Path,
+    image_index: int,
+    base_context: str,
+    results: Dict[str, Any],
+    renders_mask_rgb: Optional[Dict[str, Any]] = None,
+) -> str:
+    report_path.parent.mkdir(parents=True, exist_ok=True)
+    clusters = results.get("clusters") if isinstance(results.get("clusters"), dict) else {}
+    order = results.get("cluster_order") if isinstance(results.get("cluster_order"), list) else []
+    rows_html: List[str] = []
+
+    for pos, cluster_key in enumerate(order, start=1):
+        rec = clusters.get(cluster_key) if isinstance(clusters, dict) else None
+        if not isinstance(rec, dict):
+            continue
+        mask_name = str(rec.get("mask_name", "") or "").strip()
+        if not mask_name:
+            entry = rec.get("entry") if isinstance(rec.get("entry"), dict) else {}
+            mask_name = str(entry.get("crop_file_mask", "") or "").strip()
+
+        data_uri = ""
+        if renders_mask_rgb and mask_name in renders_mask_rgb:
+            data_uri = _rgb_array_to_png_data_uri(renders_mask_rgb.get(mask_name))
+        if not data_uri and mask_name:
+            data_uri = _image_path_to_data_uri(CLUSTER_RENDER_DIR / f"processed_{int(image_index)}" / mask_name)
+
+        label = str(rec.get("matched_label", "") or "").strip() or "(unmatched)"
+        confidence = rec.get("match_confidence")
+        try:
+            confidence_text = f"{float(confidence):.2f}"
+        except Exception:
+            confidence_text = ""
+        reason = str(rec.get("match_reason", "") or "").strip()
+        visual_text = _cluster_report_visual_text(rec.get("visual"))
+        error = str(rec.get("error", "") or "").strip()
+
+        image_html = (
+            f'<img src="{data_uri}" alt="cluster {html_lib.escape(str(cluster_key))}">'
+            if data_uri
+            else '<div class="missing">missing render</div>'
+        )
+        rows_html.append(
+            "<section class=\"cluster-card\">"
+            f"<div class=\"cluster-image\">{image_html}</div>"
+            "<div class=\"cluster-meta\">"
+            f"<h2>{html_lib.escape(label)}</h2>"
+            f"<p><strong>Cluster:</strong> {html_lib.escape(str(cluster_key))}</p>"
+            f"<p><strong>Mask:</strong> {html_lib.escape(mask_name or '(none)')}</p>"
+            f"<p><strong>Confidence:</strong> {html_lib.escape(confidence_text or '(none)')}</p>"
+            f"<p><strong>Reason:</strong> {html_lib.escape(reason or '(none)')}</p>"
+            f"<p><strong>Visual read:</strong> {html_lib.escape(visual_text or error or '(none)')}</p>"
+            "</div>"
+            f"<div class=\"cluster-number\">#{pos}</div>"
+            "</section>"
+        )
+
+    if not rows_html:
+        rows_html.append("<p>No clusters were available in this labeling result.</p>")
+
+    html = f"""<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <title>Cluster Label Report - processed_{int(image_index)}</title>
+  <style>
+    body {{ margin: 0; font-family: Arial, sans-serif; background: #f6f7f9; color: #172033; }}
+    header {{ padding: 24px 28px; background: #172033; color: white; }}
+    header h1 {{ margin: 0 0 8px; font-size: 24px; }}
+    header p {{ margin: 0; color: #d9e1f2; max-width: 980px; }}
+    main {{ display: grid; gap: 14px; padding: 18px; }}
+    .cluster-card {{ position: relative; display: grid; grid-template-columns: 260px 1fr; gap: 18px; align-items: stretch; background: white; border: 1px solid #dfe4ec; border-radius: 8px; padding: 14px; }}
+    .cluster-image {{ display: flex; align-items: center; justify-content: center; min-height: 220px; background: #fff; border: 1px solid #e6e9ef; border-radius: 6px; overflow: hidden; }}
+    .cluster-image img {{ max-width: 100%; max-height: 240px; object-fit: contain; image-rendering: auto; }}
+    .missing {{ color: #6b7280; font-size: 14px; }}
+    .cluster-meta h2 {{ margin: 2px 42px 10px 0; font-size: 21px; }}
+    .cluster-meta p {{ margin: 7px 0; line-height: 1.4; }}
+    .cluster-number {{ position: absolute; top: 12px; right: 14px; color: #64748b; font-size: 13px; }}
+    @media (max-width: 720px) {{
+      .cluster-card {{ grid-template-columns: 1fr; }}
+      .cluster-image {{ min-height: 180px; }}
+    }}
+  </style>
+</head>
+<body>
+  <header>
+    <h1>Cluster Label Report - processed_{int(image_index)}</h1>
+    <p>{html_lib.escape(str(base_context or ""))}</p>
+  </header>
+  <main>
+    {''.join(rows_html)}
+  </main>
+</body>
+</html>
+"""
+    report_path.write_text(html, encoding="utf-8")
+    return str(report_path.resolve())
+
+
 def _build_clean_schematic_labels_output(
     *,
     image_index: int,
@@ -2958,6 +3112,17 @@ def label_clusters_transformers(
         results["cluster_label_rows"] = cluster_label_rows
 
         if save_outputs:
+            try:
+                results["cluster_label_report_path"] = _write_cluster_label_visual_report(
+                    report_path=folder / "cluster_label_report.html",
+                    image_index=idx,
+                    base_context=base_context,
+                    results=results,
+                    renders_mask_rgb=pack.get("renders_mask_rgb") if isinstance(pack.get("renders_mask_rgb"), dict) else None,
+                )
+            except Exception as e:
+                results["cluster_label_report_error"] = f"{type(e).__name__}: {e}"
+
             clean_out = _build_clean_cluster_labels_output(
                 image_index=idx,
                 diagram_name=base_context,

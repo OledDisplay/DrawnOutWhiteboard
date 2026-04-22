@@ -31,10 +31,11 @@ except Exception as exc:  # pragma: no cover
 
 try:
     from vllm import LLM, SamplingParams
+    _VLLM_IMPORT_ERROR = None
 except Exception as exc:  # pragma: no cover
-    raise RuntimeError(
-        "vllm is required for this worker server. Install it inside the WSL/Linux environment that will host the server."
-    ) from exc
+    LLM = None  # type: ignore[assignment]
+    SamplingParams = None  # type: ignore[assignment]
+    _VLLM_IMPORT_ERROR = exc
 
 try:
     from fastapi import FastAPI, HTTPException
@@ -49,7 +50,7 @@ except Exception as exc:  # pragma: no cover
 DEFAULT_MODEL_ID = "cyankiwi/Qwen3.5-4B-AWQ-4bit"
 DEFAULT_MAX_MODEL_LEN = 32_768
 DEFAULT_GPU_MEMORY_UTILIZATION = 0.98
-DEFAULT_KV_CACHE_DTYPE = "turboquant_k8v4"
+DEFAULT_KV_CACHE_DTYPE = "auto"
 DEFAULT_ATTENTION_CONFIG = {"flash_attn_version": 2}
 DEFAULT_COMPILATION_CONFIG = 3
 DEFAULT_BATCH_LONG_PREFILL_THRESHOLD = 4096
@@ -67,7 +68,7 @@ class WorkerConfig:
     trust_remote_code: bool = True
     tensor_parallel_size: int = 1
     dtype: str = "half"
-    quantization: Optional[str] = "awq"
+    quantization: Optional[str] = None
     max_model_len: int = DEFAULT_MAX_MODEL_LEN
     gpu_memory_utilization: float = DEFAULT_GPU_MEMORY_UTILIZATION
     kv_cache_dtype: str = DEFAULT_KV_CACHE_DTYPE
@@ -77,7 +78,7 @@ class WorkerConfig:
     scheduler_reserve_full_isl: bool = True
     max_num_batched_tokens: Optional[int] = None
     max_num_seqs: Optional[int] = None
-    max_num_partial_prefills: int = 2
+    max_num_partial_prefills: int = 1
     max_long_partial_prefills: int = 1
     long_prefill_token_threshold: int = DEFAULT_BATCH_LONG_PREFILL_THRESHOLD
     compilation_config: int | dict[str, Any] = DEFAULT_COMPILATION_CONFIG
@@ -158,6 +159,10 @@ class GenerationConfig:
     skip_special_tokens: bool = True
 
     def to_sampling_params(self) -> SamplingParams:
+        if SamplingParams is None:
+            raise RuntimeError(
+                "vllm is required to build local SamplingParams. Use the Docker/vLLM server for HTTP-only clients."
+            ) from _VLLM_IMPORT_ERROR
         kwargs: dict[str, Any] = {
             "max_tokens": int(self.max_new_tokens),
             "skip_special_tokens": bool(self.skip_special_tokens),
@@ -227,6 +232,10 @@ class QwenVLLMWorker:
                     tok.pad_token_id = eos
 
     def _build_engine(self) -> LLM:
+        if LLM is None:
+            raise RuntimeError(
+                "vllm is required for this worker server. Install it inside the WSL/Linux environment that will host the server."
+            ) from _VLLM_IMPORT_ERROR
         kwargs = self.config.for_vllm()
         LOG.info("Creating vLLM engine with config: %s", json.dumps(_json_safe(kwargs), indent=2))
         return LLM(**kwargs)
@@ -403,6 +412,7 @@ def create_text_worker(
     debug_scheduler: bool = False,
     enable_speculative: bool = False,
     num_speculative_tokens: int = 1,
+    quantization: Optional[str] = None,
     hf_token: Optional[str] = None,
 ) -> QwenVLLMWorker:
     cfg = WorkerConfig(
@@ -414,6 +424,7 @@ def create_text_worker(
         enable_prefix_caching=not enable_speculative,
         enable_speculative=enable_speculative,
         num_speculative_tokens=num_speculative_tokens,
+        quantization=quantization,
         enable_logging_iteration_details=debug_scheduler,
         kv_cache_metrics=debug_scheduler,
         cudagraph_metrics=debug_scheduler,
@@ -431,6 +442,7 @@ def create_vision_worker(
     debug_scheduler: bool = False,
     enable_speculative: bool = False,
     num_speculative_tokens: int = 1,
+    quantization: Optional[str] = None,
     hf_token: Optional[str] = None,
 ) -> QwenVLLMWorker:
     cfg = WorkerConfig(
@@ -446,6 +458,7 @@ def create_vision_worker(
         enable_prefix_caching=not enable_speculative,
         enable_speculative=enable_speculative,
         num_speculative_tokens=num_speculative_tokens,
+        quantization=quantization,
         enable_logging_iteration_details=debug_scheduler,
         kv_cache_metrics=debug_scheduler,
         cudagraph_metrics=debug_scheduler,
@@ -470,6 +483,7 @@ class LoadWorkerRequest(BaseModel):
     debug_scheduler: bool = False
     enable_speculative: bool = False
     num_speculative_tokens: int = 1
+    quantization: Optional[str] = None
     hf_token: Optional[str] = None
     warmup: bool = False
 
@@ -563,6 +577,7 @@ class QwenWorkerManager:
                 debug_scheduler=request.debug_scheduler,
                 enable_speculative=request.enable_speculative,
                 num_speculative_tokens=request.num_speculative_tokens,
+                quantization=request.quantization,
                 hf_token=request.hf_token,
             )
             if request.warmup and mode == "text":

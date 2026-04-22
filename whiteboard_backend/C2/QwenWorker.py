@@ -36,7 +36,35 @@ os.environ.setdefault("PYTORCH_CUDA_ALLOC_CONF", "garbage_collection_threshold:0
 import torch
 from transformers import AutoModelForCausalLM, AutoTokenizer
 
-from LLMstuff.qwen_vllm_server import QwenServerClient
+try:
+    from LLMstuff.qwen_vllm_server import QwenServerClient
+except Exception:
+    class QwenServerClient:
+        def __init__(self, base_url: str) -> None:
+            self.base_url = str(base_url or "").rstrip("/")
+            import requests
+            self._requests = requests
+
+        def generate_text_batch(
+            self,
+            prompts: List[str],
+            *,
+            system_prompt: Optional[str] = None,
+            generation: Optional[Dict[str, Any]] = None,
+            use_tqdm: bool = False,
+        ) -> Dict[str, Any]:
+            response = self._requests.post(
+                f"{self.base_url}/generate/text",
+                json={
+                    "prompts": list(prompts or []),
+                    "system_prompt": system_prompt,
+                    "generation": generation or {},
+                    "use_tqdm": bool(use_tqdm),
+                },
+                timeout=600,
+            )
+            response.raise_for_status()
+            return response.json()
 
 
 DEFAULT_MODEL = os.environ.get("QWEN_MODEL", "Qwen/Qwen3.5-0.8B")
@@ -3835,16 +3863,13 @@ class ServerQwenWorker(QwenWorker):
             return
         task, mode = key
         try:
-            if len(batch) == 1:
-                results = [QwenWorker.infer(self, batch[0].body)]
-            else:
-                payloads = []
-                for item in batch:
-                    payload = item.body.get("payload", {})
-                    if not isinstance(payload, dict):
-                        raise ValueError("payload must be an object")
-                    payloads.append(payload)
-                results = self._infer_many_with_splitting(task=task, mode=mode, payloads=payloads)
+            payloads = []
+            for item in batch:
+                payload = item.body.get("payload", {})
+                if not isinstance(payload, dict):
+                    raise ValueError("payload must be an object")
+                payloads.append(payload)
+            results = self._infer_many_with_splitting(task=task, mode=mode, payloads=payloads)
             for item, result in zip(batch, results):
                 item.result = result
         except Exception as exc:
@@ -3891,6 +3916,15 @@ class ServerQwenWorker(QwenWorker):
                 "parsed_payload": parsed_payload,
             }
             out_path.write_text(json.dumps(payload_obj, ensure_ascii=False, indent=2), encoding="utf-8")
+            parsed_keys = sorted(parsed_payload.keys()) if isinstance(parsed_payload, dict) else type(parsed_payload).__name__
+            self.logger.info(
+                "stage_io wrote task=%s mode=%s path=%s raw_chars=%s parsed=%s",
+                task,
+                mode,
+                out_path,
+                len(str(raw_text or "")),
+                parsed_keys,
+            )
         except Exception:
             self.logger.exception("Failed to write stage io debug for task=%s", task)
 
@@ -3916,16 +3950,63 @@ class ServerQwenWorker(QwenWorker):
     ) -> List[str]:
         if not prompts:
             return []
+        generation = self._task_generation(task, repair=repair)
+        prompt_lengths = [len(str(prompt or "")) for prompt in prompts]
+        self.logger.info(
+            "qwen server generate start task=%s repair=%s batch=%s prompt_chars_total=%s prompt_chars_max=%s system_chars=%s generation=%s url=%s",
+            task,
+            repair,
+            len(prompts),
+            sum(prompt_lengths),
+            max(prompt_lengths) if prompt_lengths else 0,
+            len(str(system_prompt or "")),
+            generation,
+            self.server_base_url,
+        )
+        t0 = time.perf_counter()
         result = self.server_client.generate_text_batch(
             prompts=prompts,
             system_prompt=system_prompt,
-            generation=self._task_generation(task, repair=repair),
+            generation=generation,
             use_tqdm=False,
         )
         rows = result.get("responses")
         if not isinstance(rows, list) or len(rows) != len(prompts):
             raise RuntimeError(f"server batch response mismatch for task={task}")
-        return [self._normalize_raw_jsonish_text(str((row or {}).get("text", "") or "")) for row in rows]
+        raw_rows = [self._normalize_raw_jsonish_text(str((row or {}).get("text", "") or "")) for row in rows]
+        output_lengths = [len(text) for text in raw_rows]
+        self.logger.info(
+            "qwen server generate end task=%s repair=%s batch=%s elapsed_s=%.3f output_chars_total=%s output_chars_max=%s server_elapsed=%s output_tps=%s",
+            task,
+            repair,
+            len(prompts),
+            time.perf_counter() - t0,
+            sum(output_lengths),
+            max(output_lengths) if output_lengths else 0,
+            result.get("elapsed_s"),
+            result.get("output_tokens_per_s"),
+        )
+        for idx, text in enumerate(raw_rows[:8]):
+            preview = re.sub(r"\s+", " ", text).strip()[:240]
+            self.logger.debug("qwen raw preview task=%s index=%s chars=%s preview=%r", task, idx, len(text), preview)
+        return raw_rows
+
+    def _infer_many_with_splitting(self, task: str, mode: str, payloads: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+        if not payloads:
+            return []
+        self.logger.info("server infer split start task=%s mode=%s payloads=%s", task, mode, len(payloads))
+        try:
+            result = self._infer_many_batched(task=task, mode=mode, payloads=payloads)
+            self.logger.info("server infer split complete task=%s mode=%s payloads=%s results=%s", task, mode, len(payloads), len(result))
+            return result
+        except Exception:
+            self.logger.exception("server batched infer failed for task=%s batch_size=%s", task, len(payloads))
+            if len(payloads) <= 1:
+                raise
+            mid = max(1, len(payloads) // 2)
+            left = self._infer_many_with_splitting(task=task, mode=mode, payloads=payloads[:mid])
+            right = self._infer_many_with_splitting(task=task, mode=mode, payloads=payloads[mid:])
+            return left + right
 
     def _repair_json_output(self, task: str, payload: Dict[str, Any], raw_text: str) -> Optional[Dict[str, Any]]:
         formatter_prompts = {
@@ -3960,6 +4041,7 @@ class ServerQwenWorker(QwenWorker):
             "- no prose outside JSON\n"
         )
         try:
+            self.logger.info("qwen repair start task=%s raw_chars=%s", task, len(str(raw_text or "")))
             rows = self._server_generate_rows(
                 task=task,
                 prompts=[user_prompt],
@@ -3970,7 +4052,9 @@ class ServerQwenWorker(QwenWorker):
             self.logger.exception("server repair prompt failed for task=%s", task)
             return None
         repaired_text = rows[0] if rows else ""
-        return self._extract_best_json(repaired_text, task=task)
+        repaired = self._extract_best_json(repaired_text, task=task)
+        self.logger.info("qwen repair end task=%s repaired_chars=%s parsed=%s", task, len(repaired_text), sorted(repaired.keys()) if isinstance(repaired, dict) else None)
+        return repaired
 
     def _generate(self, task: str, system_prompt: str, user_prompt: str, mode: str) -> Dict[str, Any]:
         normalized_mode = "normal" if str(mode or "normal").strip().lower() == "thinking" else str(mode or "normal").strip().lower()
@@ -3990,6 +4074,7 @@ class ServerQwenWorker(QwenWorker):
         }
 
     def _infer_many_batched(self, task: str, mode: str, payloads: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+        self.logger.info("server infer batch build task=%s mode=%s payloads=%s", task, mode, len(payloads))
         prompts: List[str] = []
         prompt_rows: List[Dict[str, str]] = []
         for payload in payloads:
@@ -4009,7 +4094,16 @@ class ServerQwenWorker(QwenWorker):
         results: List[Dict[str, Any]] = []
         for idx, payload in enumerate(payloads):
             raw_text = str(raw_rows[idx] if idx < len(raw_rows) else "")
+            parse_t0 = time.perf_counter()
             result = self._parse_or_repair_task_result(task, payload, raw_text)
+            self.logger.info(
+                "server infer parse task=%s index=%s raw_chars=%s elapsed_s=%.3f parsed_keys=%s",
+                task,
+                idx,
+                len(raw_text),
+                time.perf_counter() - parse_t0,
+                sorted(result.keys()) if isinstance(result, dict) else type(result).__name__,
+            )
             prompt_row = prompt_rows[idx] if idx < len(prompt_rows) else {}
             self._write_stage_io(
                 task=task,

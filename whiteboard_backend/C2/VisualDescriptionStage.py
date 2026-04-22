@@ -6,10 +6,12 @@ Stage-2 visual description pipeline for accepted Wikidata components.
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
 import logging
 import os
 import re
+import time
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from html import unescape
 from typing import Any, Dict, Iterable, List, Optional
@@ -51,15 +53,21 @@ def _clean_text(value: Any) -> str:
     return text.strip()
 
 
-def _slugify(value: str, fallback: str, limit: int = 80) -> str:
+def _slugify(value: str, fallback: str, limit: int = 56) -> str:
     text = _clean_text(value)
     if not text:
         text = fallback
+    original = text
     text = re.sub(r"[<>:\"/\\|?*\x00-\x1F]", "_", text)
     text = re.sub(r"\s+", "_", text)
     text = re.sub(r"_+", "_", text).strip("._ ")
     if not text:
         text = fallback
+    limit = max(12, int(limit or 56))
+    if len(text) > limit:
+        digest = hashlib.sha1(original.encode("utf-8", errors="ignore")).hexdigest()[:8]
+        prefix_limit = max(1, limit - len(digest) - 1)
+        text = f"{text[:prefix_limit].strip('._ ')}_{digest}"
     return text[:limit].strip("._ ") or fallback
 
 
@@ -413,7 +421,16 @@ class VisualDescriptionStage:
     def run(self, stage1_report: Dict[str, Any], original_prompt: str) -> Dict[str, Any]:
         accepted = [row for row in stage1_report.get("accepted_components", []) if isinstance(row, dict)]
         target = stage1_report.get("target", {}) or {}
+        self.logger.info(
+            "visual stage start prompt=%r accepted=%s target=%s output_root=%s batch_size=%s",
+            str(original_prompt or "")[:160],
+            len(accepted),
+            target.get("label") if isinstance(target, dict) else "",
+            self.output_root,
+            self.component_batch_size,
+        )
         if not accepted:
+            self.logger.warning("visual stage empty: no accepted components from C2 stage1 prompt=%r", str(original_prompt or "")[:160])
             return {
                 "prompt_dir": "",
                 "manifest_path": "",
@@ -424,34 +441,68 @@ class VisualDescriptionStage:
 
         prompt_dir = os.path.join(
             self.output_root,
-            _slugify(original_prompt or target.get("label", ""), target.get("qid", "prompt")),
+            _slugify(original_prompt or target.get("label", ""), target.get("qid", "prompt"), limit=40),
         )
         os.makedirs(prompt_dir, exist_ok=True)
+        self.logger.info("visual stage prompt_dir=%s", os.path.abspath(prompt_dir))
 
+        t0 = time.perf_counter()
         query_overrides = self._refine_queries(
             original_prompt=original_prompt,
             target=target,
             components=accepted,
         )
+        self.logger.info("visual query refinement complete elapsed_s=%.3f overrides=%s", time.perf_counter() - t0, len(query_overrides))
         parts_context = self._parts_context(accepted)
         states = self._build_component_states(accepted, prompt_dir, query_overrides)
+        self.logger.info(
+            "visual states built count=%s skipped=%s labels=%s",
+            len(states),
+            sum(1 for state in states if str(state.get("skip_reason", "") or "").strip()),
+            [str(state.get("label", "")) for state in states[:24]],
+        )
         component_rows = []
 
-        for chunk in self._chunked(states, self.component_batch_size):
+        for chunk_index, chunk in enumerate(self._chunked(states, self.component_batch_size), start=1):
+            labels = [str(state.get("label", "")) for state in chunk]
+            self.logger.info("visual chunk start index=%s size=%s labels=%s", chunk_index, len(chunk), labels)
+            chunk_t0 = time.perf_counter()
+            phase_t0 = time.perf_counter()
             self._load_profiles_parallel(chunk)
+            self.logger.info("visual chunk phase profiles_done index=%s elapsed_s=%.3f loaded=%s errors=%s", chunk_index, time.perf_counter() - phase_t0, sum(1 for s in chunk if s.get("profile")), [s.get("error") for s in chunk if s.get("error")][:8])
+            phase_t0 = time.perf_counter()
             self._batch_select_sections(chunk, original_prompt)
+            self.logger.info("visual chunk phase section_select_done index=%s elapsed_s=%.3f", chunk_index, time.perf_counter() - phase_t0)
+            phase_t0 = time.perf_counter()
             self._load_selected_wikipedia_text_parallel(chunk)
+            self.logger.info("visual chunk phase wikipedia_text_done index=%s elapsed_s=%.3f text_chars=%s", chunk_index, time.perf_counter() - phase_t0, [len(str(s.get("selected_wikipedia_text", "") or "")) for s in chunk])
+            phase_t0 = time.perf_counter()
             self._batch_extract_wikipedia_descriptions(chunk, original_prompt, parts_context)
+            self.logger.info("visual chunk phase extract_descriptions_done index=%s elapsed_s=%.3f desc_chars=%s", chunk_index, time.perf_counter() - phase_t0, [len(str(s.get("wikipedia_visual_description", "") or "")) for s in chunk])
+            phase_t0 = time.perf_counter()
             self._collect_candidates_parallel(chunk)
+            self.logger.info("visual chunk phase collect_candidates_done index=%s elapsed_s=%.3f candidate_counts=%s", chunk_index, time.perf_counter() - phase_t0, [len(s.get("image_candidates") or []) for s in chunk])
+            phase_t0 = time.perf_counter()
             self._batch_refine_descriptions(chunk, original_prompt)
+            self.logger.info("visual chunk phase refine_descriptions_done index=%s elapsed_s=%.3f refined_chars=%s", chunk_index, time.perf_counter() - phase_t0, [len(str(s.get("refined_visual_description", "") or "")) for s in chunk])
             for state in chunk:
-                component_rows.append(
-                    self._finalize_component_state(
-                        state=state,
-                        target=target,
-                        original_prompt=original_prompt,
-                    )
+                row = self._finalize_component_state(
+                    state=state,
+                    target=target,
+                    original_prompt=original_prompt,
                 )
+                self.logger.info(
+                    "visual component finalized label=%s qid=%s candidates=%s wiki_desc_chars=%s refined_chars=%s error=%s json=%s",
+                    row.get("label"),
+                    row.get("qid"),
+                    len(row.get("image_candidates") or []),
+                    len(str(row.get("wikipedia_visual_description", "") or "")),
+                    len(str(row.get("refined_visual_description", "") or "")),
+                    row.get("error"),
+                    row.get("json_path"),
+                )
+                component_rows.append(row)
+            self.logger.info("visual chunk complete index=%s elapsed_s=%.3f", chunk_index, time.perf_counter() - chunk_t0)
 
         manifest = {
             "target_prompt": original_prompt,
@@ -464,6 +515,7 @@ class VisualDescriptionStage:
         manifest_path = os.path.join(prompt_dir, "visual_stage_manifest.json")
         with open(manifest_path, "w", encoding="utf-8") as handle:
             json.dump(manifest, handle, ensure_ascii=False, indent=2)
+        self.logger.info("visual stage complete components=%s manifest=%s", len(component_rows), os.path.abspath(manifest_path))
 
         return {
             "prompt_dir": os.path.abspath(prompt_dir),
@@ -548,7 +600,7 @@ class VisualDescriptionStage:
         for component in components:
             qid = str(component.get("qid", "")).strip()
             label = str(component.get("label", "")).strip() or qid
-            component_dir = os.path.join(prompt_dir, _slugify(label, qid or "component"))
+            component_dir = os.path.join(prompt_dir, _slugify(label, qid or "component", limit=32))
             os.makedirs(component_dir, exist_ok=True)
             skipped_reason = self._visual_skip_reason(component)
             states.append(

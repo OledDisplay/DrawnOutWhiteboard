@@ -35,6 +35,8 @@ import hashlib
 import difflib
 import threading
 import time
+import base64
+import html as html_lib
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from contextlib import contextmanager
 from dataclasses import dataclass, field
@@ -6067,6 +6069,176 @@ class LessonTimeline:
                 pass
         return chosen
 
+    def _image_path_to_data_uri(self, path: Any) -> str:
+        p = Path(str(path or ""))
+        if not p.is_file():
+            return ""
+        suffix = p.suffix.lower().lstrip(".")
+        mime = "image/png"
+        if suffix in {"jpg", "jpeg"}:
+            mime = "image/jpeg"
+        elif suffix == "webp":
+            mime = "image/webp"
+        try:
+            encoded = base64.b64encode(p.read_bytes()).decode("ascii")
+        except Exception:
+            return ""
+        return f"data:{mime};base64,{encoded}"
+
+    def _write_unified_cluster_label_report(
+        self,
+        *,
+        pid: str,
+        row: Dict[str, Any],
+        matches: List[Dict[str, Any]],
+    ) -> Optional[str]:
+        clusters = row.get("clusters_out") if isinstance(row.get("clusters_out"), list) else []
+        if not clusters:
+            return None
+
+        labels_by_cluster: Dict[str, List[Dict[str, Any]]] = {}
+        for match in matches:
+            if not isinstance(match, dict):
+                continue
+            label = str(match.get("matched_label", "") or "").strip()
+            if not label:
+                continue
+            cluster_ids = [
+                str(x).strip()
+                for x in (match.get("cluster_ids") if isinstance(match.get("cluster_ids"), list) else [])
+                if str(x).strip()
+            ]
+            source_key = str(match.get("source_key", "") or "").strip()
+            if source_key.startswith("C") and source_key not in cluster_ids:
+                cluster_ids.append(source_key)
+            for cluster_id in cluster_ids:
+                labels_by_cluster.setdefault(cluster_id, []).append(match)
+
+        report_dir = Path(self.debug_out_dir) / "cluster_label_reports"
+        report_dir.mkdir(parents=True, exist_ok=True)
+        report_path = report_dir / f"{pid}.html"
+        cards: List[str] = []
+
+        for idx, cluster in enumerate(clusters, start=1):
+            if not isinstance(cluster, dict):
+                continue
+            cluster_id = str(cluster.get("cluster_id", "") or f"C{idx:03d}").strip()
+            cluster_matches = labels_by_cluster.get(cluster_id, [])
+            if not cluster_matches:
+                cluster_strokes = set(self._coerce_int_list(cluster.get("stroke_ids")))
+                if cluster_strokes:
+                    cluster_matches = [
+                        m
+                        for m in matches
+                        if isinstance(m, dict)
+                        and cluster_strokes.intersection(self._coerce_int_list(m.get("stroke_indexes")))
+                    ]
+            if cluster_matches:
+                label_text = ", ".join(
+                    str(m.get("matched_label", "") or "").strip()
+                    for m in cluster_matches
+                    if str(m.get("matched_label", "") or "").strip()
+                )
+                conf_values = []
+                for m in cluster_matches:
+                    try:
+                        conf_values.append(float(m.get("match_confidence", 0.0) or 0.0))
+                    except Exception:
+                        pass
+                confidence_text = f"{max(conf_values):.2f}" if conf_values else ""
+                reason_text = " | ".join(
+                    str(m.get("reason", "") or "").strip()
+                    for m in cluster_matches
+                    if str(m.get("reason", "") or "").strip()
+                )
+                stroke_ids = sorted(
+                    {
+                        sid
+                        for m in cluster_matches
+                        for sid in self._coerce_int_list(m.get("stroke_indexes"))
+                    }
+                )
+                stroke_text = ", ".join(str(x) for x in stroke_ids)
+            else:
+                label_text = "(unmatched)"
+                confidence_text = ""
+                reason_text = ""
+                stroke_text = ", ".join(str(x) for x in self._coerce_int_list(cluster.get("stroke_ids")))
+
+            data_uri = self._image_path_to_data_uri(cluster.get("cluster_render_path"))
+            image_html = (
+                f'<img src="{data_uri}" alt="{html_lib.escape(cluster_id)}">'
+                if data_uri
+                else '<div class="missing">missing render</div>'
+            )
+            visual = str(cluster.get("CLUSTER_VISUAL_DESCRIPTION", "") or "").strip()
+            neighbor = str(cluster.get("neighbor_context", "") or "").strip()
+            cues = cluster.get("dominant_cues") if isinstance(cluster.get("dominant_cues"), list) else []
+            cue_text = ", ".join(str(x).strip() for x in cues if str(x).strip())
+            visual_bits = " | ".join(
+                x
+                for x in [
+                    visual,
+                    f"context: {neighbor}" if neighbor else "",
+                    f"cues: {cue_text}" if cue_text else "",
+                ]
+                if x
+            )
+
+            cards.append(
+                "<section class=\"cluster-card\">"
+                f"<div class=\"cluster-image\">{image_html}</div>"
+                "<div class=\"cluster-meta\">"
+                f"<h2>{html_lib.escape(label_text or '(unmatched)')}</h2>"
+                f"<p><strong>Cluster:</strong> {html_lib.escape(cluster_id)}</p>"
+                f"<p><strong>Mask:</strong> {html_lib.escape(str(cluster.get('mask_name', '') or '(none)'))}</p>"
+                f"<p><strong>Confidence:</strong> {html_lib.escape(confidence_text or '(none)')}</p>"
+                f"<p><strong>Stroke ids:</strong> {html_lib.escape(stroke_text or '(none)')}</p>"
+                f"<p><strong>Reason:</strong> {html_lib.escape(reason_text or '(none)')}</p>"
+                f"<p><strong>Visual read:</strong> {html_lib.escape(visual_bits or '(none)')}</p>"
+                "</div>"
+                f"<div class=\"cluster-number\">#{idx}</div>"
+                "</section>"
+            )
+
+        html = f"""<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <title>Cluster Label Report - {html_lib.escape(pid)}</title>
+  <style>
+    body {{ margin: 0; font-family: Arial, sans-serif; background: #f6f7f9; color: #172033; }}
+    header {{ padding: 24px 28px; background: #172033; color: white; }}
+    header h1 {{ margin: 0 0 8px; font-size: 24px; }}
+    header p {{ margin: 0; color: #d9e1f2; max-width: 980px; }}
+    main {{ display: grid; gap: 14px; padding: 18px; }}
+    .cluster-card {{ position: relative; display: grid; grid-template-columns: 260px 1fr; gap: 18px; align-items: stretch; background: white; border: 1px solid #dfe4ec; border-radius: 8px; padding: 14px; }}
+    .cluster-image {{ display: flex; align-items: center; justify-content: center; min-height: 220px; background: #fff; border: 1px solid #e6e9ef; border-radius: 6px; overflow: hidden; }}
+    .cluster-image img {{ max-width: 100%; max-height: 240px; object-fit: contain; }}
+    .missing {{ color: #6b7280; font-size: 14px; }}
+    .cluster-meta h2 {{ margin: 2px 42px 10px 0; font-size: 21px; }}
+    .cluster-meta p {{ margin: 7px 0; line-height: 1.4; }}
+    .cluster-number {{ position: absolute; top: 12px; right: 14px; color: #64748b; font-size: 13px; }}
+    @media (max-width: 720px) {{
+      .cluster-card {{ grid-template-columns: 1fr; }}
+      .cluster-image {{ min-height: 180px; }}
+    }}
+  </style>
+</head>
+<body>
+  <header>
+    <h1>Cluster Label Report - {html_lib.escape(pid)}</h1>
+    <p>{html_lib.escape(str(row.get("base_context", "") or ""))}</p>
+  </header>
+  <main>
+    {''.join(cards) if cards else '<p>No clusters were available in this labeling result.</p>'}
+  </main>
+</body>
+</html>
+"""
+        report_path.write_text(html, encoding="utf-8")
+        return str(report_path.resolve())
+
     def _run_qwen_unified_diagram_matching(
         self,
         *,
@@ -6548,6 +6720,19 @@ class LessonTimeline:
                 "matches": normalized_rows,
                 "refined_label_to_strokes": refined_label_to_strokes,
             }
+            try:
+                report_path = self._write_unified_cluster_label_report(
+                    pid=pid,
+                    row=row,
+                    matches=normalized_rows,
+                )
+                if report_path:
+                    payload["cluster_label_report_path"] = report_path
+                    if isinstance(payload.get("source_artifacts"), dict):
+                        payload["source_artifacts"]["cluster_label_report_path"] = report_path
+            except Exception as e:
+                payload["cluster_label_report_error"] = f"{type(e).__name__}: {e}"
+
             by_processed_id[pid] = payload
             images.append(
                 {
@@ -6557,6 +6742,7 @@ class LessonTimeline:
                     "snapshot_count": int(len(row.get("snapshots") or [])),
                     "cluster_count": int(len(row.get("clusters_out") or [])),
                     "canonical_part_count": int(len(row.get("canonical_parts") or [])),
+                    "cluster_label_report_path": payload.get("cluster_label_report_path"),
                     "status": payload.get("status"),
                     "reason": payload.get("reason"),
                 }
@@ -7171,6 +7357,7 @@ class LessonTimeline:
                 "qwen_output_keys": list(qwen_idx_out.keys()),
                 "label_cluster_map": qwen_idx_out.get("label_cluster_map", {}),
                 "cluster_label_rows": qwen_idx_out.get("cluster_label_rows", []),
+                "cluster_label_report_path": qwen_idx_out.get("cluster_label_report_path"),
                 "elapsed_ms": round((time.perf_counter() - one_t0) * 1000.0, 2),
             })
 
@@ -8018,6 +8205,7 @@ class LessonTimeline:
                 "clusters_kept": row.get("clusters_kept", row.get("clusters_matched")),
                 "clusters_dropped": row.get("clusters_dropped"),
                 "sam_filter_debug_count": row.get("sam_filter_debug_count", row.get("debug_matches_count")),
+                "cluster_label_report_path": row.get("cluster_label_report_path"),
                 "label_cluster_keys": list((row.get("label_cluster_map") or {}).keys())[:80]
                 if isinstance(row.get("label_cluster_map"), dict)
                 else [],
@@ -9238,6 +9426,7 @@ class LessonTimeline:
                         "parser_kind": "diagram_unified_match_v2",
                         "status": payload.get("status"),
                         "matched_labels": payload.get("matched_labels"),
+                        "cluster_label_report_path": payload.get("cluster_label_report_path"),
                         "path": str(out_path),
                     }
                 )
