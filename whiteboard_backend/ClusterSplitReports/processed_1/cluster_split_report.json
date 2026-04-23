@@ -1,0 +1,643 @@
+{
+  "processed_id": "processed_1",
+  "source_image_path": "C:\\Users\\sashk\\Documents\\GitHub\\DrawnOut\\DrawnOut\\DrawnOutWhiteboard\\whiteboard_backend\\ProccessedImages\\processed_1.png",
+  "cluster_count": 33,
+  "reclustered": true,
+  "settings_used": {
+    "GROUP_RADIUS_PX": 44.0,
+    "GRID_CELL_PX": 96.0,
+    "ENABLE_DYNAMIC_INTERNAL_CLUSTER_SPLIT": false,
+    "DYNAMIC_SPLIT_MIN_STROKES_FOR_CHECK": 8,
+    "DYNAMIC_SPLIT_MIN_SPREAD_RATIO": 9.0,
+    "DYNAMIC_SPLIT_BRIDGE_RATIO": 2.0,
+    "DYNAMIC_SPLIT_MST_GAP_IQR_SCALE": 1.75,
+    "DYNAMIC_SPLIT_MAX_GROUPS": 3,
+    "DYNAMIC_SPLIT_MIN_COMPONENT_STROKES": 3,
+    "ENABLE_CROSS_COLOR_CLUSTER_MERGE": true,
+    "CROSS_COLOR_SHARED_BBOX_GROWTH_MAX": 1.0,
+    "ENABLE_FILLED_WRAP_MASK": true,
+    "WRAP_BRIDGE_PX": 6,
+    "WRAP_TIGHTEN_PX": 2,
+    "WRAP_STROKE_THICKNESS": 1,
+    "MERGE_GRID_CELL_PX": 96.0
+  },
+  "clusters": [
+    {
+      "color_id": 2,
+      "color_name": "yellow",
+      "group_index_in_color": 0,
+      "stroke_indexes": [
+        1,
+        2,
+        3
+      ],
+      "bbox_xyxy": [
+        243,
+        641,
+        337,
+        748
+      ],
+      "crop_file_mask": "yellow_0_mask.png"
+    },
+    {
+      "color_id": 2,
+      "color_name": "yellow",
+      "group_index_in_color": 1,
+      "stroke_indexes": [
+        0
+      ],
+      "bbox_xyxy": [
+        566,
+        178,
+        671,
+        277
+      ],
+      "crop_file_mask": "yellow_1_mask.png"
+    },
+    {
+      "color_id": 3,
+      "color_name": "orange",
+      "group_index_in_color": 0,
+      "stroke_indexes": [
+        4,
+        5,
+        6,
+        7,
+        9,
+        136,
+        138,
+        139,
+        140
+      ],
+      "bbox_xyxy": [
+        199,
+        42,
+        469,
+        390
+      ],
+      "crop_file_mask": "orange_0_mask.png"
+    },
+    {
+      "color_id": 3,
+      "color_name": "orange",
+      "group_index_in_color": 1,
+      "stroke_indexes": [
+        13,
+        14,
+        15,
+        16
+      ],
+      "bbox_xyxy": [
+        382,
+        772,
+        533,
+        842
+      ],
+      "crop_file_mask": "orange_1_mask.png"
+    },
+    {
+      "color_id": 3,
+      "color_name": "orange",
+      "group_index_in_color": 2,
+      "stroke_indexes": [
+        17
+      ],
+      "bbox_xyxy": [
+        491,
+        151,
+        537,
+        200
+      ],
+      "crop_file_mask": "orange_2_mask.png"
+    },
+    {
+      "color_id": 3,
+      "color_name": "orange",
+      "group_index_in_color": 3,
+      "stroke_indexes": [
+        8,
+        10,
+        11,
+        12,
+        142
+      ],
+      "bbox_xyxy": [
+        564,
+        177,
+        783,
+        367
+      ],
+      "crop_file_mask": "orange_3_mask.png"
+    },
+    {
+      "color_id": 3,
+      "color_name": "orange",
+      "group_index_in_color": 4,
+      "stroke_indexes": [
+        18
+      ],
+      "bbox_xyxy": [
+        617,
+        706,
+        681,
+        759
+      ],
+      "crop_file_mask": "orange_4_mask.png"
+    },
+    {
+      "color_id": 6,
+      "color_name": "magenta",
+      "group_index_in_color": 0,
+      "stroke_indexes": [
+        19,
+        20,
+        21,
+        22,
+        23,
+        24,
+        25,
+        26,
+        27,
+        28,
+        29,
+        30,
+        31,
+        32,
+        33,
+        34,
+        35,
+        36,
+        37,
+        38,
+        39,
+        40,
+        41,
+        42,
+        43,
+        44
+      ],
+      "bbox_xyxy": [
+        128,
+        545,
+        814,
+        754
+      ],
+      "crop_file_mask": "magenta_0_mask.png"
+    },
+    {
+      "color_id": 7,
+      "color_name": "red",
+      "group_index_in_color": 0,
+      "stroke_indexes": [
+        59,
+        60,
+        61,
+        62,
+        63,
+        64,
+        65,
+        66,
+        67,
+        68,
+        69,
+        70,
+        71,
+        72,
+        73,
+        74,
+        75,
+        76,
+        77,
+        78,
+        79,
+        80
+      ],
+      "bbox_xyxy": [
+        225,
+        668,
+        727,
+        807
+      ],
+      "crop_file_mask": "red_0_mask.png"
+    },
+    {
+      "color_id": 7,
+      "color_name": "red",
+      "group_index_in_color": 1,
+      "stroke_indexes": [
+        51,
+        52,
+        53,
+        54,
+        55,
+        56
+      ],
+      "bbox_xyxy": [
+        254,
+        224,
+        500,
+        647
+      ],
+      "crop_file_mask": "red_1_mask.png"
+    },
+    {
+      "color_id": 7,
+      "color_name": "red",
+      "group_index_in_color": 2,
+      "stroke_indexes": [
+        47
+      ],
+      "bbox_xyxy": [
+        365,
+        168,
+        399,
+        202
+      ],
+      "crop_file_mask": "red_2_mask.png"
+    },
+    {
+      "color_id": 7,
+      "color_name": "red",
+      "group_index_in_color": 3,
+      "stroke_indexes": [
+        48,
+        49,
+        50,
+        57,
+        58,
+        81
+      ],
+      "bbox_xyxy": [
+        419,
+        199,
+        782,
+        637
+      ],
+      "crop_file_mask": "red_3_mask.png"
+    },
+    {
+      "color_id": 7,
+      "color_name": "red",
+      "group_index_in_color": 4,
+      "stroke_indexes": [
+        45
+      ],
+      "bbox_xyxy": [
+        562,
+        135,
+        598,
+        166
+      ],
+      "crop_file_mask": "red_4_mask.png"
+    },
+    {
+      "color_id": 7,
+      "color_name": "red",
+      "group_index_in_color": 5,
+      "stroke_indexes": [
+        46
+      ],
+      "bbox_xyxy": [
+        609,
+        169,
+        664,
+        209
+      ],
+      "crop_file_mask": "red_5_mask.png"
+    },
+    {
+      "color_id": 8,
+      "color_name": "blue",
+      "group_index_in_color": 0,
+      "stroke_indexes": [
+        86
+      ],
+      "bbox_xyxy": [
+        267,
+        664,
+        348,
+        740
+      ],
+      "crop_file_mask": "blue_0_mask.png"
+    },
+    {
+      "color_id": 8,
+      "color_name": "blue",
+      "group_index_in_color": 1,
+      "stroke_indexes": [
+        82,
+        83,
+        84,
+        85
+      ],
+      "bbox_xyxy": [
+        330,
+        426,
+        590,
+        603
+      ],
+      "crop_file_mask": "blue_1_mask.png"
+    },
+    {
+      "color_id": 9,
+      "color_name": "purple",
+      "group_index_in_color": 0,
+      "stroke_indexes": [
+        87,
+        88,
+        89
+      ],
+      "bbox_xyxy": [
+        319,
+        554,
+        587,
+        693
+      ],
+      "crop_file_mask": "purple_0_mask.png"
+    },
+    {
+      "color_id": 10,
+      "color_name": "gray",
+      "group_index_in_color": 0,
+      "stroke_indexes": [
+        90,
+        91,
+        92,
+        93,
+        94,
+        95,
+        96,
+        97,
+        98,
+        99,
+        100,
+        101,
+        102,
+        103,
+        104,
+        106,
+        109,
+        110,
+        111,
+        114,
+        115,
+        117,
+        118,
+        119,
+        120,
+        121,
+        122,
+        123,
+        124,
+        125,
+        126,
+        127,
+        128,
+        129,
+        130,
+        131,
+        132,
+        133,
+        134,
+        135
+      ],
+      "bbox_xyxy": [
+        133,
+        44,
+        875,
+        927
+      ],
+      "crop_file_mask": "gray_0_mask.png"
+    },
+    {
+      "color_id": 10,
+      "color_name": "gray",
+      "group_index_in_color": 1,
+      "stroke_indexes": [
+        105
+      ],
+      "bbox_xyxy": [
+        188,
+        192,
+        255,
+        273
+      ],
+      "crop_file_mask": "gray_1_mask.png"
+    },
+    {
+      "color_id": 10,
+      "color_name": "gray",
+      "group_index_in_color": 2,
+      "stroke_indexes": [
+        107
+      ],
+      "bbox_xyxy": [
+        186,
+        319,
+        284,
+        576
+      ],
+      "crop_file_mask": "gray_2_mask.png"
+    },
+    {
+      "color_id": 10,
+      "color_name": "gray",
+      "group_index_in_color": 3,
+      "stroke_indexes": [
+        108
+      ],
+      "bbox_xyxy": [
+        273,
+        368,
+        303,
+        400
+      ],
+      "crop_file_mask": "gray_3_mask.png"
+    },
+    {
+      "color_id": 10,
+      "color_name": "gray",
+      "group_index_in_color": 4,
+      "stroke_indexes": [
+        112,
+        113
+      ],
+      "bbox_xyxy": [
+        575,
+        529,
+        626,
+        580
+      ],
+      "crop_file_mask": "gray_4_mask.png"
+    },
+    {
+      "color_id": 10,
+      "color_name": "gray",
+      "group_index_in_color": 5,
+      "stroke_indexes": [
+        116
+      ],
+      "bbox_xyxy": [
+        666,
+        612,
+        761,
+        673
+      ],
+      "crop_file_mask": "gray_5_mask.png"
+    },
+    {
+      "color_id": 11,
+      "color_name": "black",
+      "group_index_in_color": 0,
+      "stroke_indexes": [
+        145,
+        146
+      ],
+      "bbox_xyxy": [
+        171,
+        406,
+        392,
+        540
+      ],
+      "crop_file_mask": "black_0_mask.png"
+    },
+    {
+      "color_id": 11,
+      "color_name": "black",
+      "group_index_in_color": 1,
+      "stroke_indexes": [
+        147,
+        149
+      ],
+      "bbox_xyxy": [
+        182,
+        524,
+        413,
+        834
+      ],
+      "crop_file_mask": "black_1_mask.png"
+    },
+    {
+      "color_id": 11,
+      "color_name": "black",
+      "group_index_in_color": 2,
+      "stroke_indexes": [
+        144
+      ],
+      "bbox_xyxy": [
+        194,
+        323,
+        450,
+        499
+      ],
+      "crop_file_mask": "black_2_mask.png"
+    },
+    {
+      "color_id": 11,
+      "color_name": "black",
+      "group_index_in_color": 3,
+      "stroke_indexes": [
+        152,
+        153,
+        154
+      ],
+      "bbox_xyxy": [
+        262,
+        738,
+        409,
+        917
+      ],
+      "crop_file_mask": "black_3_mask.png"
+    },
+    {
+      "color_id": 11,
+      "color_name": "black",
+      "group_index_in_color": 4,
+      "stroke_indexes": [
+        150
+      ],
+      "bbox_xyxy": [
+        458,
+        693,
+        539,
+        938
+      ],
+      "crop_file_mask": "black_4_mask.png"
+    },
+    {
+      "color_id": 11,
+      "color_name": "black",
+      "group_index_in_color": 5,
+      "stroke_indexes": [
+        137
+      ],
+      "bbox_xyxy": [
+        474,
+        58,
+        636,
+        357
+      ],
+      "crop_file_mask": "black_5_mask.png"
+    },
+    {
+      "color_id": 11,
+      "color_name": "black",
+      "group_index_in_color": 6,
+      "stroke_indexes": [
+        141
+      ],
+      "bbox_xyxy": [
+        598,
+        114,
+        785,
+        232
+      ],
+      "crop_file_mask": "black_6_mask.png"
+    },
+    {
+      "color_id": 11,
+      "color_name": "black",
+      "group_index_in_color": 7,
+      "stroke_indexes": [
+        151
+      ],
+      "bbox_xyxy": [
+        668,
+        715,
+        793,
+        834
+      ],
+      "crop_file_mask": "black_7_mask.png"
+    },
+    {
+      "color_id": 11,
+      "color_name": "black",
+      "group_index_in_color": 8,
+      "stroke_indexes": [
+        143
+      ],
+      "bbox_xyxy": [
+        695,
+        290,
+        802,
+        337
+      ],
+      "crop_file_mask": "black_8_mask.png"
+    },
+    {
+      "color_id": 11,
+      "color_name": "black",
+      "group_index_in_color": 9,
+      "stroke_indexes": [
+        148
+      ],
+      "bbox_xyxy": [
+        692,
+        533,
+        845,
+        754
+      ],
+      "crop_file_mask": "black_9_mask.png"
+    }
+  ]
+}

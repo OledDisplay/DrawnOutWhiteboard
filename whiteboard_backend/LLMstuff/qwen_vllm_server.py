@@ -61,10 +61,72 @@ DEFAULT_PORT = 8009
 LOG = logging.getLogger("qwen_vllm_server")
 
 
+def _resolve_vision_processor_model(model_id: Any, explicit_processor: Any = None) -> str:
+    """Return the repo/path to use for AutoProcessor assets.
+
+    Some quantized vision repos ship model weights for vLLM but omit the
+    `preprocessor_config.json` / image processor files required by
+    `AutoProcessor.from_pretrained(...)`. In that case we must load processor
+    assets from the matching base model repo instead of the quantized weights
+    repo.
+    """
+    explicit = str(explicit_processor or "").strip()
+    if explicit:
+        return explicit
+
+    requested = str(model_id or "").strip()
+    lowered = requested.casefold()
+
+    if lowered == "cyankiwi/internvl3_5-8b-awq-4bit":
+        return "OpenGVLab/InternVL3_5-8B-HF"
+    if lowered == "opengvlab/internvl3_5-8b":
+        return "OpenGVLab/InternVL3_5-8B-HF"
+
+    return requested
+
+
+def _is_internvl_model(*values: Any) -> bool:
+    return any("internvl" in str(value or "").casefold() for value in values)
+
+
+def _sanitize_mm_processor_kwargs(
+    *,
+    model: Any,
+    processor: Any = None,
+    mm_processor_kwargs: Optional[dict[str, Any]] = None,
+) -> tuple[Optional[dict[str, Any]], list[str]]:
+    """Return vLLM-safe multimodal processor kwargs.
+
+    vLLM passes ``mm_processor_kwargs`` to every processor object it builds for a
+    model. InternVL's image processor accepts some dynamic-patch knobs in
+    certain HF code paths, but vLLM also constructs an ``InternVLVideoProcessor``
+    during engine initialization. That video processor currently rejects
+    ``max_dynamic_patch`` / ``min_dynamic_patch``, which makes the whole load fail
+    before weights are usable. Strip those known-bad keys here so stale clients
+    and old CLI commands cannot crash the worker after a long load attempt.
+    """
+    if not isinstance(mm_processor_kwargs, dict) or not mm_processor_kwargs:
+        return None, []
+
+    sanitized = dict(mm_processor_kwargs)
+    warnings: list[str] = []
+    if _is_internvl_model(model, processor):
+        for key in ("max_dynamic_patch", "min_dynamic_patch"):
+            if key in sanitized:
+                removed = sanitized.pop(key)
+                warnings.append(
+                    f"removed unsupported InternVL mm_processor_kwargs.{key}={removed!r}; "
+                    "vLLM forwards it to InternVLVideoProcessor, which rejects it"
+                )
+
+    return (sanitized or None), warnings
+
+
 @dataclass(slots=True)
 class WorkerConfig:
     model: str = DEFAULT_MODEL_ID
     tokenizer: Optional[str] = None
+    processor: Optional[str] = None
     trust_remote_code: bool = True
     tensor_parallel_size: int = 1
     dtype: str = "half"
@@ -78,6 +140,7 @@ class WorkerConfig:
     scheduler_reserve_full_isl: bool = True
     max_num_batched_tokens: Optional[int] = None
     max_num_seqs: Optional[int] = None
+    cpu_offload_gb: float = 0.0
     max_num_partial_prefills: int = 1
     max_long_partial_prefills: int = 1
     long_prefill_token_threshold: int = DEFAULT_BATCH_LONG_PREFILL_THRESHOLD
@@ -89,6 +152,7 @@ class WorkerConfig:
     mm_processor_cache_type: Optional[str] = None
     mm_processor_cache_gb: Optional[int] = None
     mm_shm_cache_max_object_size_mb: Optional[int] = None
+    mm_processor_kwargs: Optional[dict[str, Any]] = None
     enable_speculative: bool = False
     num_speculative_tokens: int = 1
     default_enable_thinking: bool = False
@@ -98,11 +162,14 @@ class WorkerConfig:
     kv_cache_metrics: bool = False
     cudagraph_metrics: bool = False
     hf_token: Optional[str] = None
+    config_warnings: list[str] = field(default_factory=list)
 
     def for_vllm(self) -> dict[str, Any]:
+        compilation_config = 0 if self.enforce_eager else self.compilation_config
+        tokenizer_id = self.tokenizer or self.processor or self.model
         kwargs: dict[str, Any] = {
             "model": self.model,
-            "tokenizer": self.tokenizer or self.model,
+            "tokenizer": tokenizer_id,
             "trust_remote_code": self.trust_remote_code,
             "tensor_parallel_size": self.tensor_parallel_size,
             "dtype": self.dtype,
@@ -115,10 +182,11 @@ class WorkerConfig:
             "scheduler_reserve_full_isl": self.scheduler_reserve_full_isl,
             "max_num_batched_tokens": self.max_num_batched_tokens,
             "max_num_seqs": self.max_num_seqs,
+            "cpu_offload_gb": self.cpu_offload_gb,
             "max_num_partial_prefills": self.max_num_partial_prefills,
             "max_long_partial_prefills": self.max_long_partial_prefills,
             "long_prefill_token_threshold": self.long_prefill_token_threshold,
-            "compilation_config": self.compilation_config,
+            "compilation_config": compilation_config,
             "attention_config": self.attention_config,
             "language_model_only": self.language_model_only,
             "limit_mm_per_prompt": self.limit_mm_per_prompt,
@@ -140,6 +208,18 @@ class WorkerConfig:
             kwargs["mm_processor_cache_gb"] = self.mm_processor_cache_gb
         if self.mm_shm_cache_max_object_size_mb is not None:
             kwargs["mm_shm_cache_max_object_size_mb"] = self.mm_shm_cache_max_object_size_mb
+        if self.mm_processor_kwargs:
+            mm_kwargs, warnings = _sanitize_mm_processor_kwargs(
+                model=self.model,
+                processor=self.processor,
+                mm_processor_kwargs=self.mm_processor_kwargs,
+            )
+            for warning in warnings:
+                if warning not in self.config_warnings:
+                    self.config_warnings.append(warning)
+                LOG.warning("Sanitized vLLM config: %s", warning)
+            if mm_kwargs:
+                kwargs["mm_processor_kwargs"] = mm_kwargs
         if self.enable_speculative:
             kwargs["speculative_config"] = {
                 "method": "mtp",
@@ -220,8 +300,15 @@ class QwenVLLMWorker:
                 if eos is not None:
                     self._tokenizer.pad_token_id = eos
         else:
+            processor_model = _resolve_vision_processor_model(self.model_id, self.config.processor)
+            if processor_model != self.model_id:
+                LOG.info(
+                    "Vision processor repo differs from weights repo: model=%s processor=%s",
+                    self.model_id,
+                    processor_model,
+                )
             self._processor = AutoProcessor.from_pretrained(
-                self.model_id,
+                processor_model,
                 trust_remote_code=self.config.trust_remote_code,
                 token=self.hf_token,
             )
@@ -287,6 +374,22 @@ class QwenVLLMWorker:
         num_images: int,
         system_prompt: Optional[str] = None,
     ) -> str:
+        if _is_internvl_model(self.model_id, self.config.processor):
+            # vLLM's InternVL multimodal processor searches the text prompt for
+            # literal "<image>" placeholders and replaces each one with the
+            # model-specific "<img><IMG_CONTEXT>...</img>" feature tokens.
+            # Hugging Face's chat template eagerly turns image content into
+            # "<IMG_CONTEXT>", which makes vLLM's replacement pass fail with:
+            # "Failed to apply prompt replacement for mm_items['image'][0]".
+            parts: list[str] = []
+            if system_prompt:
+                parts.append(f"<|im_start|>system\n{str(system_prompt).strip()}<|im_end|>")
+            image_tokens = "\n".join("<image>" for _ in range(max(1, int(num_images or 1))))
+            user_text = str(user_prompt or "").strip()
+            parts.append(f"<|im_start|>user\n{image_tokens}\n{user_text}<|im_end|>")
+            parts.append("<|im_start|>assistant\n")
+            return "\n".join(parts)
+
         messages: list[dict[str, Any]] = []
         if system_prompt:
             messages.append({
@@ -409,17 +512,27 @@ def create_text_worker(
     tensor_parallel_size: int = 1,
     gpu_memory_utilization: float = DEFAULT_GPU_MEMORY_UTILIZATION,
     max_model_len: int = DEFAULT_MAX_MODEL_LEN,
+    max_num_batched_tokens: Optional[int] = None,
+    max_num_seqs: Optional[int] = None,
+    cpu_offload_gb: float = 0.0,
+    enforce_eager: bool = False,
     debug_scheduler: bool = False,
     enable_speculative: bool = False,
     num_speculative_tokens: int = 1,
     quantization: Optional[str] = None,
     hf_token: Optional[str] = None,
+    mm_processor_kwargs: Optional[dict[str, Any]] = None,
+    disable_log_stats: bool = False,
 ) -> QwenVLLMWorker:
     cfg = WorkerConfig(
         model=model,
         tensor_parallel_size=tensor_parallel_size,
         gpu_memory_utilization=gpu_memory_utilization,
         max_model_len=max_model_len,
+        max_num_batched_tokens=max_num_batched_tokens,
+        max_num_seqs=max_num_seqs,
+        cpu_offload_gb=float(cpu_offload_gb or 0.0),
+        enforce_eager=enforce_eager,
         language_model_only=True,
         enable_prefix_caching=not enable_speculative,
         enable_speculative=enable_speculative,
@@ -428,6 +541,7 @@ def create_text_worker(
         enable_logging_iteration_details=debug_scheduler,
         kv_cache_metrics=debug_scheduler,
         cudagraph_metrics=debug_scheduler,
+        disable_log_stats=disable_log_stats,
         hf_token=hf_token,
     )
     return QwenVLLMWorker(config=cfg, mode="text")
@@ -436,25 +550,48 @@ def create_text_worker(
 def create_vision_worker(
     *,
     model: str = DEFAULT_MODEL_ID,
+    processor: Optional[str] = None,
     tensor_parallel_size: int = 1,
     gpu_memory_utilization: float = DEFAULT_GPU_MEMORY_UTILIZATION,
     max_model_len: int = DEFAULT_MAX_MODEL_LEN,
+    max_num_batched_tokens: Optional[int] = None,
+    max_num_seqs: Optional[int] = None,
+    cpu_offload_gb: float = 0.0,
+    enforce_eager: bool = False,
     debug_scheduler: bool = False,
     enable_speculative: bool = False,
     num_speculative_tokens: int = 1,
     quantization: Optional[str] = None,
     hf_token: Optional[str] = None,
+    mm_processor_kwargs: Optional[dict[str, Any]] = None,
+    limit_mm_per_prompt: Optional[dict[str, int]] = None,
+    disable_log_stats: bool = True,
 ) -> QwenVLLMWorker:
+    processor_model = _resolve_vision_processor_model(model, processor)
+    safe_mm_processor_kwargs, config_warnings = _sanitize_mm_processor_kwargs(
+        model=model,
+        processor=processor_model,
+        mm_processor_kwargs=mm_processor_kwargs,
+    )
+    for warning in config_warnings:
+        LOG.warning("Sanitized requested vision config: %s", warning)
     cfg = WorkerConfig(
         model=model,
+        processor=processor_model,
         tensor_parallel_size=tensor_parallel_size,
         gpu_memory_utilization=gpu_memory_utilization,
         max_model_len=max_model_len,
+        max_num_batched_tokens=max_num_batched_tokens,
+        max_num_seqs=max_num_seqs,
+        cpu_offload_gb=float(cpu_offload_gb or 0.0),
+        enforce_eager=enforce_eager,
         language_model_only=False,
+        limit_mm_per_prompt=dict(limit_mm_per_prompt or {"image": 1}),
         mm_encoder_tp_mode="data",
         mm_processor_cache_type="shm",
         mm_processor_cache_gb=4,
         mm_shm_cache_max_object_size_mb=256,
+        mm_processor_kwargs=safe_mm_processor_kwargs,
         enable_prefix_caching=not enable_speculative,
         enable_speculative=enable_speculative,
         num_speculative_tokens=num_speculative_tokens,
@@ -462,7 +599,9 @@ def create_vision_worker(
         enable_logging_iteration_details=debug_scheduler,
         kv_cache_metrics=debug_scheduler,
         cudagraph_metrics=debug_scheduler,
+        disable_log_stats=disable_log_stats,
         hf_token=hf_token,
+        config_warnings=config_warnings,
     )
     return QwenVLLMWorker(config=cfg, mode="vision")
 
@@ -477,14 +616,22 @@ def create_qwen_worker(*, mode: str = "text", **kwargs: Any) -> QwenVLLMWorker:
 
 class LoadWorkerRequest(BaseModel):
     model: str = DEFAULT_MODEL_ID
+    processor: Optional[str] = None
     tensor_parallel_size: int = 1
     gpu_memory_utilization: float = DEFAULT_GPU_MEMORY_UTILIZATION
     max_model_len: int = DEFAULT_MAX_MODEL_LEN
+    max_num_batched_tokens: Optional[int] = None
+    max_num_seqs: Optional[int] = None
+    cpu_offload_gb: float = 0.0
+    enforce_eager: bool = False
     debug_scheduler: bool = False
     enable_speculative: bool = False
     num_speculative_tokens: int = 1
     quantization: Optional[str] = None
     hf_token: Optional[str] = None
+    mm_processor_kwargs: Optional[dict[str, Any]] = None
+    limit_mm_per_prompt: Optional[dict[str, int]] = None
+    disable_log_stats: bool = False
     warmup: bool = False
 
 
@@ -568,17 +715,30 @@ class QwenWorkerManager:
             if self._worker is not None:
                 self._unload_locked()
 
+            worker_kwargs: dict[str, Any] = {
+                "mode": mode,
+                "model": request.model,
+                "tensor_parallel_size": request.tensor_parallel_size,
+                "gpu_memory_utilization": request.gpu_memory_utilization,
+                "max_model_len": request.max_model_len,
+                "max_num_batched_tokens": request.max_num_batched_tokens,
+                "max_num_seqs": request.max_num_seqs,
+                "cpu_offload_gb": request.cpu_offload_gb,
+                "enforce_eager": request.enforce_eager,
+                "debug_scheduler": request.debug_scheduler,
+                "enable_speculative": request.enable_speculative,
+                "num_speculative_tokens": request.num_speculative_tokens,
+                "quantization": request.quantization,
+                "hf_token": request.hf_token,
+                "mm_processor_kwargs": request.mm_processor_kwargs,
+                "disable_log_stats": request.disable_log_stats,
+            }
+            if mode == "vision":
+                worker_kwargs["processor"] = request.processor
+                worker_kwargs["limit_mm_per_prompt"] = request.limit_mm_per_prompt
+
             worker = create_qwen_worker(
-                mode=mode,
-                model=request.model,
-                tensor_parallel_size=request.tensor_parallel_size,
-                gpu_memory_utilization=request.gpu_memory_utilization,
-                max_model_len=request.max_model_len,
-                debug_scheduler=request.debug_scheduler,
-                enable_speculative=request.enable_speculative,
-                num_speculative_tokens=request.num_speculative_tokens,
-                quantization=request.quantization,
-                hf_token=request.hf_token,
+                **worker_kwargs,
             )
             if request.warmup and mode == "text":
                 worker.warmup()

@@ -53,9 +53,9 @@ SIGLIP_NAME = (
     str(
         os.getenv("SIGLIP_MODEL_ID")
         or os.getenv("SIGLIP_NAME")
-        or "google/siglip-base-patch16-384"
+        or "google/siglip2-giant-opt-patch16-384"
     ).strip()
-    or "google/siglip-base-patch16-384"
+    or "google/siglip2-giant-opt-patch16-384"
 )
 
 

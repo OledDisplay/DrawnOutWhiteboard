@@ -24,6 +24,38 @@ CLUSTER_RENDER_DIR = BASE_DIR / "ClusterRenders"
 CLUSTER_MAP_DIR = BASE_DIR / "ClusterMaps"
 
 
+def _env_bool(name: str, default: bool) -> bool:
+    raw = os.environ.get(name)
+    if raw is None:
+        return bool(default)
+    text = str(raw).strip().lower()
+    if text in {"1", "true", "yes", "on"}:
+        return True
+    if text in {"0", "false", "no", "off"}:
+        return False
+    return bool(default)
+
+
+def _env_int(name: str, default: int) -> int:
+    raw = os.environ.get(name)
+    if raw is None:
+        return int(default)
+    try:
+        return int(raw)
+    except Exception:
+        return int(default)
+
+
+def _env_float(name: str, default: float) -> float:
+    raw = os.environ.get(name)
+    if raw is None:
+        return float(default)
+    try:
+        return float(raw)
+    except Exception:
+        return float(default)
+
+
 # ============================
 # 11-PASS COLOR ORDER
 # ============================
@@ -53,25 +85,25 @@ def color_rank(name: str) -> int:
 # CONFIG (simple + blunt)
 # ============================
 # “blanket threshold” in image pixels (bbox-to-bbox distance)
-GROUP_RADIUS_PX = 12
+GROUP_RADIUS_PX = _env_float("IMAGE_CLUSTERS_GROUP_RADIUS_PX", 28.0)
 
 # spatial hash cell size; should be >= radius so neighbors are local
-GRID_CELL_PX = 48.0
+GRID_CELL_PX = _env_float("IMAGE_CLUSTERS_GRID_CELL_PX", 48.0)
 
 # dynamic post-pass split for very spread-out same-colour clusters
-ENABLE_DYNAMIC_INTERNAL_CLUSTER_SPLIT = True
+ENABLE_DYNAMIC_INTERNAL_CLUSTER_SPLIT = _env_bool("IMAGE_CLUSTERS_ENABLE_DYNAMIC_INTERNAL_CLUSTER_SPLIT", False)
 
 # We only attempt the post-pass when there is enough internal structure to read.
-DYNAMIC_SPLIT_MIN_STROKES_FOR_CHECK = 6
+DYNAMIC_SPLIT_MIN_STROKES_FOR_CHECK = _env_int("IMAGE_CLUSTERS_DYNAMIC_SPLIT_MIN_STROKES_FOR_CHECK", 8)
 
 # "Huge" is treated relatively: cluster span vs its own typical nearest-neighbour spacing.
-DYNAMIC_SPLIT_MIN_SPREAD_RATIO = 5.0
+DYNAMIC_SPLIT_MIN_SPREAD_RATIO = _env_float("IMAGE_CLUSTERS_DYNAMIC_SPLIT_MIN_SPREAD_RATIO", 7.0)
 
 # Split only when candidate bridge edges are clearly weaker than local internal ties.
-DYNAMIC_SPLIT_BRIDGE_RATIO = 1.4
-DYNAMIC_SPLIT_MST_GAP_IQR_SCALE = 1.25
-DYNAMIC_SPLIT_MAX_GROUPS = 4
-DYNAMIC_SPLIT_MIN_COMPONENT_STROKES = 2
+DYNAMIC_SPLIT_BRIDGE_RATIO = _env_float("IMAGE_CLUSTERS_DYNAMIC_SPLIT_BRIDGE_RATIO", 1.8)
+DYNAMIC_SPLIT_MST_GAP_IQR_SCALE = _env_float("IMAGE_CLUSTERS_DYNAMIC_SPLIT_MST_GAP_IQR_SCALE", 1.75)
+DYNAMIC_SPLIT_MAX_GROUPS = _env_int("IMAGE_CLUSTERS_DYNAMIC_SPLIT_MAX_GROUPS", 3)
+DYNAMIC_SPLIT_MIN_COMPONENT_STROKES = _env_int("IMAGE_CLUSTERS_DYNAMIC_SPLIT_MIN_COMPONENT_STROKES", 3)
 
 # crop padding (image pixels)
 CLUSTER_CROP_PAD = 8
@@ -93,33 +125,74 @@ BBOX_PAD_MAX_PX = 15
 # ============================
 # CROSS-COLOUR CLUSTER MERGE
 # ============================
-ENABLE_CROSS_COLOR_CLUSTER_MERGE = True
+ENABLE_CROSS_COLOR_CLUSTER_MERGE = _env_bool("IMAGE_CLUSTERS_ENABLE_CROSS_COLOR_CLUSTER_MERGE", True)
 
 # shared bbox growth =
 #   (shared_bbox_area - area_of_smaller_cluster_bbox) / area_of_smaller_cluster_bbox
-CROSS_COLOR_SHARED_BBOX_GROWTH_MAX = 0.20  # allow up to 20% growth vs the smaller cluster
+CROSS_COLOR_SHARED_BBOX_GROWTH_MAX = _env_float(
+    "IMAGE_CLUSTERS_CROSS_COLOR_SHARED_BBOX_GROWTH_MAX",
+    0.50,
+)  # allow up to 20% growth vs the smaller cluster
 
 
 # ============================
 # FILLED WRAP MASK FOR OUTPUT CROPS
 # ============================
 # This is ONLY for the grayscale+color crop output (helps when strokes are outlines).
-ENABLE_FILLED_WRAP_MASK = True
+ENABLE_FILLED_WRAP_MASK = _env_bool("IMAGE_CLUSTERS_ENABLE_FILLED_WRAP_MASK", True)
 
 # How aggressively to bridge gaps between nearby stroke segments inside the crop.
-WRAP_BRIDGE_PX = 6
+WRAP_BRIDGE_PX = _env_int("IMAGE_CLUSTERS_WRAP_BRIDGE_PX", 6)
 
 # How much to "tighten" after filling (erosion).
-WRAP_TIGHTEN_PX = 2
+WRAP_TIGHTEN_PX = _env_int("IMAGE_CLUSTERS_WRAP_TIGHTEN_PX", 2)
 
 # Pixel thickness used when rasterizing stroke lines into the initial mask
-WRAP_STROKE_THICKNESS = 1
+WRAP_STROKE_THICKNESS = _env_int("IMAGE_CLUSTERS_WRAP_STROKE_THICKNESS", 1)
 
 
 # ============================
 # MERGE SEARCH
 # ============================
-MERGE_GRID_CELL_PX = 96.0
+MERGE_GRID_CELL_PX = _env_float("IMAGE_CLUSTERS_MERGE_GRID_CELL_PX", 96.0)
+
+
+def get_runtime_cluster_settings() -> Dict[str, Any]:
+    return {
+        "GROUP_RADIUS_PX": float(GROUP_RADIUS_PX),
+        "GRID_CELL_PX": float(GRID_CELL_PX),
+        "ENABLE_DYNAMIC_INTERNAL_CLUSTER_SPLIT": bool(ENABLE_DYNAMIC_INTERNAL_CLUSTER_SPLIT),
+        "DYNAMIC_SPLIT_MIN_STROKES_FOR_CHECK": int(DYNAMIC_SPLIT_MIN_STROKES_FOR_CHECK),
+        "DYNAMIC_SPLIT_MIN_SPREAD_RATIO": float(DYNAMIC_SPLIT_MIN_SPREAD_RATIO),
+        "DYNAMIC_SPLIT_BRIDGE_RATIO": float(DYNAMIC_SPLIT_BRIDGE_RATIO),
+        "DYNAMIC_SPLIT_MST_GAP_IQR_SCALE": float(DYNAMIC_SPLIT_MST_GAP_IQR_SCALE),
+        "DYNAMIC_SPLIT_MAX_GROUPS": int(DYNAMIC_SPLIT_MAX_GROUPS),
+        "DYNAMIC_SPLIT_MIN_COMPONENT_STROKES": int(DYNAMIC_SPLIT_MIN_COMPONENT_STROKES),
+        "ENABLE_CROSS_COLOR_CLUSTER_MERGE": bool(ENABLE_CROSS_COLOR_CLUSTER_MERGE),
+        "CROSS_COLOR_SHARED_BBOX_GROWTH_MAX": float(CROSS_COLOR_SHARED_BBOX_GROWTH_MAX),
+        "ENABLE_FILLED_WRAP_MASK": bool(ENABLE_FILLED_WRAP_MASK),
+        "WRAP_BRIDGE_PX": int(WRAP_BRIDGE_PX),
+        "WRAP_TIGHTEN_PX": int(WRAP_TIGHTEN_PX),
+        "WRAP_STROKE_THICKNESS": int(WRAP_STROKE_THICKNESS),
+        "MERGE_GRID_CELL_PX": float(MERGE_GRID_CELL_PX),
+    }
+
+
+def apply_runtime_cluster_settings(**overrides: Any) -> Dict[str, Any]:
+    previous = get_runtime_cluster_settings()
+    for key, value in overrides.items():
+        if value is None or key not in previous:
+            continue
+        globals()[key] = value
+    return previous
+
+
+def restore_runtime_cluster_settings(settings: Dict[str, Any]) -> None:
+    if not isinstance(settings, dict):
+        return
+    for key, value in settings.items():
+        if key in globals():
+            globals()[key] = value
 
 
 # ============================

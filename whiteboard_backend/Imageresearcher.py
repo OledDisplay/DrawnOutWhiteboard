@@ -39,7 +39,7 @@ class _EmbedJob:
 
 
 class _EmbeddingService:
-    """
+    """ 
     Single-thread owner of SentenceTransformer to keep it hot and prevent concurrent encode() interference.
     Also batches small requests to cut overhead.
     """
@@ -8180,7 +8180,7 @@ if __name__ == "__main__":
 
     dbg("[MAIN] initializing shared model workers (SigLIP + MiniLM)")
     init_siglip_minilm_hot(
-        siglip_model_id="google/siglip-base-patch16-384",
+        siglip_model_id="google/siglip2-giant-opt-patch16-384",
         minilm_model_id="sentence-transformers/all-MiniLM-L6-v2",
         cpu_threads=4,
         warmup=True,

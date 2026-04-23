@@ -1364,7 +1364,10 @@ def _pipeline_worker(
             )
         except Exception:
             pass
-        if not diagram_text_items or not diagram_preproc_by_idx or not diagram_vectors_by_idx:
+        diagram_cluster_backend = str(os.getenv("DIAGRAM_CLUSTER_BACKEND", "stroke") or "stroke").strip().lower()
+        needs_vectors = diagram_cluster_backend != "sam2_dinov2"
+
+        if not diagram_text_items or not diagram_preproc_by_idx or (needs_vectors and not diagram_vectors_by_idx):
             try:
                 pre_keys = set(int(k) for k in preproc_by_idx.keys())
                 vec_keys = set(int(k) for k in vectors_by_idx.keys())
@@ -1380,13 +1383,23 @@ def _pipeline_worker(
             print("[done] no diagram items available for clusters -> finished after colours.")
             return
 
-        print("[11/11] ImageClusters (all diagrams, in-memory)...")
-        with stage("ImageClusters.cluster_in_memory"):
-            ImageClusters.cluster_in_memory(
-                preproc_by_idx=diagram_preproc_by_idx,
-                vectors_by_idx=diagram_vectors_by_idx,
-                save_outputs=True,
-            )
+        if diagram_cluster_backend == "sam2_dinov2":
+            import DiagramMaskClusters
+
+            print("[11/11] DiagramMaskClusters (SAM2 + DINOv2, all diagrams, in-memory)...")
+            with stage("DiagramMaskClusters.cluster_diagrams_in_memory"):
+                DiagramMaskClusters.cluster_diagrams_in_memory(
+                    preproc_by_idx=diagram_preproc_by_idx,
+                    save_outputs=True,
+                )
+        else:
+            print("[11/11] ImageClusters (all diagrams, in-memory)...")
+            with stage("ImageClusters.cluster_in_memory"):
+                ImageClusters.cluster_in_memory(
+                    preproc_by_idx=diagram_preproc_by_idx,
+                    vectors_by_idx=diagram_vectors_by_idx,
+                    save_outputs=True,
+                )
 
     except BaseException as e:
         handle.errors["pipeline_fatal"] = f"{type(e).__name__}: {e}"

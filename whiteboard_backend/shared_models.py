@@ -26,7 +26,7 @@ def _log(msg: str) -> None:
     print(f"[{ts}][{th}] {msg}")
 
 
-_SIGLIP_DEFAULT_FALLBACK = "google/siglip-base-patch16-384"
+_SIGLIP_DEFAULT_FALLBACK = "google/siglip2-giant-opt-patch16-384"
 
 
 def resolve_siglip_model_id(explicit: Optional[str] = None) -> str:
@@ -1003,6 +1003,35 @@ def siglip_embed_pil_images(pil_images: List[Any]) -> Optional[List[List[float]]
         feats = mdl.get_image_features(**inputs)
         feats = torch.nn.functional.normalize(feats, p=2, dim=-1)
         return feats.detach().cpu().tolist()
+
+
+def siglip_score_pil_images_against_texts(
+    pil_images: List[Any],
+    texts: List[str],
+) -> Optional[List[List[float]]]:
+    if _SIGLIP is None:
+        return None
+    clean_texts = [str(x or "").strip() for x in texts if str(x or "").strip()]
+    if not pil_images or not clean_texts:
+        return []
+    import torch
+
+    with _SIGLIP_LOCK, torch.inference_mode():
+        proc = _SIGLIP.processor
+        mdl = _SIGLIP.model
+        dev = _SIGLIP.device
+
+        image_inputs = proc(images=pil_images, return_tensors="pt", padding=True)
+        text_inputs = proc(text=clean_texts, return_tensors="pt", padding=True, truncation=True)
+        image_inputs = _batch_to_device(image_inputs, dev)
+        text_inputs = _batch_to_device(text_inputs, dev)
+
+        image_features = mdl.get_image_features(**image_inputs)
+        text_features = mdl.get_text_features(**text_inputs)
+        image_features = torch.nn.functional.normalize(image_features, p=2, dim=-1)
+        text_features = torch.nn.functional.normalize(text_features, p=2, dim=-1)
+        scores = image_features @ text_features.T
+        return scores.detach().float().cpu().tolist()
 
 
 def minilm_embed_texts(texts: List[str]) -> Optional[List[List[float]]]:

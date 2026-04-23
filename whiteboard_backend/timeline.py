@@ -5992,6 +5992,14 @@ class LessonTimeline:
             out.append(
                 {
                     "label": label,
+                    "visual_signature": str(
+                        row.get("visual_signature")
+                        or row.get("refined_visual_description")
+                        or row.get("wikipedia_visual_description")
+                        or ""
+                    ).strip(),
+                    "synonyms": row.get("synonyms") if isinstance(row.get("synonyms"), list) else [],
+                    "source": ["c2_component_report"],
                     "general_visual_description": str(row.get("refined_visual_description", "") or "").strip(),
                     "wikipedia_visual_description": str(row.get("wikipedia_visual_description", "") or "").strip(),
                     "component_dir": str(report_row.get("component_dir", "") or row.get("component_dir", "") or "").strip(),
@@ -6022,6 +6030,9 @@ class LessonTimeline:
             out.append(
                 {
                     "label": s,
+                    "visual_signature": "",
+                    "synonyms": [],
+                    "source": ["refined_labels_fallback"],
                     "general_visual_description": "",
                     "wikipedia_visual_description": "",
                     "component_dir": "",
@@ -6117,6 +6128,46 @@ class LessonTimeline:
         report_dir = Path(self.debug_out_dir) / "cluster_label_reports"
         report_dir.mkdir(parents=True, exist_ok=True)
         report_path = report_dir / f"{pid}.html"
+        catalog = row.get("component_catalog") if isinstance(row.get("component_catalog"), list) else []
+        catalog_by_label: Dict[str, Dict[str, Any]] = {}
+        catalog_rows_html: List[str] = []
+        for component in catalog:
+            if not isinstance(component, dict):
+                continue
+            component_label = str(component.get("label", "") or component.get("name", "") or "").strip()
+            if not component_label:
+                continue
+            catalog_by_label[component_label.casefold()] = component
+            signature = str(
+                component.get("visual_signature")
+                or component.get("refined_visual_description")
+                or component.get("wikipedia_visual_description")
+                or component.get("description")
+                or ""
+            ).strip()
+            synonyms = component.get("synonyms") if isinstance(component.get("synonyms"), list) else []
+            synonyms_text = ", ".join(str(x).strip() for x in synonyms if str(x).strip())
+            source = component.get("source")
+            if isinstance(source, list):
+                source_text = ", ".join(str(x).strip() for x in source if str(x).strip())
+            else:
+                source_text = str(source or "").strip()
+            catalog_rows_html.append(
+                "<tr>"
+                f"<td>{html_lib.escape(component_label)}</td>"
+                f"<td>{html_lib.escape(signature or '(no visual signature)')}</td>"
+                f"<td>{html_lib.escape(synonyms_text or '(none)')}</td>"
+                f"<td>{html_lib.escape(source_text or '(unknown)')}</td>"
+                "</tr>"
+            )
+        catalog_html = (
+            "<table class=\"catalog-table\">"
+            "<thead><tr><th>Component</th><th>C2 visual context</th><th>Synonyms</th><th>Source</th></tr></thead>"
+            f"<tbody>{''.join(catalog_rows_html)}</tbody>"
+            "</table>"
+            if catalog_rows_html
+            else "<p>No C2 component context was available for this run.</p>"
+        )
         cards: List[str] = []
 
         for idx, cluster in enumerate(clusters, start=1):
@@ -6151,6 +6202,16 @@ class LessonTimeline:
                     for m in cluster_matches
                     if str(m.get("reason", "") or "").strip()
                 )
+                component_context_rows = []
+                for m in cluster_matches:
+                    matched_label = str(m.get("matched_label", "") or "").strip()
+                    component = catalog_by_label.get(matched_label.casefold()) if matched_label else None
+                    if not isinstance(component, dict):
+                        continue
+                    signature = str(component.get("visual_signature", "") or "").strip()
+                    if signature:
+                        component_context_rows.append(f"{matched_label}: {signature}")
+                component_context_text = " | ".join(component_context_rows)
                 stroke_ids = sorted(
                     {
                         sid
@@ -6163,6 +6224,7 @@ class LessonTimeline:
                 label_text = "(unmatched)"
                 confidence_text = ""
                 reason_text = ""
+                component_context_text = ""
                 stroke_text = ", ".join(str(x) for x in self._coerce_int_list(cluster.get("stroke_ids")))
 
             data_uri = self._image_path_to_data_uri(cluster.get("cluster_render_path"))
@@ -6172,12 +6234,26 @@ class LessonTimeline:
                 else '<div class="missing">missing render</div>'
             )
             visual = str(cluster.get("CLUSTER_VISUAL_DESCRIPTION", "") or "").strip()
+            vlm_visual = cluster.get("vlm_visual") if isinstance(cluster.get("vlm_visual"), dict) else {}
+            if vlm_visual:
+                visual = visual or " | ".join(
+                    str(vlm_visual.get(k, "") or "").strip()
+                    for k in ("geometry", "boundary_shape", "internal_pattern", "surrounding_relation", "notes_without_naming")
+                    if str(vlm_visual.get(k, "") or "").strip()
+                )
+            siglip_top = cluster.get("siglip_top_k") if isinstance(cluster.get("siglip_top_k"), list) else []
+            siglip_text = ", ".join(
+                f"{str(row.get('label', '') or '').strip()}={float(row.get('score', 0.0) or 0.0):.3f}"
+                for row in siglip_top[:5]
+                if isinstance(row, dict) and str(row.get("label", "") or "").strip()
+            )
             neighbor = str(cluster.get("neighbor_context", "") or "").strip()
             cues = cluster.get("dominant_cues") if isinstance(cluster.get("dominant_cues"), list) else []
             cue_text = ", ".join(str(x).strip() for x in cues if str(x).strip())
             visual_bits = " | ".join(
                 x
                 for x in [
+                    f"siglip: {siglip_text}" if siglip_text else "",
                     visual,
                     f"context: {neighbor}" if neighbor else "",
                     f"cues: {cue_text}" if cue_text else "",
@@ -6195,6 +6271,7 @@ class LessonTimeline:
                 f"<p><strong>Confidence:</strong> {html_lib.escape(confidence_text or '(none)')}</p>"
                 f"<p><strong>Stroke ids:</strong> {html_lib.escape(stroke_text or '(none)')}</p>"
                 f"<p><strong>Reason:</strong> {html_lib.escape(reason_text or '(none)')}</p>"
+                f"<p><strong>C2 component context:</strong> {html_lib.escape(component_context_text or '(none)')}</p>"
                 f"<p><strong>Visual read:</strong> {html_lib.escape(visual_bits or '(none)')}</p>"
                 "</div>"
                 f"<div class=\"cluster-number\">#{idx}</div>"
@@ -6219,6 +6296,11 @@ class LessonTimeline:
     .cluster-meta h2 {{ margin: 2px 42px 10px 0; font-size: 21px; }}
     .cluster-meta p {{ margin: 7px 0; line-height: 1.4; }}
     .cluster-number {{ position: absolute; top: 12px; right: 14px; color: #64748b; font-size: 13px; }}
+    .catalog-section {{ background: white; border: 1px solid #dfe4ec; border-radius: 8px; padding: 16px; }}
+    .catalog-section h2 {{ margin: 0 0 12px; font-size: 19px; }}
+    .catalog-table {{ width: 100%; border-collapse: collapse; font-size: 14px; }}
+    .catalog-table th, .catalog-table td {{ text-align: left; vertical-align: top; border-top: 1px solid #e6e9ef; padding: 8px; }}
+    .catalog-table th {{ background: #f8fafc; color: #334155; }}
     @media (max-width: 720px) {{
       .cluster-card {{ grid-template-columns: 1fr; }}
       .cluster-image {{ min-height: 180px; }}
@@ -6231,6 +6313,10 @@ class LessonTimeline:
     <p>{html_lib.escape(str(row.get("base_context", "") or ""))}</p>
   </header>
   <main>
+    <section class="catalog-section">
+      <h2>C2 Component Research Context</h2>
+      {catalog_html}
+    </section>
     {''.join(cards) if cards else '<p>No clusters were available in this labeling result.</p>'}
   </main>
 </body>
@@ -6245,7 +6331,7 @@ class LessonTimeline:
         assets_by_name: Dict[str, ImageAsset],
         sam_bbox_map_any: Any,
         diagram_modes_by_name: Optional[Dict[str, List[int]]] = None,
-        text_bundle: Dict[str, Any],
+        text_bundle: Optional[Dict[str, Any]] = None,
     ) -> Dict[str, Any]:
         import qwentest
 
@@ -6263,6 +6349,8 @@ class LessonTimeline:
 
         prepared: Dict[str, Dict[str, Any]] = {}
         base_dir = Path(__file__).resolve().parent
+        diagram_cluster_backend = str(os.getenv("DIAGRAM_CLUSTER_BACKEND", "stroke") or "stroke").strip().lower()
+        diagram_cluster_force_refresh = str(os.getenv("DIAGRAM_CLUSTER_FORCE_REFRESH", "0") or "0").strip().lower() in {"1", "true", "yes", "on"}
 
         for image_name, asset in (assets_by_name or {}).items():
             if not isinstance(asset, ImageAsset):
@@ -6283,8 +6371,22 @@ class LessonTimeline:
             if row is None:
                 desc_path = self._resolve_schematic_descriptor_path(pid)
                 processed_image_path = self._resolve_processed_png_path(pid)
-                desc_obj = self._load_json_file_safe(desc_path)
                 cluster_map_path = base_dir / "ClusterMaps" / pid / "clusters.json"
+                render_dir = base_dir / "ClusterRenders" / pid
+                if diagram_cluster_backend == "sam2_dinov2":
+                    needs_refresh = bool(diagram_cluster_force_refresh)
+                    if not cluster_map_path.is_file() or not render_dir.is_dir():
+                        needs_refresh = True
+                    if needs_refresh and processed_image_path:
+                        try:
+                            import DiagramMaskClusters
+                            DiagramMaskClusters.ensure_processed_clusters(pid, save_outputs=True)
+                        except Exception as exc:
+                            self._dbg(
+                                "diagram_mask_cluster_backend_failed",
+                                data={"processed_id": pid, "error": f"{type(exc).__name__}: {exc}"},
+                            )
+                desc_obj = self._load_json_file_safe(desc_path)
                 cluster_map_obj = self._load_json_file_safe(cluster_map_path)
                 clusters_raw = cluster_map_obj.get("clusters") if isinstance(cluster_map_obj, dict) else []
                 clusters_raw = clusters_raw if isinstance(clusters_raw, list) else []
@@ -6396,6 +6498,14 @@ class LessonTimeline:
                 )
                 if not refined_labels:
                     refined_labels = [str(c.get("label", "") or "").strip() for c in components if str(c.get("label", "") or "").strip()]
+                component_catalog = qwentest.normalize_component_catalog(
+                    components,
+                    fallback_labels=refined_labels,
+                )
+                refined_labels = qwentest.component_catalog_labels(
+                    component_catalog,
+                    fallback_labels=refined_labels,
+                )
 
                 row = {
                     "processed_id": pid,
@@ -6412,6 +6522,7 @@ class LessonTimeline:
                     "group_rows": group_rows,
                     "cluster_rows": cluster_rows,
                     "components": components,
+                    "component_catalog": component_catalog,
                     "sam_filter_payload": filter_payload,
                     "width": width,
                     "height": height,
@@ -6423,6 +6534,14 @@ class LessonTimeline:
             if asset.refined_labels_file and not row.get("refined_labels_file"):
                 row["refined_labels_file"] = asset.refined_labels_file
             _merge_unique_str_list(row["refined_labels"], self._load_refined_label_strings(asset.refined_labels_file))
+            row["component_catalog"] = qwentest.normalize_component_catalog(
+                row.get("component_catalog"),
+                fallback_labels=list(row.get("refined_labels") or []),
+            )
+            row["refined_labels"] = qwentest.component_catalog_labels(
+                row.get("component_catalog"),
+                fallback_labels=list(row.get("refined_labels") or []),
+            )
 
         snapshot_jobs: List[Dict[str, Any]] = []
         cluster_jobs: List[Dict[str, Any]] = []
@@ -6445,6 +6564,9 @@ class LessonTimeline:
                 row.setdefault("components", []).append(
                     {
                         "label": s,
+                        "visual_signature": "",
+                        "synonyms": [],
+                        "source": ["refined_labels_merge"],
                         "general_visual_description": "",
                         "wikipedia_visual_description": "",
                         "component_dir": "",
@@ -6453,6 +6575,14 @@ class LessonTimeline:
                         "canonical_candidate": {},
                     }
                 )
+            row["component_catalog"] = qwentest.normalize_component_catalog(
+                row.get("components") or row.get("component_catalog"),
+                fallback_labels=list(row.get("refined_labels") or []),
+            )
+            row["refined_labels"] = qwentest.component_catalog_labels(
+                row.get("component_catalog"),
+                fallback_labels=list(row.get("refined_labels") or []),
+            )
             diagram_payload = {
                 "canvas_size": {
                     "width": int(row.get("width", 0) or 0),
@@ -6487,6 +6617,7 @@ class LessonTimeline:
                             "bbox_xyxy": cluster.get("bbox_xyxy"),
                             "stroke_ids": cluster.get("stroke_ids"),
                             "stroke_rows": cluster.get("stroke_rows"),
+                            "component_catalog": row.get("component_catalog") or [],
                         },
                     }
                 )
@@ -6508,6 +6639,51 @@ class LessonTimeline:
                         },
                     }
                 )
+
+        siglip_by_job_key: Dict[str, Any] = {}
+        siglip_debug: Dict[str, Any] = {"ok": True, "note": "skipped_no_cluster_jobs"}
+        try:
+            debug_by_pid: Dict[str, Any] = {}
+            for pid, row in prepared.items():
+                catalog = row.get("component_catalog") if isinstance(row.get("component_catalog"), list) else []
+                pid_jobs = [
+                    job
+                    for job in cluster_jobs
+                    if str(job.get("job_key", "") or "").startswith(f"{pid}::")
+                ]
+                if not pid_jobs or not catalog:
+                    continue
+                one_debug = qwentest.score_diagram_cluster_jobs_with_siglip(
+                    jobs=pid_jobs,
+                    component_catalog=catalog,
+                    top_k=int(os.getenv("DIAGRAM_CLUSTER_SIGLIP_TOP_K", "5") or 5),
+                    gpu_index=int(self.gpu_index),
+                    cpu_threads=int(self.cpu_threads),
+                )
+                debug_by_pid[pid] = one_debug
+                if isinstance(one_debug, dict) and isinstance(one_debug.get("by_job_key"), dict):
+                    siglip_by_job_key.update(one_debug.get("by_job_key") or {})
+            if debug_by_pid:
+                siglip_debug = {"ok": True, "by_processed_id": debug_by_pid}
+                for job in cluster_jobs:
+                    job_key = str(job.get("job_key", "") or "").strip()
+                    top_k = siglip_by_job_key.get(job_key) if job_key else None
+                    if isinstance(top_k, list):
+                        job["siglip_top_k"] = top_k
+                        payload = job.get("cluster_payload") if isinstance(job.get("cluster_payload"), dict) else {}
+                        payload["siglip_top_k"] = top_k
+                        job["cluster_payload"] = payload
+        finally:
+            try:
+                from shared_models import unload_siglip
+                unload_siglip()
+            except Exception:
+                pass
+
+        if text_bundle is None:
+            text_bundle = qwentest.create_visual_describer_multimodal_bundle(
+                stage_io_dir=str(Path(self.debug_out_dir) / "qwen_stage_io")
+            )
 
         snapshot_results = qwentest.refine_diagram_snapshots_text_model(
             bundle=text_bundle,
@@ -6557,6 +6733,8 @@ class LessonTimeline:
                         "bbox_xyxy": cluster.get("bbox_xyxy"),
                         "stroke_ids": list(cluster.get("stroke_ids") or []),
                         "stroke_rows": list(cluster.get("stroke_rows") or [])[:16],
+                        "siglip_top_k": siglip_by_job_key.get(cluster_key, []),
+                        "vlm_visual": cluster_desc.get("vlm_visual") if isinstance(cluster_desc.get("vlm_visual"), dict) else {},
                         "CLUSTER_VISUAL_DESCRIPTION": cluster_desc.get("visual_summary") or " | ".join(
                             str(x.get("description", "") or "")
                             for x in (cluster.get("stroke_rows") or [])[:3]
@@ -6599,6 +6777,7 @@ class LessonTimeline:
                     "job_key": pid,
                     "base_context": row.get("base_context"),
                     "refined_labels": list(row.get("refined_labels") or []),
+                    "component_catalog": list(row.get("component_catalog") or []),
                     "snapshots": snapshots,
                     "clusters": clusters_out,
                     "canonical_parts": canonical_parts,
@@ -6670,6 +6849,12 @@ class LessonTimeline:
                     ],
                     "match_confidence": float(match.get("confidence", 0.0) or 0.0),
                     "reason": str(match.get("reason", "") or ""),
+                    "alternatives": [
+                        str(x).strip()
+                        for x in (match.get("alternatives") if isinstance(match.get("alternatives"), list) else [])
+                        if str(x).strip()
+                    ],
+                    "evidence_used": match.get("evidence_used") if isinstance(match.get("evidence_used"), dict) else {},
                 }
                 normalized_rows.append(normalized)
                 refined_label_to_strokes[label] = {
@@ -6680,6 +6865,8 @@ class LessonTimeline:
                     "cluster_ids": normalized["cluster_ids"],
                     "confidence": normalized["match_confidence"],
                     "reason": normalized["reason"],
+                    "alternatives": normalized["alternatives"],
+                    "evidence_used": normalized["evidence_used"],
                 }
 
             payload = {
@@ -6695,6 +6882,7 @@ class LessonTimeline:
                 "parser_kind": "diagram_unified_match_v2",
                 "refined_labels_file": row.get("refined_labels_file"),
                 "refined_labels": list(row.get("refined_labels") or []),
+                "component_catalog": row.get("component_catalog") or [],
                 "status": "ok" if not row.get("error") else "skipped",
                 "reason": row.get("error"),
                 "matched_labels": int(matched_count),
@@ -6710,6 +6898,7 @@ class LessonTimeline:
                 "clusters": {
                     "cluster_count": len(row.get("clusters_out") or []),
                     "items": row.get("clusters_out") or [],
+                    "siglip_debug": siglip_debug,
                     "sam_keep_mask_names": (
                         row.get("sam_filter_payload", {}).get("kept_mask_names")
                         if isinstance(row.get("sam_filter_payload"), dict)
@@ -6732,6 +6921,15 @@ class LessonTimeline:
                         payload["source_artifacts"]["cluster_label_report_path"] = report_path
             except Exception as e:
                 payload["cluster_label_report_error"] = f"{type(e).__name__}: {e}"
+
+            try:
+                labels_dir = Path(__file__).resolve().parent / "ClustersLabeled" / pid
+                labels_dir.mkdir(parents=True, exist_ok=True)
+                labels_path = labels_dir / "labels.json"
+                self._write_json_file(labels_path, payload)
+                payload["source_artifacts"]["clusters_labeled_labels_path"] = str(labels_path)
+            except Exception as e:
+                payload["clusters_labeled_write_error"] = f"{type(e).__name__}: {e}"
 
             by_processed_id[pid] = payload
             images.append(
@@ -7062,6 +7260,8 @@ class LessonTimeline:
         base_dir = Path(__file__).resolve().parent
         cluster_maps_root = base_dir / "ClusterMaps"
         cluster_renders_root = base_dir / "ClusterRenders"
+        diagram_cluster_backend = str(os.getenv("DIAGRAM_CLUSTER_BACKEND", "stroke") or "stroke").strip().lower()
+        diagram_cluster_force_refresh = str(os.getenv("DIAGRAM_CLUSTER_FORCE_REFRESH", "0") or "0").strip().lower() in {"1", "true", "yes", "on"}
 
         summary: Dict[str, Any] = {
             "ok": True,
@@ -7096,6 +7296,20 @@ class LessonTimeline:
             cmap_path = cluster_maps_root / f"processed_{idx}" / "clusters.json"
             renders_dir = cluster_renders_root / f"processed_{idx}"
             img_path = self._resolve_processed_png_path(pid)
+
+            if diagram_cluster_backend == "sam2_dinov2" and img_path:
+                needs_refresh = bool(diagram_cluster_force_refresh)
+                if not cmap_path.is_file() or not renders_dir.is_dir():
+                    needs_refresh = True
+                if needs_refresh:
+                    try:
+                        import DiagramMaskClusters
+                        DiagramMaskClusters.ensure_processed_clusters(pid, save_outputs=True)
+                    except Exception as exc:
+                        self._dbg(
+                            "diagram_mask_cluster_backend_failed",
+                            data={"processed_id": pid, "error": f"{type(exc).__name__}: {exc}"},
+                        )
 
             if not cmap_path.is_file() or not renders_dir.is_dir() or not img_path:
                 summary["images"].append({
@@ -8799,38 +9013,20 @@ class LessonTimeline:
         else:
             diagram_text_bundle = None
             try:
-                import qwentest
-                self._dbg("CUDA owner snapshot before unified diagram multimodal-qwen-load", data=self._cuda_owner_snapshot())
-                with self._timed("models.load_qwen_multimodal_for_diagram_matching", gpu_index=self.gpu_index, cpu_threads=self.cpu_threads):
-                    diagram_text_bundle = qwentest.create_diagram_multimodal_bundle(
-                        stage_io_dir=str(Path(self.debug_out_dir) / "qwen_stage_io")
+                with self._timed("qwen.diagram_unified_matching"):
+                    out["diagram_unified_matching"] = self._run_qwen_unified_diagram_matching(
+                        assets_by_name=diagram_assets_for_labeling,
+                        sam_bbox_map_any=out.get("efficientsam3_bboxes", {}),
+                        diagram_modes_by_name=diagram_modes_by_name,
+                        text_bundle=None,
                     )
-                self._dbg("CUDA owner snapshot after unified diagram multimodal-qwen-load", data=self._cuda_owner_snapshot())
+                out["diagram_cluster_labels"] = {"ok": True, "note": "replaced_by_unified_diagram_matching"}
+                out["diagram_schematic_labels"] = {"ok": True, "note": "replaced_by_unified_diagram_matching"}
             except Exception as e:
                 qwen_ready_err = repr(e)
-
-            if qwen_ready_err:
                 out["diagram_cluster_labels"] = {"ok": False, "error": f"qwen_ready_failed: {qwen_ready_err}"}
                 out["diagram_schematic_labels"] = {"ok": False, "error": f"qwen_ready_failed: {qwen_ready_err}"}
                 out["diagram_unified_matching"] = {"ok": False, "error": f"qwen_ready_failed: {qwen_ready_err}", "images": [], "by_processed_id": {}}
-            else:
-                try:
-                    with self._timed("qwen.diagram_unified_matching"):
-                        out["diagram_unified_matching"] = self._run_qwen_unified_diagram_matching(
-                            assets_by_name=diagram_assets_for_labeling,
-                            sam_bbox_map_any=out.get("efficientsam3_bboxes", {}),
-                            diagram_modes_by_name=diagram_modes_by_name,
-                            text_bundle=diagram_text_bundle,
-                        )
-                    out["diagram_cluster_labels"] = {"ok": True, "note": "replaced_by_unified_diagram_matching"}
-                    out["diagram_schematic_labels"] = {"ok": True, "note": "replaced_by_unified_diagram_matching"}
-                finally:
-                    try:
-                        import qwentest
-                        with self._timed("models.unload_qwen_multimodal_after_diagram_matching"):
-                            qwentest.destroy_diagram_multimodal_bundle(diagram_text_bundle)
-                    except Exception as e:
-                        self._dbg("Failed unloading diagram text qwen", data={"err": f"{type(e).__name__}: {e}"})
 
         diagram_label_stroke_map_err: Optional[str] = None
         try:
@@ -9416,6 +9612,7 @@ class LessonTimeline:
                     "diagram_type": payload.get("diagram_type"),
                     "matched_labels": payload.get("matched_labels"),
                     "refined_labels": payload.get("refined_labels"),
+                    "component_catalog": payload.get("component_catalog") if isinstance(payload.get("component_catalog"), list) else [],
                     "refined_label_to_strokes": payload.get("refined_label_to_strokes") if isinstance(payload.get("refined_label_to_strokes"), dict) else {},
                 }
                 self._write_json_file(compact_path, compact_payload)

@@ -11,6 +11,7 @@ import logging
 import threading
 import base64
 import html as html_lib
+import uuid
 from io import BytesIO
 from difflib import SequenceMatcher
 from contextlib import contextmanager
@@ -90,6 +91,14 @@ DIAGRAM_MULTIMODAL_MODEL_ID = os.environ.get(
     "QWEN_DIAGRAM_MULTIMODAL_MODEL_ID",
     os.environ.get("QWEN_MULTIMODAL_MODEL_ID", MODEL_ID),
 )
+DIAGRAM_VISUAL_DESCRIBER_MODEL_ID = os.environ.get(
+    "DIAGRAM_VISUAL_DESCRIBER_MODEL_ID",
+    os.environ.get("INTERNVL_MODEL_ID", "OpenGVLab/InternVL3_5-8B-HF"),
+)
+DIAGRAM_VISUAL_DESCRIBER_FALLBACK_MODEL_ID = os.environ.get(
+    "DIAGRAM_VISUAL_DESCRIBER_FALLBACK_MODEL_ID",
+    os.environ.get("QWEN_DIAGRAM_VISUAL_FALLBACK_MODEL_ID", "Qwen/Qwen3-VL-2B-Instruct"),
+)
 
 QWEN_MIN_PIXELS = 256 * 28 * 28
 QWEN_MAX_PIXELS = 512 * 28 * 28
@@ -131,8 +140,9 @@ PROC_LONGEST_EDGE = _env_int("QWEN_PROC_LONGEST_EDGE", 600, 128) # composite max
 
 SUGGESTION_LIMIT = 40
 MAX_NEW_TOKENS = _env_int("QWEN_MAX_NEW_TOKENS", 70, 8)
-CLUSTER_VISUAL_MAX_NEW_TOKENS = _env_int("QWEN_CLUSTER_VISUAL_MAX_NEW_TOKENS", 220, 32)
-DIAGRAM_CLUSTER_VISUAL_MAX_NEW_TOKENS = _env_int("QWEN_DIAGRAM_CLUSTER_VISUAL_MAX_NEW_TOKENS", 420, 64)
+CLUSTER_VISUAL_MAX_NEW_TOKENS = _env_int("QWEN_CLUSTER_VISUAL_MAX_NEW_TOKENS", 96, 32)
+DIAGRAM_CLUSTER_VISUAL_MAX_NEW_TOKENS = _env_int("QWEN_DIAGRAM_CLUSTER_VISUAL_MAX_NEW_TOKENS", 180, 64)
+DIAGRAM_VISUAL_ONLY_MAX_NEW_TOKENS = _env_int("DIAGRAM_VISUAL_ONLY_MAX_NEW_TOKENS", 320, 64)
 SCHEMATIC_LINE_MATCH_MAX_NEW_TOKENS = _env_int("QWEN_SCHEMATIC_LINE_MATCH_MAX_NEW_TOKENS", 420, 64)
 POSTFACTO_MATCH_MAX_NEW_TOKENS = _env_int("QWEN_POSTFACTO_MATCH_MAX_NEW_TOKENS", 700, 64)
 DO_SAMPLE = False
@@ -173,6 +183,13 @@ def _resolved_text_model_id(model_id: Any) -> str:
 
 def _resolved_multimodal_model_id(model_id: Any) -> str:
     requested = str(model_id or "").strip() or str(MODEL_ID)
+    if requested == "OpenGVLab/InternVL3_5-8B" and not _env_flag("INTERNVL_USE_EXACT_GITHUB_FORMAT", False):
+        mapped = "OpenGVLab/InternVL3_5-8B-HF"
+        print(
+            f"[visual_describer] internvl_hf_format_map requested={requested} "
+            f"using={mapped} reason=transformers_generate_api"
+        )
+        return mapped
     if _is_qwen_35_08b_model(requested):
         print(
             f"[qwen][DBG] multimodal_model_fallback requested={requested} "
@@ -1230,10 +1247,9 @@ def build_prompt(
         f"- RIGHT: A(n) {base_context}, LEFT crop from there\n\n"
         f"Visually charecterize the features of LEFT's object and its placement in the {base_context} based on foreground.\n"
         "Look at RIGHT and LEFTS FOREGROUND and link the crop to WIDER surroundings (their shapes, colours) for RELATIVE context \n"
-        "Based on LEFT's full semantic profile label it - what it is\n\n"
+        "Do NOT name or label the component. Describe only visible geometry, color, texture, boundary, orientation, and surroundings.\n\n"
         "Return ONLY JSON with REQUIRED keys:\n"
         "{"
-        "\"label\":string|null,"
         "\"full_visual_LEFT\": string,"
         "\"LEFT_SURROUNDINGS\": string,"
         "\"geometry_keywords\": strings"
@@ -1319,18 +1335,16 @@ def build_cluster_visual_prompt(
     bc = (base_context or "").strip() or "unknown"
 
     return (
-        "Input : Two images merged horizontally\n"
-        f"- LEFT: Cropped box with with coloured {colour_txt} main object and grayscaled surroundings\n"
-        f"- RIGHT: A(n) {base_context}, LEFT crop from there\n\n"
-        f"Visually charecterize the features of LEFT's object and its placement in the {base_context} based on foreground.\n"
-        "Look at RIGHT and LEFTS FOREGROUND and link the crop to WIDER surroundings (their shapes, colours) for RELATIVE context \n"
-        "Based on LEFT's full semantic profile label it - what it is\n\n"
+        "Input: two images merged horizontally.\n"
+        f"- LEFT: isolated foreground object with color hint {colour_txt}, grayscale surroundings.\n"
+        f"- RIGHT: full {bc} with the same region boxed.\n\n"
+        "Do not name or label the object. Describe only visible geometry, color, texture, boundary, orientation, "
+        "internal marks, and nearby surroundings. Keep each value short.\n\n"
         "Return ONLY JSON with REQUIRED keys:\n"
         "{"
-        "\"label\":string|null,"
-        "\"full_visual_LEFT\": string,"
-        "\"LEFT_SURROUNDINGS\": string,"
-        "\"geometry_keywords\": strings"
+        "\"full_visual_LEFT\": string <= 35 words,"
+        "\"LEFT_SURROUNDINGS\": string <= 20 words,"
+        "\"geometry_keywords\": array of 3 to 8 short strings"
         "}\n"
     )
 
@@ -1423,13 +1437,14 @@ def _parse_cluster_visual(text_out: str) -> Dict[str, Any]:
     fv = obj.get("full_visual_LEFT") if isinstance(obj, dict) else None
     ls = obj.get("LEFT_SURROUNDINGS") if isinstance(obj, dict) else None
     gk = obj.get("geometry_keywords") if isinstance(obj, dict) else None
-    label_guess = obj.get("label") if isinstance(obj, dict) else None
 
     out = {
-        "label_guess": _clean_short_label(label_guess) if isinstance(label_guess, str) else "",
+        "label_guess": "",
         "full_visual_LEFT": fv if isinstance(fv, str) else "",
         "LEFT_SURROUNDINGS": ls if isinstance(ls, str) else "",
         "geometry_keywords": [],
+        "parse_ok": False,
+        "parse_error": "",
     }
 
     if isinstance(gk, list):
@@ -1441,14 +1456,26 @@ def _parse_cluster_visual(text_out: str) -> Dict[str, Any]:
                     kk.append(s)
         out["geometry_keywords"] = kk[:12]
 
-    if not out["label_guess"]:
-        out["label_guess"] = _clean_short_label(_extract_jsonish_string_field(text_out or "", "label")) or ""
+    json_obj_parsed = isinstance(obj, dict)
+
     if not out["full_visual_LEFT"]:
         out["full_visual_LEFT"] = _extract_jsonish_string_field(text_out or "", "full_visual_LEFT")
     if not out["LEFT_SURROUNDINGS"]:
         out["LEFT_SURROUNDINGS"] = _extract_jsonish_string_field(text_out or "", "LEFT_SURROUNDINGS")
     if not out["geometry_keywords"]:
         out["geometry_keywords"] = _extract_jsonish_keywords_field(text_out or "", "geometry_keywords")
+
+    text_nonblank = bool(str(text_out or "").strip())
+    any_field = bool(out["full_visual_LEFT"]) or bool(out["LEFT_SURROUNDINGS"]) or bool(out["geometry_keywords"])
+    if json_obj_parsed and any_field:
+        out["parse_ok"] = True
+    elif any_field:
+        out["parse_ok"] = True
+        out["parse_error"] = "regex_recovered_fields"
+    elif not text_nonblank:
+        out["parse_error"] = "empty_vlm_output"
+    else:
+        out["parse_error"] = "no_parsable_json_or_fields"
 
     return out
 
@@ -1469,7 +1496,6 @@ def build_postfacto_label_match_prompt(
         if not isinstance(v, dict):
             continue
         clusters_compact[str(k)] = {
-            "stage1_label_guess": str(v.get("label_guess", "") or "")[:120],
             "geometry_keywords": v.get("geometry_keywords", []) if isinstance(v.get("geometry_keywords"), list) else [],
             "full_visual_LEFT": str(v.get("full_visual_LEFT", "") or "")[:600],
             "LEFT_SURROUNDINGS": str(v.get("LEFT_SURROUNDINGS", "") or "")[:600],
@@ -1543,7 +1569,6 @@ def build_single_cluster_label_match_prompt(
     labels = _dedupe_clean_labels(refined_labels)[:120]
     compact_visual = {
         "object_key": str(object_key or "").strip(),
-        "stage1_label_guess": str((visual or {}).get("label_guess", "") or "")[:120],
         "geometry_keywords": (visual or {}).get("geometry_keywords", []) if isinstance((visual or {}).get("geometry_keywords"), list) else [],
         "full_visual_LEFT": str((visual or {}).get("full_visual_LEFT", "") or "")[:700],
         "LEFT_SURROUNDINGS": str((visual or {}).get("LEFT_SURROUNDINGS", "") or "")[:700],
@@ -1561,7 +1586,6 @@ def build_single_cluster_label_match_prompt(
     return (
         f"BASE CONTEXT: {(base_context or '').strip() or 'unknown'}\n\n"
         "You are matching ONE visual object to ONE allowed label.\n"
-        "The stage1 label guess may be wrong. Do NOT echo it blindly.\n"
         "You must actually compare the object's visual description against the allowed labels and choose the best visual-semantic fit.\n"
         f"{match_mode}\n"
         "Use ONLY one of the allowed labels exactly as written.\n"
@@ -1809,38 +1833,18 @@ def _dedupe_matches_by_label(
 ) -> Dict[str, Dict[str, Any]]:
     if not matches:
         return {}
-
-    order_rank: Dict[str, int] = {str(k): i for i, k in enumerate(cluster_order or [])}
-    best_by_label: Dict[str, Dict[str, Any]] = {}
-
-    for ck, m in matches.items():
-        if not isinstance(m, dict):
-            continue
-        lab = m.get("label")
-        if not isinstance(lab, str) or not lab.strip():
-            continue
-        conf = float(m.get("confidence", 0.0) or 0.0)
-        rank = int(order_rank.get(str(ck), 10**9))
-
-        prev = best_by_label.get(lab)
-        if prev is None or conf > float(prev["confidence"]) or (conf == float(prev["confidence"]) and rank < int(prev["rank"])):
-            best_by_label[lab] = {"cluster_key": str(ck), "confidence": conf, "rank": rank}
-
     out: Dict[str, Dict[str, Any]] = {}
-    for ck, m in matches.items():
+    ordered_keys = [str(k) for k in (cluster_order or []) if str(k) in matches]
+    if not ordered_keys:
+        ordered_keys = [str(k) for k in matches.keys()]
+    for ck in ordered_keys:
+        m = matches.get(ck)
         if not isinstance(m, dict):
             continue
-        row = dict(m)
-        lab = row.get("label")
-        if isinstance(lab, str) and lab.strip():
-            keep = best_by_label.get(lab)
-            if not keep or str(keep.get("cluster_key")) != str(ck):
-                prev_reason = str(row.get("reason", "") or "").strip()
-                row["label"] = None
-                row["confidence"] = 0.0
-                row["reason"] = (prev_reason + " | duplicate_label_dropped").strip(" |")
-        out[str(ck)] = row
-
+        out[str(ck)] = dict(m)
+    for ck, m in matches.items():
+        if str(ck) not in out and isinstance(m, dict):
+            out[str(ck)] = dict(m)
     return out
 
 
@@ -1939,6 +1943,284 @@ def _dedupe_clean_labels(refined_labels: List[str]) -> List[str]:
     return out
 
 
+def _coerce_str_list(value: Any, *, cap: int = 16) -> List[str]:
+    out: List[str] = []
+    seen = set()
+    if isinstance(value, str):
+        raw_items = re.split(r"[,;/|]+", value)
+    elif isinstance(value, list):
+        raw_items = value
+    else:
+        raw_items = []
+    for item in raw_items:
+        text = str(item or "").strip()
+        if not text:
+            continue
+        key = text.casefold()
+        if key in seen:
+            continue
+        seen.add(key)
+        out.append(text[:160])
+        if len(out) >= int(cap):
+            break
+    return out
+
+
+# Relative strength of ``visual_signature_source`` markers. Higher values beat
+# lower ones when merging catalog rows. Keep this in sync with the tags emitted
+# by ``test_cluster_label_report._clean_component_catalog``.
+_VISUAL_SIG_SOURCE_RANK = {
+    "": 0,
+    "fallback_labels": 1,
+    "component_catalog": 1,
+    "c2:accepted_components:stage1": 2,
+    "c2:accepted_components:description": 2,
+    "c2:accepted_components": 2,
+    "c2:requested_components_resolved": 2,
+    "stage1_description": 2,
+    "description": 2,
+    "c2:visual_stage:wikipedia": 3,
+    "c2:visual_stage:refined": 4,
+    "c2:visual_stage": 4,
+    "CANONICAL_VISUAL_PARTS": 5,
+}
+
+
+def _signature_candidates_from_row(row: Dict[str, Any]) -> List[Tuple[str, str]]:
+    """Return (text, visual_signature_source) pairs from a dict row, strong-first."""
+    out: List[Tuple[str, str]] = []
+    canonical = str(row.get("CANONICAL_VISUAL_PARTS") or "").strip()
+    if canonical:
+        out.append((canonical, "CANONICAL_VISUAL_PARTS"))
+    refined = str(row.get("refined_visual_description") or "").strip()
+    if refined:
+        out.append((refined, "c2:visual_stage:refined"))
+    wiki = str(row.get("wikipedia_visual_description") or "").strip()
+    if wiki:
+        out.append((wiki, "c2:visual_stage:wikipedia"))
+    existing = str(row.get("visual_signature") or "").strip()
+    if existing:
+        existing_src = str(row.get("visual_signature_source") or "c2:visual_stage").strip() or "c2:visual_stage"
+        out.append((existing, existing_src))
+    gen = str(row.get("general_visual_description") or "").strip()
+    if gen:
+        out.append((gen, "c2:visual_stage"))
+    desc = str(row.get("description") or "").strip()
+    if desc:
+        out.append((desc, "description"))
+    return out
+
+
+def normalize_component_catalog(value: Any, fallback_labels: Optional[List[str]] = None) -> List[Dict[str, Any]]:
+    rows: List[Any] = []
+    if isinstance(value, dict):
+        for key in ("component_catalog", "components", "canonical_parts", "items"):
+            if isinstance(value.get(key), list):
+                rows = value.get(key) or []
+                break
+    elif isinstance(value, list):
+        rows = value
+
+    out: List[Dict[str, Any]] = []
+    seen: Dict[str, int] = {}
+
+    def add_row(row: Any, source_default: str) -> None:
+        if isinstance(row, str):
+            label = row.strip()
+            candidates: List[Tuple[str, str]] = []
+            stage1 = ""
+            synonyms: List[str] = []
+            source: List[str] = [source_default]
+            priority = None
+            canonical_candidate: Dict[str, Any] = {}
+        elif isinstance(row, dict):
+            label = str(row.get("label") or row.get("name") or row.get("matched_label") or "").strip()
+            candidates = _signature_candidates_from_row(row)
+            stage1 = str(row.get("stage1_description") or "").strip()
+            synonyms = _coerce_str_list(row.get("synonyms") or row.get("aliases") or row.get("alt_labels"), cap=16)
+            source = _coerce_str_list(row.get("source"), cap=12) or [source_default]
+            priority = row.get("priority")
+            canonical_candidate = row.get("canonical_candidate") if isinstance(row.get("canonical_candidate"), dict) else {}
+        else:
+            return
+
+        if not label:
+            return
+        key = label.casefold()
+        if key in seen:
+            existing = out[seen[key]]
+            # Upgrade visual signature if new candidate is from a stronger source.
+            cur_src = existing.get("visual_signature_source", "") or ""
+            cur_rank = _VISUAL_SIG_SOURCE_RANK.get(cur_src, 0)
+            for text, src in candidates:
+                if not text:
+                    continue
+                new_rank = _VISUAL_SIG_SOURCE_RANK.get(src, 0)
+                if new_rank > cur_rank or (new_rank == cur_rank and not existing.get("visual_signature")):
+                    existing["visual_signature"] = text
+                    existing["visual_signature_source"] = src
+                    cur_rank = new_rank
+            if stage1 and not existing.get("stage1_description"):
+                existing["stage1_description"] = stage1
+            for syn in synonyms:
+                if syn and syn not in existing["synonyms"]:
+                    existing["synonyms"].append(syn)
+            # Do not pollute ``source`` with ``fallback_labels`` when we already
+            # know about this label from a real C2 row -- that tag was
+            # producing misleading provenance in labels.json.
+            for src in source:
+                if not src:
+                    continue
+                if src == "fallback_labels" and source_default == "fallback_labels":
+                    # Incoming is literally the fallback-labels pass. Skip if the
+                    # catalog already has this label from anywhere else.
+                    continue
+                if src not in existing["source"]:
+                    existing["source"].append(src)
+            if canonical_candidate and not existing.get("canonical_candidate"):
+                existing["canonical_candidate"] = canonical_candidate
+            return
+
+        best_sig = ""
+        best_src = ""
+        if candidates:
+            best_sig, best_src = candidates[0]
+        item: Dict[str, Any] = {
+            "label": label,
+            "visual_signature": best_sig,
+            "visual_signature_source": best_src,
+            "stage1_description": stage1,
+            "synonyms": synonyms,
+            "source": source,
+        }
+        if priority is not None:
+            item["priority"] = priority
+        if canonical_candidate:
+            item["canonical_candidate"] = canonical_candidate
+        seen[key] = len(out)
+        out.append(item)
+
+    for row in rows:
+        add_row(row, "component_catalog")
+    for label in fallback_labels or []:
+        add_row(label, "fallback_labels")
+    return out
+
+
+def component_catalog_labels(component_catalog: Any, fallback_labels: Optional[List[str]] = None) -> List[str]:
+    return [row["label"] for row in normalize_component_catalog(component_catalog, fallback_labels=fallback_labels)]
+
+
+def component_catalog_texts(component_catalog: Any, fallback_labels: Optional[List[str]] = None) -> Tuple[List[Dict[str, Any]], List[str]]:
+    catalog = normalize_component_catalog(component_catalog, fallback_labels=fallback_labels)
+    texts: List[str] = []
+    for row in catalog:
+        parts = [str(row.get("label", "") or "").strip()]
+        signature = str(row.get("visual_signature", "") or "").strip()
+        if signature:
+            parts.append(signature)
+        synonyms = row.get("synonyms") if isinstance(row.get("synonyms"), list) else []
+        clean_synonyms = [str(x).strip() for x in synonyms if str(x).strip()]
+        if clean_synonyms:
+            parts.append("also called " + ", ".join(clean_synonyms[:8]))
+        texts.append(" | ".join(x for x in parts if x))
+    return catalog, texts
+
+
+def _rank_siglip_scores(
+    *,
+    catalog: List[Dict[str, Any]],
+    scores: List[float],
+    top_k: int,
+) -> List[Dict[str, Any]]:
+    indexed = []
+    for idx, score in enumerate(scores):
+        if idx >= len(catalog):
+            continue
+        try:
+            score_f = float(score)
+        except Exception:
+            score_f = 0.0
+        indexed.append((idx, score_f))
+    indexed.sort(key=lambda item: item[1], reverse=True)
+    top = indexed[: max(1, int(top_k or 1))]
+    second_by_rank = indexed[1][1] if len(indexed) > 1 else None
+    out: List[Dict[str, Any]] = []
+    for rank, (idx, score_f) in enumerate(top, start=1):
+        next_score = indexed[rank][1] if rank < len(indexed) else None
+        margin = score_f - (next_score if next_score is not None else (second_by_rank if second_by_rank is not None and rank == 1 else score_f))
+        out.append(
+            {
+                "rank": int(rank),
+                "label": str(catalog[idx].get("label", "") or ""),
+                "score": round(float(score_f), 6),
+                "margin_to_next": round(float(margin), 6),
+            }
+        )
+    return out
+
+
+def score_diagram_cluster_jobs_with_siglip(
+    *,
+    jobs: List[Dict[str, Any]],
+    component_catalog: List[Dict[str, Any]],
+    top_k: int = 5,
+    gpu_index: int = 0,
+    cpu_threads: int = 4,
+) -> Dict[str, Any]:
+    catalog, texts = component_catalog_texts(component_catalog)
+    if not jobs or not catalog or not texts:
+        return {"ok": True, "note": "empty_siglip_inputs", "by_job_key": {}}
+    try:
+        import shared_models
+        if shared_models.get_siglip() is None:
+            shared_models.init_siglip_hot(gpu_index=int(gpu_index), cpu_threads=int(cpu_threads), warmup=False)
+        scorer = getattr(shared_models, "siglip_score_pil_images_against_texts", None)
+        if not callable(scorer):
+            return {"ok": False, "error": "siglip_scorer_unavailable", "by_job_key": {}}
+    except Exception as e:
+        return {"ok": False, "error": f"siglip_load_failed: {type(e).__name__}: {e}", "by_job_key": {}}
+
+    active_jobs: List[Dict[str, Any]] = []
+    images: List[Image.Image] = []
+    for job in jobs:
+        if not isinstance(job, dict):
+            continue
+        key = str(job.get("job_key", "") or "").strip()
+        path = str(job.get("cluster_render_path", "") or "").strip()
+        if not key or not path:
+            continue
+        image = _open_rgb_image_for_qwen(path)
+        if image is None:
+            continue
+        active_jobs.append(job)
+        images.append(image)
+
+    if not active_jobs:
+        return {"ok": True, "note": "no_readable_cluster_images", "by_job_key": {}}
+
+    try:
+        matrix = scorer(images, texts)
+    except Exception as e:
+        return {"ok": False, "error": f"siglip_score_failed: {type(e).__name__}: {e}", "by_job_key": {}}
+
+    by_job_key: Dict[str, Any] = {}
+    for idx, job in enumerate(active_jobs):
+        row_scores = matrix[idx] if isinstance(matrix, list) and idx < len(matrix) and isinstance(matrix[idx], list) else []
+        by_job_key[str(job.get("job_key", "") or "")] = _rank_siglip_scores(
+            catalog=catalog,
+            scores=row_scores,
+            top_k=int(top_k),
+        )
+    return {
+        "ok": True,
+        "model_id": getattr(__import__("shared_models").get_siglip(), "model_id", ""),
+        "catalog_size": len(catalog),
+        "top_k": int(top_k),
+        "by_job_key": by_job_key,
+    }
+
+
 def _coerce_int_list(values: Any) -> List[int]:
     out: List[int] = []
     seen = set()
@@ -1971,6 +2253,7 @@ def _build_clean_cluster_labels_output(
     refined_labels: List[str],
     label_cluster_map: Dict[str, Any],
     clusters: Dict[str, Dict[str, Any]],
+    component_catalog: Optional[List[Dict[str, Any]]] = None,
 ) -> Dict[str, Any]:
     rows: List[Dict[str, Any]] = []
     for label in _dedupe_clean_labels(refined_labels):
@@ -1992,7 +2275,7 @@ def _build_clean_cluster_labels_output(
         }
         rows.append(row)
 
-    return {
+    out: Dict[str, Any] = {
         "schema": "diagram_label_matches_clean_v1",
         "image_index": int(image_index),
         "diagram_type": 1,
@@ -2001,6 +2284,23 @@ def _build_clean_cluster_labels_output(
         "labels": rows,
         "matched_labels_count": int(sum(1 for row in rows if row.get("stroke_indexes"))),
     }
+    # Preserve the full component catalog (visual signature, synonyms, source,
+    # visual_signature_source, stage1_description) alongside the legacy flat
+    # label list so downstream consumers keep the C2 evidence intact.
+    if component_catalog:
+        out["component_catalog"] = [
+            {
+                "label": str(r.get("label", "") or ""),
+                "visual_signature": str(r.get("visual_signature", "") or ""),
+                "visual_signature_source": str(r.get("visual_signature_source", "") or ""),
+                "stage1_description": str(r.get("stage1_description", "") or ""),
+                "synonyms": list(r.get("synonyms", []) or []),
+                "source": list(r.get("source", []) or []),
+            }
+            for r in component_catalog
+            if isinstance(r, dict) and str(r.get("label", "") or "").strip()
+        ]
+    return out
 
 
 def _image_path_to_data_uri(path: Any) -> str:
@@ -2037,9 +2337,6 @@ def _cluster_report_visual_text(visual: Any) -> str:
     if not isinstance(visual, dict):
         return ""
     parts: List[str] = []
-    label_guess = str(visual.get("label_guess", "") or "").strip()
-    if label_guess:
-        parts.append(f"stage1 guess: {label_guess}")
     full_visual = str(visual.get("full_visual_LEFT", "") or visual.get("visual_summary", "") or "").strip()
     if full_visual:
         parts.append(full_visual)
@@ -2054,6 +2351,119 @@ def _cluster_report_visual_text(visual: Any) -> str:
     return " | ".join(parts)
 
 
+def _component_catalog_report_rows(component_catalog: Any) -> Tuple[str, Dict[str, Dict[str, Any]]]:
+    catalog = normalize_component_catalog(component_catalog)
+    by_label: Dict[str, Dict[str, Any]] = {}
+    rows_html: List[str] = []
+    for row in catalog:
+        if not isinstance(row, dict):
+            continue
+        label = str(row.get("label", "") or "").strip()
+        if not label:
+            continue
+        by_label[label.casefold()] = row
+        signature = str(row.get("visual_signature", "") or "").strip()
+        signature_source = str(row.get("visual_signature_source", "") or "").strip()
+        stage1 = str(row.get("stage1_description", "") or "").strip()
+        synonyms = row.get("synonyms") if isinstance(row.get("synonyms"), list) else []
+        synonyms_text = ", ".join(str(x).strip() for x in synonyms if str(x).strip())
+        source = row.get("source")
+        if isinstance(source, list):
+            source_text = ", ".join(str(x).strip() for x in source if str(x).strip())
+        else:
+            source_text = str(source or "").strip()
+        sig_cell = html_lib.escape(signature) if signature else "<em>(no visual signature)</em>"
+        if signature_source:
+            sig_cell += f' <span class="tag">[{html_lib.escape(signature_source)}]</span>'
+        stage1_cell = html_lib.escape(stage1) if stage1 else "<em>(none)</em>"
+        rows_html.append(
+            "<tr>"
+            f"<td>{html_lib.escape(label)}</td>"
+            f"<td>{sig_cell}</td>"
+            f"<td>{stage1_cell}</td>"
+            f"<td>{html_lib.escape(synonyms_text or '(none)')}</td>"
+            f"<td>{html_lib.escape(source_text or '(unknown)')}</td>"
+            "</tr>"
+        )
+    if not rows_html:
+        return "<p>No C2 component context was available for this run.</p>", by_label
+    return (
+        "<table class=\"catalog-table\">"
+        "<thead><tr><th>Component</th><th>C2 visual description</th>"
+        "<th>Stage-1 terminology</th><th>Synonyms</th><th>Source</th></tr></thead>"
+        f"<tbody>{''.join(rows_html)}</tbody>"
+        "</table>"
+    ), by_label
+
+
+def _format_siglip_rows_html(rows: Any, catalog_by_label: Dict[str, Dict[str, Any]]) -> str:
+    if not isinstance(rows, list) or not rows:
+        return "<em>(no SigLIP ranking)</em>"
+    items: List[str] = []
+    for row in rows[:5]:
+        if not isinstance(row, dict):
+            continue
+        label = str(row.get("label", "") or "").strip()
+        if not label:
+            continue
+        try:
+            score = float(row.get("score", 0.0) or 0.0)
+        except Exception:
+            score = 0.0
+        try:
+            margin = float(row.get("margin_to_next", 0.0) or 0.0)
+        except Exception:
+            margin = 0.0
+        cat = catalog_by_label.get(label.casefold(), {}) if label else {}
+        sig = str(cat.get("visual_signature", "") or "").strip()
+        sig_cell = f' — <span class="sig">{html_lib.escape(sig[:220])}</span>' if sig else ""
+        items.append(
+            f"<li><strong>#{int(row.get('rank') or 0)}</strong> {html_lib.escape(label)} "
+            f"(score={score:.3f}, margin={margin:.3f}){sig_cell}</li>"
+        )
+    if not items:
+        return "<em>(no SigLIP ranking)</em>"
+    return "<ol class=\"siglip-list\">" + "".join(items) + "</ol>"
+
+
+def _format_vlm_visual_html(visual: Any, *, parse_ok: bool, error: str, preview: str) -> str:
+    if not parse_ok:
+        parts = [f"<span class=\"tag-error\">VLM parse FAILED</span>: {html_lib.escape(error or 'unknown')}"]
+        if preview:
+            parts.append(f"<code class=\"preview\">{html_lib.escape(preview[:400])}</code>")
+        return "<div class=\"vlm-failed\">" + "<br>".join(parts) + "</div>"
+    if not isinstance(visual, dict):
+        return "<em>(no VLM visual)</em>"
+    full = str(visual.get("full_visual_LEFT", "") or "").strip()
+    surr = str(visual.get("LEFT_SURROUNDINGS", "") or "").strip()
+    keywords = visual.get("geometry_keywords")
+    items: List[str] = []
+    if full:
+        items.append(f"<div><strong>Visual:</strong> {html_lib.escape(full)}</div>")
+    if surr:
+        items.append(f"<div><strong>Surroundings:</strong> {html_lib.escape(surr)}</div>")
+    if isinstance(keywords, list) and keywords:
+        pretty = ", ".join(html_lib.escape(str(k).strip()) for k in keywords if str(k).strip())
+        if pretty:
+            items.append(f"<div><strong>Keywords:</strong> {pretty}</div>")
+    if not items:
+        return "<em>(VLM returned no descriptive fields)</em>"
+    return "<div class=\"vlm-ok\">" + "".join(items) + "</div>"
+
+
+def _format_evidence_used_html(evidence: Any) -> str:
+    if isinstance(evidence, list) and evidence:
+        pretty = ", ".join(html_lib.escape(str(x).strip()) for x in evidence if str(x).strip())
+        if pretty:
+            return pretty
+    if isinstance(evidence, dict) and evidence:
+        parts = []
+        for k, v in evidence.items():
+            parts.append(f"{html_lib.escape(str(k))}={html_lib.escape(str(v))}")
+        return "; ".join(parts)
+    return "<em>(none)</em>"
+
+
 def _write_cluster_label_visual_report(
     *,
     report_path: Path,
@@ -2065,7 +2475,13 @@ def _write_cluster_label_visual_report(
     report_path.parent.mkdir(parents=True, exist_ok=True)
     clusters = results.get("clusters") if isinstance(results.get("clusters"), dict) else {}
     order = results.get("cluster_order") if isinstance(results.get("cluster_order"), list) else []
+    raw_catalog = results.get("component_catalog")
+    has_catalog = bool(raw_catalog)
+    catalog_html, catalog_by_label = _component_catalog_report_rows(raw_catalog)
     rows_html: List[str] = []
+
+    arbiter_debug = results.get("postfacto_debug") if isinstance(results.get("postfacto_debug"), dict) else {}
+    arbiter_error = str(arbiter_debug.get("arbiter_error", "") or "").strip()
 
     for pos, cluster_key in enumerate(order, start=1):
         rec = clusters.get(cluster_key) if isinstance(clusters, dict) else None
@@ -2089,8 +2505,89 @@ def _write_cluster_label_visual_report(
         except Exception:
             confidence_text = ""
         reason = str(rec.get("match_reason", "") or "").strip()
-        visual_text = _cluster_report_visual_text(rec.get("visual"))
-        error = str(rec.get("error", "") or "").strip()
+        vlm_parse_ok = bool(rec.get("vlm_parse_ok", False))
+        vlm_error = str(rec.get("vlm_error", "") or "").strip()
+        model_raw_preview = str(rec.get("model_raw_preview", "") or "").strip()
+        vlm_visual_html = _format_vlm_visual_html(
+            rec.get("visual"),
+            parse_ok=vlm_parse_ok,
+            error=vlm_error,
+            preview=model_raw_preview,
+        )
+        matched_cat = catalog_by_label.get(label.casefold(), {}) if label and label != "(unmatched)" else {}
+        matched_context = str(matched_cat.get("visual_signature", "") or "").strip()
+        matched_context_source = str(matched_cat.get("visual_signature_source", "") or "").strip()
+        siglip_top = rec.get("siglip_top_k") if isinstance(rec.get("siglip_top_k"), list) else []
+        siglip_html = _format_siglip_rows_html(siglip_top, catalog_by_label)
+
+        # Arbiter-side extras (alternatives, evidence_used).
+        arbiter_row = rec.get("arbiter_row") if isinstance(rec.get("arbiter_row"), dict) else {}
+        alternatives = arbiter_row.get("alternatives") if isinstance(arbiter_row.get("alternatives"), list) else []
+        evidence_used = arbiter_row.get("evidence_used") if arbiter_row else []
+        evidence_used_html = _format_evidence_used_html(evidence_used)
+
+        # When the cluster is unmatched, show the context of the top SigLIP
+        # candidates so humans can see what the pipeline considered.
+        unmatched_context_html = ""
+        if label == "(unmatched)":
+            candidate_bits: List[str] = []
+            for row in siglip_top[:3]:
+                if not isinstance(row, dict):
+                    continue
+                lab = str(row.get("label", "") or "").strip()
+                if not lab:
+                    continue
+                cat = catalog_by_label.get(lab.casefold(), {})
+                sig = str(cat.get("visual_signature", "") or "").strip()
+                if sig:
+                    candidate_bits.append(
+                        f"<li><strong>{html_lib.escape(lab)}</strong>: {html_lib.escape(sig[:280])}</li>"
+                    )
+            if candidate_bits:
+                unmatched_context_html = (
+                    "<p><strong>Top candidate C2 contexts:</strong></p>"
+                    "<ul class=\"candidate-list\">" + "".join(candidate_bits) + "</ul>"
+                )
+
+        if has_catalog and label != "(unmatched)":
+            if matched_context:
+                context_html = html_lib.escape(matched_context)
+                if matched_context_source:
+                    context_html += f' <span class="tag">[{html_lib.escape(matched_context_source)}]</span>'
+            else:
+                context_html = "<em>(matched label has no C2 visual signature)</em>"
+        elif not has_catalog:
+            context_html = "<em>(C2 component context unavailable)</em>"
+        else:
+            fallback_lab = ""
+            fallback_sig = ""
+            fallback_source = ""
+            for row in siglip_top:
+                if not isinstance(row, dict):
+                    continue
+                lab = str(row.get("label", "") or "").strip()
+                if not lab:
+                    continue
+                cat = catalog_by_label.get(lab.casefold(), {})
+                sig = str(cat.get("visual_signature", "") or "").strip()
+                if not sig:
+                    continue
+                fallback_lab = lab
+                fallback_sig = sig
+                fallback_source = str(cat.get("visual_signature_source", "") or "").strip()
+                break
+            if fallback_sig:
+                context_html = f"<strong>{html_lib.escape(fallback_lab)}</strong>: {html_lib.escape(fallback_sig)}"
+                if fallback_source:
+                    context_html += f' <span class="tag">[{html_lib.escape(fallback_source)}]</span>'
+            else:
+                context_html = "<em>(no matching label was chosen)</em>"
+
+        alt_html = (
+            ", ".join(html_lib.escape(str(x)) for x in alternatives if str(x).strip())
+            if isinstance(alternatives, list) and alternatives
+            else "<em>(none)</em>"
+        )
 
         image_html = (
             f'<img src="{data_uri}" alt="cluster {html_lib.escape(str(cluster_key))}">'
@@ -2106,7 +2603,12 @@ def _write_cluster_label_visual_report(
             f"<p><strong>Mask:</strong> {html_lib.escape(mask_name or '(none)')}</p>"
             f"<p><strong>Confidence:</strong> {html_lib.escape(confidence_text or '(none)')}</p>"
             f"<p><strong>Reason:</strong> {html_lib.escape(reason or '(none)')}</p>"
-            f"<p><strong>Visual read:</strong> {html_lib.escape(visual_text or error or '(none)')}</p>"
+            f"<p><strong>Alternatives:</strong> {alt_html}</p>"
+            f"<p><strong>Evidence used:</strong> {evidence_used_html}</p>"
+            f"<p><strong>C2 component context:</strong> {context_html}</p>"
+            f"<p><strong>VLM visual read:</strong></p>{vlm_visual_html}"
+            f"<p><strong>SigLIP top-k:</strong></p>{siglip_html}"
+            f"{unmatched_context_html}"
             "</div>"
             f"<div class=\"cluster-number\">#{pos}</div>"
             "</section>"
@@ -2114,6 +2616,14 @@ def _write_cluster_label_visual_report(
 
     if not rows_html:
         rows_html.append("<p>No clusters were available in this labeling result.</p>")
+
+    arbiter_banner = ""
+    if arbiter_error:
+        arbiter_banner = (
+            "<section class=\"arbiter-banner\">"
+            f"<strong>Final arbiter warning:</strong> {html_lib.escape(arbiter_error)}"
+            "</section>"
+        )
 
     html = f"""<!doctype html>
 <html lang="en">
@@ -2133,6 +2643,22 @@ def _write_cluster_label_visual_report(
     .cluster-meta h2 {{ margin: 2px 42px 10px 0; font-size: 21px; }}
     .cluster-meta p {{ margin: 7px 0; line-height: 1.4; }}
     .cluster-number {{ position: absolute; top: 12px; right: 14px; color: #64748b; font-size: 13px; }}
+    .catalog-section {{ background: white; border: 1px solid #dfe4ec; border-radius: 8px; padding: 16px; }}
+    .catalog-section h2 {{ margin: 0 0 12px; font-size: 19px; }}
+    .catalog-table {{ width: 100%; border-collapse: collapse; font-size: 14px; }}
+    .catalog-table th, .catalog-table td {{ text-align: left; vertical-align: top; border-top: 1px solid #e6e9ef; padding: 8px; }}
+    .catalog-table th {{ background: #f8fafc; color: #334155; }}
+    .tag {{ color: #64748b; font-size: 12px; }}
+    .tag-error {{ color: #b91c1c; font-weight: 600; }}
+    .preview {{ display: block; margin-top: 6px; padding: 6px 8px; background: #fef2f2; color: #7f1d1d; font-size: 12px; white-space: pre-wrap; word-break: break-word; }}
+    .vlm-failed {{ border-left: 3px solid #b91c1c; background: #fef2f2; padding: 6px 10px; color: #7f1d1d; }}
+    .vlm-ok {{ border-left: 3px solid #059669; background: #ecfdf5; padding: 6px 10px; }}
+    .vlm-ok div {{ margin: 3px 0; }}
+    .siglip-list {{ margin: 4px 0 4px 20px; padding: 0; }}
+    .siglip-list li {{ margin: 3px 0; }}
+    .siglip-list .sig {{ color: #475569; font-size: 12px; }}
+    .candidate-list {{ margin: 4px 0 4px 20px; padding: 0; }}
+    .arbiter-banner {{ margin: 8px 0; padding: 10px 14px; background: #fffbeb; border-left: 4px solid #d97706; color: #7c2d12; border-radius: 4px; }}
     @media (max-width: 720px) {{
       .cluster-card {{ grid-template-columns: 1fr; }}
       .cluster-image {{ min-height: 180px; }}
@@ -2145,6 +2671,11 @@ def _write_cluster_label_visual_report(
     <p>{html_lib.escape(str(base_context or ""))}</p>
   </header>
   <main>
+    {arbiter_banner}
+    <section class="catalog-section">
+      <h2>C2 Component Research Context</h2>
+      {catalog_html}
+    </section>
     {''.join(rows_html)}
   </main>
 </body>
@@ -2225,6 +2756,622 @@ def _build_clean_schematic_labels_output(
         "labels": rows,
         "matched_labels_count": int(sum(1 for row in rows if row.get("stroke_indexes"))),
     }
+
+
+# ============================
+# Evidence-packet arbiter
+# ============================
+# SigLIP top-1 must clear this bar before it is allowed to stand in for a
+# failed text arbiter response. Below this, we emit a null final label.
+ARBITER_SIGLIP_FALLBACK_MIN_SCORE = 0.25
+ARBITER_SIGLIP_FALLBACK_MIN_MARGIN = 0.05
+
+
+def _compact_siglip_top_k(rows: Any, *, cap: int = 5) -> List[Dict[str, Any]]:
+    out: List[Dict[str, Any]] = []
+    if not isinstance(rows, list):
+        return out
+    for row in rows[:cap]:
+        if not isinstance(row, dict):
+            continue
+        try:
+            rank = int(row.get("rank"))
+        except Exception:
+            rank = len(out) + 1
+        try:
+            score = float(row.get("score", 0.0) or 0.0)
+        except Exception:
+            score = 0.0
+        try:
+            margin = float(row.get("margin_to_next", 0.0) or 0.0)
+        except Exception:
+            margin = 0.0
+        label = str(row.get("label", "") or "").strip()
+        if not label:
+            continue
+        out.append({
+            "rank": rank,
+            "label": label,
+            "score": round(score, 6),
+            "margin_to_next": round(margin, 6),
+        })
+    return out
+
+
+def _compact_component_catalog_for_arbiter(catalog: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    out: List[Dict[str, Any]] = []
+    for row in catalog or []:
+        if not isinstance(row, dict):
+            continue
+        label = str(row.get("label", "") or "").strip()
+        if not label:
+            continue
+        out.append({
+            "label": label,
+            "visual_signature": _clip_text_block(row.get("visual_signature", ""), 320),
+            "visual_signature_source": str(row.get("visual_signature_source", "") or ""),
+            "stage1_description": _clip_text_block(row.get("stage1_description", ""), 180),
+            "synonyms": list(row.get("synonyms", []) or [])[:8],
+        })
+    return out
+
+
+def _compact_visual_for_arbiter(visual: Any) -> Dict[str, Any]:
+    if not isinstance(visual, dict):
+        return {}
+    return {
+        "full_visual_LEFT": _clip_text_block(visual.get("full_visual_LEFT", ""), 360),
+        "LEFT_SURROUNDINGS": _clip_text_block(visual.get("LEFT_SURROUNDINGS", ""), 260),
+        "geometry_keywords": list(visual.get("geometry_keywords", []) or [])[:12],
+    }
+
+
+def build_cluster_evidence_arbiter_prompt(
+    *,
+    base_context: str,
+    component_catalog: List[Dict[str, Any]],
+    cluster_evidence: List[Dict[str, Any]],
+    compressed: bool = False,
+) -> str:
+    bc = (base_context or "").strip() or "unknown"
+    catalog_rows = _compact_component_catalog_for_arbiter(component_catalog)
+    allowed_labels = [row["label"] for row in catalog_rows]
+    if compressed:
+        # Drop stage1_description and trim signatures further.
+        catalog_rows = [
+            {
+                "label": row["label"],
+                "visual_signature": _clip_text_block(row.get("visual_signature", ""), 140),
+                "synonyms": row.get("synonyms", [])[:4],
+            }
+            for row in catalog_rows
+        ]
+        for ev in cluster_evidence:
+            vis = ev.get("vlm_visual") if isinstance(ev.get("vlm_visual"), dict) else {}
+            ev["vlm_visual"] = {
+                "full_visual_LEFT": _clip_text_block(vis.get("full_visual_LEFT", ""), 140),
+                "LEFT_SURROUNDINGS": _clip_text_block(vis.get("LEFT_SURROUNDINGS", ""), 100),
+                "geometry_keywords": list(vis.get("geometry_keywords", []) or [])[:6],
+            }
+    return (
+        "You are the FINAL text-only arbiter for a diagram cluster labeling pipeline.\n"
+        "You are given one evidence packet per cluster. Each packet contains:\n"
+        "- cluster_key, colour_hint, vlm_parse_ok (whether the visual VLM produced parseable JSON),\n"
+        "- vlm_visual: the parsed visual description JSON (may be empty when vlm_parse_ok is false),\n"
+        "- vlm_error and model_raw_preview when the VLM failed,\n"
+        "- siglip_top_k: image-text similarity ranking against the component_catalog.\n\n"
+        "Rules:\n"
+        "- Choose final_label strictly from the component_catalog labels, or null when no allowed label fits.\n"
+        "- Never invent a label. Never match on stage-1 Wikidata terminology alone when a better visual signature exists.\n"
+        "- Do not pick a label just because the VLM text \"sounds like\" it; weigh SigLIP ranks and visual-signature fit.\n"
+        "- If vlm_parse_ok is false, you may still label if SigLIP is decisive; otherwise set final_label to null.\n"
+        "- Explain in reason which evidence dominated (e.g. siglip_rank_1, visual_signature_match, vlm_visual_shape).\n"
+        "- evidence_used must list the specific evidence fields you relied on, e.g. [\"siglip_top_k.rank1\", \"vlm_visual.full_visual_LEFT\"].\n"
+        "- alternatives is an ordered list of other plausible labels from component_catalog (may be empty).\n\n"
+        f"BASE_CONTEXT: {bc}\n\n"
+        "COMPONENT_CATALOG:\n"
+        f"{json.dumps(catalog_rows, ensure_ascii=False, indent=2)}\n\n"
+        "ALLOWED_LABELS:\n"
+        f"{json.dumps(allowed_labels, ensure_ascii=False)}\n\n"
+        "CLUSTER_EVIDENCE:\n"
+        f"{json.dumps(cluster_evidence, ensure_ascii=False, indent=2)}\n\n"
+        "Return JSON only with this schema:\n"
+        "{"
+        "\"matches\":["
+        "{"
+        "\"cluster_key\":\"string\","
+        "\"final_label\":\"string|null\","
+        "\"confidence\":0.0,"
+        "\"reason\":\"string\","
+        "\"alternatives\":[\"string\"],"
+        "\"evidence_used\":[\"string\"]"
+        "}"
+        "]"
+        "}\n"
+    )
+
+
+def _parse_cluster_evidence_arbiter(text_out: str, allowed_labels: List[str]) -> Dict[str, Dict[str, Any]]:
+    obj = extract_json_object(text_out or "")
+    if not isinstance(obj, dict):
+        return {}
+    raw_matches = obj.get("matches")
+    if not isinstance(raw_matches, list):
+        return {}
+    label_set = {lab.casefold(): lab for lab in allowed_labels if isinstance(lab, str) and lab.strip()}
+    out: Dict[str, Dict[str, Any]] = {}
+    for row in raw_matches:
+        if not isinstance(row, dict):
+            continue
+        ck = str(row.get("cluster_key", "") or "").strip()
+        if not ck:
+            continue
+        raw_label = row.get("final_label")
+        if isinstance(raw_label, str) and raw_label.strip():
+            final_label = label_set.get(raw_label.strip().casefold())
+        else:
+            final_label = None
+        try:
+            confidence = float(row.get("confidence", 0.0) or 0.0)
+        except Exception:
+            confidence = 0.0
+        confidence = max(0.0, min(1.0, confidence))
+        if final_label is None:
+            confidence = 0.0
+        reason = _clip_text_block(row.get("reason", ""), 320)
+        alternatives_raw = row.get("alternatives") if isinstance(row.get("alternatives"), list) else []
+        alternatives: List[str] = []
+        for alt in alternatives_raw:
+            if isinstance(alt, str) and alt.strip():
+                m = label_set.get(alt.strip().casefold())
+                if m and m != final_label and m not in alternatives:
+                    alternatives.append(m)
+        evidence_used_raw = row.get("evidence_used") if isinstance(row.get("evidence_used"), list) else []
+        evidence_used = [str(x).strip() for x in evidence_used_raw if str(x).strip()][:12]
+        out[ck] = {
+            "label": final_label,
+            "confidence": confidence,
+            "reason": reason,
+            "alternatives": alternatives[:6],
+            "evidence_used": evidence_used,
+        }
+    return out
+
+
+def _resolve_allowed_label_text(raw_label: Any, allowed_labels: List[str]) -> Optional[str]:
+    text = str(raw_label or "").strip()
+    if not text:
+        return None
+    text = re.sub(r"^[`*_\s\"']+|[`*_\s\"'.,;:]+$", "", text).strip()
+    label_set = {lab.casefold(): lab for lab in allowed_labels if isinstance(lab, str) and lab.strip()}
+    direct = label_set.get(text.casefold())
+    if direct:
+        return direct
+    # Prose outputs often wrap labels in Markdown or append short explanations.
+    lowered = text.casefold()
+    matches = [canonical for key, canonical in label_set.items() if re.search(rf"\b{re.escape(key)}\b", lowered)]
+    if len(matches) == 1:
+        return matches[0]
+    if matches:
+        # Prefer the longest label to avoid "membrane" beating "plasma membrane".
+        return sorted(matches, key=len, reverse=True)[0]
+    return None
+
+
+def _parse_cluster_evidence_arbiter_prose(
+    text_out: str,
+    *,
+    allowed_labels: List[str],
+    cluster_keys: List[str],
+) -> Dict[str, Dict[str, Any]]:
+    """Recover useful labels when Qwen ignores the JSON-only instruction.
+
+    The 4B arbiter sometimes emits Markdown like:
+    ``### Cluster 0001 ... Final Label: `endoplasmic reticulum``.
+    This parser is intentionally conservative: it only accepts labels from the
+    component catalog and only when the text block is clearly tied to a known
+    cluster key or its numeric prefix.
+    """
+    text = str(text_out or "")
+    if not text.strip():
+        return {}
+
+    key_by_num: Dict[str, str] = {}
+    for ck in cluster_keys:
+        m = re.match(r"^0*(\d+)", str(ck or ""))
+        if m:
+            key_by_num[m.group(1)] = ck
+
+    out: Dict[str, Dict[str, Any]] = {}
+    heading_re = re.compile(r"(?im)^\s*(?:#{1,6}\s*)?(?:cluster|packet)\s+0*(\d+)\b[^\n]*")
+    matches = list(heading_re.finditer(text))
+    for idx, match in enumerate(matches):
+        num = match.group(1)
+        ck = key_by_num.get(num)
+        if not ck:
+            continue
+        start = match.end()
+        end = matches[idx + 1].start() if idx + 1 < len(matches) else len(text)
+        block = text[start:end].strip()
+        if not block:
+            continue
+
+        label_raw = ""
+        label_match = re.search(
+            r"(?is)(?:final\s+label|label)\s*[:\-]\s*(?:\*\*)?\s*`?([^\n`*]+)",
+            block,
+        )
+        if label_match:
+            label_raw = label_match.group(1)
+        else:
+            # Fall back to "is <allowed label>" only inside this cluster block.
+            for allowed in sorted(allowed_labels, key=len, reverse=True):
+                if re.search(rf"(?is)\b(?:is|as|choose|chosen)\s+(?:the\s+)?`?{re.escape(allowed)}`?\b", block):
+                    label_raw = allowed
+                    break
+        label = _resolve_allowed_label_text(label_raw, allowed_labels)
+        if not label:
+            continue
+
+        reason = ""
+        reason_match = re.search(
+            r"(?is)(?:reasoning|reason|rationale)\s*[:\-]\s*(.*?)(?=\n\s*(?:\*\*)?(?:alternatives?|evidence|confidence)\b|$)",
+            block,
+        )
+        if reason_match:
+            reason = reason_match.group(1).strip()
+        if not reason:
+            reason = block
+
+        alternatives: List[str] = []
+        alt_match = re.search(r"(?is)alternatives?\s*[:\-]\s*([^\n]+)", block)
+        if alt_match:
+            for piece in re.split(r"[,;/|]+", alt_match.group(1)):
+                alt = _resolve_allowed_label_text(piece, allowed_labels)
+                if alt and alt != label and alt not in alternatives:
+                    alternatives.append(alt)
+
+        evidence_used = []
+        lower_block = block.casefold()
+        if "siglip" in lower_block:
+            evidence_used.append("siglip_top_k")
+        if "vlm" in lower_block or "visual" in lower_block:
+            evidence_used.append("vlm_visual")
+        if "signature" in lower_block or "catalog" in lower_block:
+            evidence_used.append("component_catalog.visual_signature")
+        if not evidence_used:
+            evidence_used = ["arbiter_prose_recovery"]
+
+        out[ck] = {
+            "label": label,
+            "confidence": 0.72,
+            "reason": _clip_text_block("arbiter_prose_recovery: " + reason, 420),
+            "alternatives": alternatives[:6],
+            "evidence_used": evidence_used[:12],
+        }
+
+    # Also recover from truncated JSON-ish output. This happens when Qwen starts
+    # a valid object but hits max tokens before closing braces. If the cluster_key
+    # and final_label are already present, keep the useful decision.
+    for ck in cluster_keys:
+        if ck in out:
+            continue
+        m = re.search(
+            rf'(?is)"cluster_key"\s*:\s*"{re.escape(ck)}"(?P<block>.*?)(?=(?:"cluster_key"\s*:)|\Z)',
+            text,
+        )
+        if not m:
+            continue
+        block = m.group("block")
+        label_match = re.search(r'(?is)"final_label"\s*:\s*(?:null|"([^"]+)")', block)
+        if not label_match or not label_match.group(1):
+            continue
+        label = _resolve_allowed_label_text(label_match.group(1), allowed_labels)
+        if not label:
+            continue
+        confidence = 0.72
+        conf_match = re.search(r'(?is)"confidence"\s*:\s*([0-9.]+)', block)
+        if conf_match:
+            try:
+                confidence = max(0.0, min(1.0, float(conf_match.group(1))))
+            except Exception:
+                confidence = 0.72
+        reason = ""
+        reason_match = re.search(r'(?is)"reason"\s*:\s*"((?:\\.|[^"\\])*)', block)
+        if reason_match:
+            reason = _json_unescape_loose(reason_match.group(1))
+        if not reason:
+            reason = f"Recovered from truncated arbiter JSON fragment for {ck}."
+        evidence_used = ["arbiter_json_fragment_recovery"]
+        lower_block = block.casefold()
+        if "siglip" in lower_block:
+            evidence_used.append("siglip_top_k")
+        if "vlm" in lower_block or "visual" in lower_block:
+            evidence_used.append("vlm_visual")
+        out[ck] = {
+            "label": label,
+            "confidence": confidence,
+            "reason": _clip_text_block("arbiter_json_fragment_recovery: " + reason, 420),
+            "alternatives": [],
+            "evidence_used": evidence_used[:12],
+        }
+    return out
+
+
+def _siglip_fallback_match_row(
+    *,
+    allowed_labels: List[str],
+    siglip_top_k: List[Dict[str, Any]],
+) -> Optional[Dict[str, Any]]:
+    if not siglip_top_k:
+        return None
+    top = siglip_top_k[0]
+    if not isinstance(top, dict):
+        return None
+    label = str(top.get("label", "") or "").strip()
+    allowed = {lab.casefold(): lab for lab in allowed_labels if isinstance(lab, str) and lab.strip()}
+    resolved = allowed.get(label.casefold())
+    if not resolved:
+        return None
+    try:
+        score = float(top.get("score", 0.0) or 0.0)
+    except Exception:
+        score = 0.0
+    try:
+        margin = float(top.get("margin_to_next", 0.0) or 0.0)
+    except Exception:
+        margin = 0.0
+    if score < ARBITER_SIGLIP_FALLBACK_MIN_SCORE or margin < ARBITER_SIGLIP_FALLBACK_MIN_MARGIN:
+        return None
+    return {
+        "label": resolved,
+        "confidence": max(0.55, min(0.85, score)),
+        "reason": f"arbiter_fallback_siglip_top1 score={score:.3f} margin={margin:.3f}",
+        "alternatives": [],
+        "evidence_used": ["siglip_top_k.rank1"],
+    }
+
+
+def evidence_packet_match_labels_with_qwen(
+    model,
+    processor,
+    device: torch.device,
+    *,
+    base_context: str,
+    component_catalog: List[Dict[str, Any]],
+    cluster_visual_map: Dict[str, Dict[str, Any]],
+    cluster_status_map: Dict[str, Dict[str, Any]],
+    siglip_by_cluster: Dict[str, List[Dict[str, Any]]],
+    debug_sink: Optional[Dict[str, Any]] = None,
+) -> Dict[str, Dict[str, Any]]:
+    """Evidence-packet arbiter. Sends Qwen the catalog + per-cluster evidence.
+
+    Replaces the old `postfacto_match_labels_with_qwen` flow. Always returns a
+    dict keyed by cluster_key. A cluster missing from the returned dict means
+    the arbiter explicitly decided the cluster has no matching label.
+    """
+    allowed_labels = [
+        str(row.get("label", "") or "").strip()
+        for row in (component_catalog or [])
+        if isinstance(row, dict) and str(row.get("label", "") or "").strip()
+    ]
+    cluster_keys = [str(k) for k in (cluster_visual_map or {}).keys() if str(k or "").strip()]
+    if not allowed_labels or not cluster_keys:
+        if isinstance(debug_sink, dict):
+            debug_sink["mode"] = "skipped_empty_inputs"
+            debug_sink["allowed_labels_count"] = len(allowed_labels)
+            debug_sink["cluster_count"] = len(cluster_keys)
+        return {}
+
+    def _packet(ck: str, *, compress: bool) -> Dict[str, Any]:
+        vis = cluster_visual_map.get(ck) if isinstance(cluster_visual_map.get(ck), dict) else {}
+        status = cluster_status_map.get(ck) if isinstance(cluster_status_map.get(ck), dict) else {}
+        siglip_rows = _compact_siglip_top_k(siglip_by_cluster.get(ck, []), cap=4 if compress else 5)
+        packet: Dict[str, Any] = {
+            "cluster_key": ck,
+            "colour_hint": status.get("colour_hint"),
+            "vlm_parse_ok": bool(status.get("vlm_parse_ok", False)),
+            "vlm_visual": _compact_visual_for_arbiter(vis),
+            "siglip_top_k": siglip_rows,
+        }
+        if not packet["vlm_parse_ok"]:
+            packet["vlm_error"] = _clip_text_block(status.get("vlm_error", ""), 160)
+            packet["model_raw_preview"] = _clip_text_block(status.get("model_raw_preview", ""), 160)
+        return packet
+
+    packets = [_packet(ck, compress=False) for ck in cluster_keys]
+    prompt = build_cluster_evidence_arbiter_prompt(
+        base_context=base_context,
+        component_catalog=component_catalog,
+        cluster_evidence=packets,
+    )
+
+    raw_texts: List[str] = []
+    arbiter_error = ""
+    try:
+        parsed_objs, raw_batch = _generate_json_objects_from_prompts(
+            model=model,
+            processor=processor,
+            device=device,
+            prompts=[prompt],
+            temperature=0.0,
+            max_new_tokens=min(1200, int(POSTFACTO_MATCH_MAX_NEW_TOKENS) + 400),
+            batch_size=1,
+            debug_label="evidence_packet_arbiter",
+            stage_io_contexts=[
+                _build_qwen_stage_io_context(
+                    bundle=None,
+                    debug_label="evidence_packet_arbiter",
+                    job_key="arbiter",
+                    stage_kind="text",
+                    rendered_input_text=str(prompt),
+                    input_prompt_text=str(prompt),
+                    extra={"cluster_count": len(cluster_keys)},
+                )
+            ],
+        )
+        raw_texts = list(raw_batch or [])
+    except Exception as exc:
+        arbiter_error = f"first_pass_failed:{type(exc).__name__}:{exc}"
+
+    first_raw = raw_texts[0] if raw_texts else ""
+    parsed = _parse_cluster_evidence_arbiter(first_raw, allowed_labels) if first_raw else {}
+    parse_mode = "json" if parsed else ""
+
+    # Retry once with a compressed packet if the first pass was empty/broken.
+    retry_info: Dict[str, Any] = {}
+    if not parsed:
+        retry_info["first_pass_output"] = (first_raw or "")[:600]
+        compressed_packets = [_packet(ck, compress=True) for ck in cluster_keys]
+        compressed_prompt = build_cluster_evidence_arbiter_prompt(
+            base_context=base_context,
+            component_catalog=component_catalog,
+            cluster_evidence=compressed_packets,
+            compressed=True,
+        )
+        try:
+            _, raw2 = _generate_json_objects_from_prompts(
+                model=model,
+                processor=processor,
+                device=device,
+                prompts=[compressed_prompt],
+                temperature=0.0,
+                max_new_tokens=min(900, int(POSTFACTO_MATCH_MAX_NEW_TOKENS) + 200),
+                batch_size=1,
+                debug_label="evidence_packet_arbiter_retry",
+                stage_io_contexts=[
+                    _build_qwen_stage_io_context(
+                        bundle=None,
+                        debug_label="evidence_packet_arbiter_retry",
+                        job_key="arbiter_retry",
+                        stage_kind="text",
+                        rendered_input_text=str(compressed_prompt),
+                        input_prompt_text=str(compressed_prompt),
+                        extra={"cluster_count": len(cluster_keys), "compressed": True},
+                    )
+                ],
+            )
+            retry_raw = (raw2 or [""])[0]
+            retry_info["retry_output"] = (retry_raw or "")[:600]
+            parsed = _parse_cluster_evidence_arbiter(retry_raw, allowed_labels)
+            if not parsed:
+                parsed = _parse_cluster_evidence_arbiter_prose(
+                    retry_raw,
+                    allowed_labels=allowed_labels,
+                    cluster_keys=cluster_keys,
+                )
+                if parsed:
+                    parse_mode = "prose_recovery_retry"
+                    arbiter_error = (arbiter_error or "") + "|retry_json_parse_failed_prose_recovered"
+                else:
+                    arbiter_error = (arbiter_error or "") + "|retry_parse_failed"
+        except Exception as exc:
+            arbiter_error = (arbiter_error or "") + f"|retry_failed:{type(exc).__name__}:{exc}"
+
+    if not parsed and first_raw:
+        parsed = _parse_cluster_evidence_arbiter_prose(
+            first_raw,
+            allowed_labels=allowed_labels,
+            cluster_keys=cluster_keys,
+        )
+        if parsed:
+            parse_mode = "prose_recovery_first_pass"
+            arbiter_error = (arbiter_error or "") + "|first_pass_json_parse_failed_prose_recovered"
+
+    missing_after_group = [ck for ck in cluster_keys if not (isinstance(parsed.get(ck), dict) and parsed[ck].get("label"))]
+    if missing_after_group:
+        per_cluster_debug: List[Dict[str, Any]] = []
+        for ck in missing_after_group:
+            single_packet = [_packet(ck, compress=True)]
+            single_prompt = build_cluster_evidence_arbiter_prompt(
+                base_context=base_context,
+                component_catalog=component_catalog,
+                cluster_evidence=single_packet,
+                compressed=True,
+            )
+            try:
+                _, raw_single_rows = _generate_json_objects_from_prompts(
+                    model=model,
+                    processor=processor,
+                    device=device,
+                    prompts=[single_prompt],
+                    temperature=0.0,
+                    max_new_tokens=420,
+                    batch_size=1,
+                    debug_label="evidence_packet_arbiter_single",
+                    stage_io_contexts=[
+                        _build_qwen_stage_io_context(
+                            bundle=None,
+                            debug_label="evidence_packet_arbiter_single",
+                            job_key=ck,
+                            stage_kind="text",
+                            rendered_input_text=str(single_prompt),
+                            input_prompt_text=str(single_prompt),
+                            extra={"cluster_key": ck, "single_cluster": True},
+                        )
+                    ],
+                )
+                single_raw = (raw_single_rows or [""])[0]
+                single_parsed = _parse_cluster_evidence_arbiter(single_raw, allowed_labels)
+                single_mode = "json"
+                if not single_parsed:
+                    single_parsed = _parse_cluster_evidence_arbiter_prose(
+                        single_raw,
+                        allowed_labels=allowed_labels,
+                        cluster_keys=[ck],
+                    )
+                    single_mode = "prose" if single_parsed else "none"
+                if isinstance(single_parsed.get(ck), dict) and single_parsed[ck].get("label"):
+                    parsed[ck] = single_parsed[ck]
+                    if not parse_mode:
+                        parse_mode = "per_cluster"
+                per_cluster_debug.append({
+                    "cluster_key": ck,
+                    "mode": single_mode,
+                    "raw_preview": str(single_raw or "")[:240],
+                    "parsed": bool(isinstance(single_parsed.get(ck), dict) and single_parsed[ck].get("label")),
+                })
+            except Exception as exc:
+                per_cluster_debug.append({
+                    "cluster_key": ck,
+                    "mode": "exception",
+                    "error": f"{type(exc).__name__}: {exc}",
+                })
+        retry_info["per_cluster"] = per_cluster_debug
+        recovered_count = sum(1 for row in per_cluster_debug if row.get("parsed"))
+        if recovered_count:
+            arbiter_error = (arbiter_error or "") + f"|per_cluster_recovered={recovered_count}"
+        else:
+            arbiter_error = (arbiter_error or "") + "|per_cluster_no_recovery"
+
+    # Compose final output: parsed rows win; otherwise try SigLIP high-confidence fallback.
+    final: Dict[str, Dict[str, Any]] = {}
+    for ck in cluster_keys:
+        row = parsed.get(ck)
+        if isinstance(row, dict) and row.get("label"):
+            final[ck] = row
+            continue
+        # Explicit arbiter null or missing -> try SigLIP high-confidence fallback
+        fb = _siglip_fallback_match_row(
+            allowed_labels=allowed_labels,
+            siglip_top_k=siglip_by_cluster.get(ck, []),
+        )
+        if fb is not None:
+            fb["reason"] = "arbiter_null|" + fb.get("reason", "")
+            final[ck] = fb
+
+    if isinstance(debug_sink, dict):
+        debug_sink["mode"] = "evidence_packet_arbiter"
+        debug_sink["allowed_labels_count"] = len(allowed_labels)
+        debug_sink["cluster_count"] = len(cluster_keys)
+        debug_sink["parsed_count"] = sum(1 for ck in cluster_keys if ck in parsed and parsed[ck].get("label"))
+        debug_sink["parse_mode"] = parse_mode or "none"
+        debug_sink["final_count"] = len(final)
+        debug_sink["arbiter_error"] = arbiter_error
+        debug_sink["first_pass_raw_preview"] = (first_raw or "")[:400]
+        if retry_info:
+            debug_sink["retry"] = retry_info
+    return final
 
 
 def postfacto_match_labels_with_qwen(
@@ -2813,6 +3960,7 @@ def label_clusters_transformers(
     *,
     save_outputs: bool = False,
     skip_existing_labels: Optional[bool] = None,
+    postfacto_model_loader: Any = None,
 ) -> Dict[int, Dict[str, Any]]:
     OUT_DIR.mkdir(parents=True, exist_ok=True)
     OUT_DEBUG_DIR.mkdir(parents=True, exist_ok=True)
@@ -2852,9 +4000,13 @@ def label_clusters_transformers(
 
         suggestions_all = list(pack.get("candidate_labels_raw", []) or [])
         refined_upstream = list(pack.get("candidate_labels_refined", []) or [])
+        component_catalog = normalize_component_catalog(
+            pack.get("component_catalog"),
+            fallback_labels=refined_upstream or suggestions_all,
+        )
 
         # NOTE: refined_upstream now used ONLY in post-facto stage2 matching
-        refined_labels = refined_upstream or suggestions_all
+        refined_labels = component_catalog_labels(component_catalog, fallback_labels=refined_upstream or suggestions_all)
         refined_labels = [str(x).strip() for x in refined_labels if str(x).strip()]
 
         full_img_rgb = _as_rgb_uint8(pack.get("full_img_rgb"))
@@ -2869,6 +4021,7 @@ def label_clusters_transformers(
             "image_index": int(idx),
             "candidate_labels_raw": suggestions_all[: int(SUGGESTION_LIMIT)],
             "candidate_labels_refined": refined_labels[: int(SUGGESTION_LIMIT)],
+            "component_catalog": component_catalog,
             "base_context": base_context,
             "model_id": str(getattr(model, "name_or_path", MODEL_ID)),
             "proc_longest_edge": int(PROC_LONGEST_EDGE),
@@ -2958,6 +4111,43 @@ def label_clusters_transformers(
 
         results["clusters_after_sam_filter"] = int(len(tasks))
 
+        siglip_by_cluster_key: Dict[str, Any] = {}
+        siglip_jobs: List[Dict[str, Any]] = []
+        skip_siglip_scoring = bool(pack.get("skip_siglip_scoring")) or _env_flag("QWEN_SKIP_CLUSTER_SIGLIP", False)
+        for task in tasks:
+            cluster_key = f"{int(task['ci']):04d}_{task['mask_name']}"
+            mask_path = renders_dir / str(task["mask_name"])
+            if mask_path.is_file():
+                siglip_jobs.append(
+                    {
+                        "job_key": cluster_key,
+                        "cluster_render_path": str(mask_path),
+                    }
+                )
+        if skip_siglip_scoring:
+            results["siglip_debug"] = {
+                "ok": False,
+                "skipped": True,
+                "reason": "QWEN_SKIP_CLUSTER_SIGLIP or pack.skip_siglip_scoring",
+                "job_count": int(len(siglip_jobs)),
+            }
+        elif siglip_jobs and component_catalog:
+            siglip_debug = score_diagram_cluster_jobs_with_siglip(
+                jobs=siglip_jobs,
+                component_catalog=component_catalog,
+                top_k=int(os.getenv("DIAGRAM_CLUSTER_SIGLIP_TOP_K", "5") or 5),
+                gpu_index=int(GPU_INDEX),
+                cpu_threads=int(os.getenv("QWEN_CPU_THREADS", "4") or 4),
+            )
+            if isinstance(siglip_debug, dict):
+                results["siglip_debug"] = {
+                    k: v
+                    for k, v in siglip_debug.items()
+                    if k != "by_job_key"
+                }
+                if isinstance(siglip_debug.get("by_job_key"), dict):
+                    siglip_by_cluster_key = siglip_debug.get("by_job_key") or {}
+
         bs = max(1, int(BATCH_SIZE))
         for start in range(0, len(tasks), bs):
             chunk = tasks[start:start + bs]
@@ -3046,8 +4236,34 @@ def label_clusters_transformers(
                 dt = time.time() - t_req0
 
             except Exception as e:
+                error_text = f"batch_inference_failed: {type(e).__name__}: {e}"
                 for meta in meta_batch:
-                    _store(meta["cluster_key"], {"entry": meta["entry"], "error": f"batch_inference_failed: {e}"})
+                    ck = str(meta["cluster_key"])
+                    _store(ck, {
+                        "cluster_index": int(meta["ci"]),
+                        "entry": meta["entry"],
+                        "mask_name": meta.get("mask_name"),
+                        "colour_hint": meta.get("colour_hint"),
+                        "bbox_xyxy": meta.get("bbox_xyxy"),
+                        "bbox_right_panel_xyxy": meta.get("bbox_right_panel_xyxy"),
+                        "siglip_top_k": siglip_by_cluster_key.get(ck, []),
+                        "timing_s": float(f"{(time.time() - t_req0):.4f}"),
+                        "model_raw": "",
+                        "model_raw_preview": "",
+                        "vlm_parse_ok": False,
+                        "vlm_error": error_text,
+                        "visual": {
+                            "label_guess": "",
+                            "full_visual_LEFT": "",
+                            "LEFT_SURROUNDINGS": "",
+                            "geometry_keywords": [],
+                        },
+                        "matched_label": None,
+                        "match_confidence": None,
+                        "match_reason": "",
+                        "arbiter_row": None,
+                        "error": error_text,
+                    })
                 if torch.cuda.is_available() and device.type == "cuda":
                     torch.cuda.empty_cache()
                 continue
@@ -3058,6 +4274,9 @@ def label_clusters_transformers(
                 meta = meta_batch[j]
 
                 parsed_visual = _parse_cluster_visual(text_out)
+                vlm_parse_ok = bool(parsed_visual.pop("parse_ok", False))
+                vlm_parse_error = str(parsed_visual.pop("parse_error", "") or "")
+                raw_preview = str(text_out or "")[:400]
 
                 _store(meta["cluster_key"], {
                     "cluster_index": int(meta["ci"]),
@@ -3066,42 +4285,97 @@ def label_clusters_transformers(
                     "colour_hint": meta["colour_hint"],
                     "bbox_xyxy": meta["bbox_xyxy"],
                     "bbox_right_panel_xyxy": meta["bbox_right_panel_xyxy"],
+                    "siglip_top_k": siglip_by_cluster_key.get(str(meta["cluster_key"]), []),
                     "timing_s": float(f"{dt:.4f}"),
                     "model_raw": text_out,
+                    "model_raw_preview": raw_preview,
+                    "vlm_parse_ok": vlm_parse_ok,
+                    "vlm_error": "" if vlm_parse_ok else vlm_parse_error,
                     "visual": parsed_visual,
                     "matched_label": None,
                     "match_confidence": None,
                     "match_reason": "",
+                    "arbiter_row": None,
                 })
 
-        # ---- Stage 2: post-facto label matching across all clusters (text-only)
+        # ---- Stage 2: evidence-packet arbiter across all clusters (text-only)
         cluster_visual_map: Dict[str, Dict[str, Any]] = {}
+        cluster_status_map: Dict[str, Dict[str, Any]] = {}
+        siglip_by_cluster: Dict[str, List[Dict[str, Any]]] = {}
         for ck in results.get("cluster_order", []):
             rec = results["clusters"].get(ck, {})
             vis = rec.get("visual")
             if isinstance(vis, dict):
                 cluster_visual_map[ck] = vis
+            cluster_status_map[ck] = {
+                "vlm_parse_ok": bool(rec.get("vlm_parse_ok", False)),
+                "vlm_error": str(rec.get("vlm_error", "") or ""),
+                "model_raw_preview": str(rec.get("model_raw_preview", "") or ""),
+                "colour_hint": rec.get("colour_hint"),
+            }
+            top_k = rec.get("siglip_top_k")
+            if isinstance(top_k, list):
+                siglip_by_cluster[ck] = top_k
 
-        postfacto_debug: Dict[str, Any] = {}
-        matches = postfacto_match_labels_with_qwen(
-            model=model,
-            processor=processor,
-            device=device,
+        arbiter_debug: Dict[str, Any] = {}
+        match_model = model
+        match_processor = processor
+        match_device = device
+        if callable(postfacto_model_loader):
+            try:
+                loaded = postfacto_model_loader()
+                if isinstance(loaded, dict):
+                    match_model = loaded.get("model", match_model)
+                    match_processor = loaded.get("processor", loaded.get("tokenizer", match_processor))
+                    match_device = loaded.get("device", match_device)
+                elif isinstance(loaded, (list, tuple)) and len(loaded) >= 3:
+                    match_model, match_processor, match_device = loaded[:3]
+                arbiter_debug["postfacto_model_loader"] = "ok"
+                arbiter_debug["postfacto_model_id"] = str(getattr(match_model, "name_or_path", "") or "")
+            except Exception as e:
+                arbiter_debug["postfacto_model_loader"] = f"{type(e).__name__}: {e}"
+
+        arbiter_matches = evidence_packet_match_labels_with_qwen(
+            model=match_model,
+            processor=match_processor,
+            device=match_device,
             base_context=base_context,
-            refined_labels=refined_labels,
+            component_catalog=component_catalog,
             cluster_visual_map=cluster_visual_map,
-            debug_sink=postfacto_debug,
+            cluster_status_map=cluster_status_map,
+            siglip_by_cluster=siglip_by_cluster,
+            debug_sink=arbiter_debug,
         )
-        matches = _dedupe_matches_by_label(matches, results.get("cluster_order", []))
 
-        results["postfacto_matches"] = matches
-        results["postfacto_debug"] = postfacto_debug
+        # Convert arbiter output to legacy ``matches`` structure so downstream
+        # builders continue to work, then dedupe collisions.
+        legacy_matches: Dict[str, Dict[str, Any]] = {}
+        for ck, row in arbiter_matches.items():
+            if not isinstance(row, dict):
+                continue
+            legacy_matches[str(ck)] = {
+                "label": row.get("label"),
+                "confidence": float(row.get("confidence", 0.0) or 0.0),
+                "reason": str(row.get("reason", "") or ""),
+            }
+        legacy_matches = _dedupe_matches_by_label(legacy_matches, results.get("cluster_order", []))
 
-        for ck, m in matches.items():
+        results["postfacto_matches"] = legacy_matches
+        results["postfacto_debug"] = arbiter_debug
+        results["evidence_arbiter_matches"] = arbiter_matches
+
+        for ck, m in legacy_matches.items():
             if ck in results["clusters"] and isinstance(m, dict):
-                results["clusters"][ck]["matched_label"] = m.get("label")
-                results["clusters"][ck]["match_confidence"] = m.get("confidence")
-                results["clusters"][ck]["match_reason"] = m.get("reason", "")
+                rec = results["clusters"][ck]
+                rec["matched_label"] = m.get("label")
+                rec["match_confidence"] = m.get("confidence")
+                rec["match_reason"] = m.get("reason", "")
+                arb_row = arbiter_matches.get(ck) if isinstance(arbiter_matches.get(ck), dict) else None
+                if arb_row is not None:
+                    rec["arbiter_row"] = {
+                        "alternatives": arb_row.get("alternatives", []),
+                        "evidence_used": arb_row.get("evidence_used", []),
+                    }
 
         label_cluster_map, cluster_label_rows = _build_label_cluster_outputs(
             refined_labels=refined_labels,
@@ -3129,6 +4403,7 @@ def label_clusters_transformers(
                 refined_labels=refined_labels,
                 label_cluster_map=label_cluster_map,
                 clusters=results.get("clusters", {}),
+                component_catalog=component_catalog,
             )
             labels_path.write_text(json.dumps(clean_out, ensure_ascii=False, indent=2), encoding="utf-8")
             debug_labels_path.write_text(json.dumps(results, ensure_ascii=False, indent=2), encoding="utf-8")
@@ -4559,9 +5834,10 @@ def _load_qwen_multimodal_model(
 ):
     tried: List[str] = []
     for loader_name, loader in (
-        ("Qwen3_5ForConditionalGeneration", Qwen3_5ForConditionalGeneration),
         ("AutoModelForImageTextToText", AutoModelForImageTextToText),
+        ("AutoModelForCausalLM", AutoModelForCausalLM),
         ("Qwen3VLForConditionalGeneration", Qwen3VLForConditionalGeneration),
+        ("Qwen3_5ForConditionalGeneration", Qwen3_5ForConditionalGeneration),
     ):
         if loader is None:
             tried.append(f"{loader_name}:missing")
@@ -4646,6 +5922,269 @@ def create_diagram_multimodal_bundle(
         "tokenizer": tok if tok is not None else processor,
         "device": device,
         "stage_io_dir": str(stage_io_dir or "").strip(),
+    }
+
+
+def create_visual_describer_multimodal_bundle(
+    stage_io_dir: Optional[str] = None,
+    allow_fallback: Optional[bool] = None,
+) -> Dict[str, Any]:
+    primary = str(DIAGRAM_VISUAL_DESCRIBER_MODEL_ID or "").strip()
+    fallback = str(DIAGRAM_VISUAL_DESCRIBER_FALLBACK_MODEL_ID or "").strip()
+    if allow_fallback is None:
+        allow_fallback = str(os.getenv("DIAGRAM_VISUAL_DESCRIBER_ALLOW_FALLBACK", "0") or "0").strip().lower() in {
+            "1",
+            "true",
+            "yes",
+            "on",
+        }
+    errors: List[str] = []
+    model_ids = [primary]
+    if bool(allow_fallback):
+        model_ids.extend([fallback, str(MODEL_ID)])
+    for model_id in model_ids:
+        if not model_id:
+            continue
+        try:
+            print(f"[visual_describer] loading model={model_id} fallback_allowed={bool(allow_fallback)}")
+            bundle = create_diagram_multimodal_bundle(model_id=model_id, stage_io_dir=stage_io_dir)
+            bundle["visual_describer_role"] = "visual_only_cluster_describer"
+            return bundle
+        except Exception as e:
+            errors.append(f"{model_id}:{type(e).__name__}: {e}")
+            print(f"[visual_describer] load failed model={model_id}: {type(e).__name__}: {e}")
+            continue
+    raise RuntimeError("visual_describer_load_failed: " + " | ".join(errors))
+
+
+class _RemoteQwenServerProcessor:
+    def __init__(
+        self,
+        *,
+        base_url: str,
+        mode: str,
+        temp_dir: Optional[Path] = None,
+        docker_backend_dir: str = "/workspace/whiteboard_backend",
+    ) -> None:
+        self.base_url = str(base_url or "").rstrip("/")
+        self.mode = str(mode or "").strip().lower()
+        self.tokenizer = self
+        self.pad_token_id = 0
+        self.eos_token_id = 0
+        self.padding_side = "left"
+        self.truncation_side = "left"
+        self._last_decoded: List[str] = []
+        self._temp_dir = Path(temp_dir or (BASE_DIR / "_remote_vlm_inputs"))
+        self._temp_dir.mkdir(parents=True, exist_ok=True)
+        self._docker_backend_dir = str(docker_backend_dir or "/workspace/whiteboard_backend").rstrip("/")
+
+    def apply_chat_template(self, conv: Any, tokenize: bool = False, add_generation_prompt: bool = True, **_: Any) -> str:
+        system_parts: List[str] = []
+        user_parts: List[str] = []
+        if isinstance(conv, list):
+            for msg in conv:
+                if not isinstance(msg, dict):
+                    continue
+                role = str(msg.get("role", "") or "").strip().lower()
+                content = msg.get("content")
+                text_parts: List[str] = []
+                if isinstance(content, list):
+                    for item in content:
+                        if isinstance(item, dict) and item.get("type") == "text":
+                            text_parts.append(str(item.get("text", "") or ""))
+                elif isinstance(content, str):
+                    text_parts.append(content)
+                text = "\n".join(x for x in text_parts if x).strip()
+                if not text:
+                    continue
+                if role == "system":
+                    system_parts.append(text)
+                else:
+                    user_parts.append(text)
+        payload = {
+            "system_prompt": "\n".join(system_parts).strip(),
+            "user_prompt": "\n\n".join(user_parts).strip(),
+        }
+        return "__REMOTE_QWEN_CHAT__" + json.dumps(payload, ensure_ascii=False)
+
+    def __call__(self, **kwargs: Any) -> Dict[str, Any]:
+        texts = kwargs.get("text")
+        if isinstance(texts, str):
+            text_rows = [texts]
+        elif isinstance(texts, list):
+            text_rows = [str(x or "") for x in texts]
+        else:
+            text_rows = [""]
+
+        images = kwargs.get("images")
+        image_rows: List[Any]
+        if images is None:
+            image_rows = [None] * len(text_rows)
+        elif isinstance(images, list):
+            image_rows = list(images)
+        else:
+            image_rows = [images]
+        if len(image_rows) < len(text_rows):
+            image_rows.extend([None] * (len(text_rows) - len(image_rows)))
+
+        payloads: List[Dict[str, str]] = []
+        image_paths: List[List[str]] = []
+        for idx, text in enumerate(text_rows):
+            payloads.append(self._parse_chat_payload(text))
+            img = image_rows[idx] if idx < len(image_rows) else None
+            image_paths.append(self._save_images_for_docker(img))
+
+        return {
+            "input_ids": torch.zeros((len(text_rows), 1), dtype=torch.long),
+            "_remote_payloads": payloads,
+            "_remote_image_paths": image_paths,
+        }
+
+    def batch_decode(self, token_ids: Any, skip_special_tokens: bool = True) -> List[str]:
+        return list(self._last_decoded)
+
+    def decode(self, token_ids: Any, skip_special_tokens: bool = True) -> str:
+        return self._last_decoded[0] if self._last_decoded else ""
+
+    def _parse_chat_payload(self, text: str) -> Dict[str, str]:
+        prefix = "__REMOTE_QWEN_CHAT__"
+        raw = str(text or "")
+        if raw.startswith(prefix):
+            try:
+                obj = json.loads(raw[len(prefix):])
+            except Exception:
+                obj = {}
+            if isinstance(obj, dict):
+                return {
+                    "system_prompt": str(obj.get("system_prompt", "") or ""),
+                    "user_prompt": str(obj.get("user_prompt", "") or ""),
+                }
+        return {"system_prompt": "", "user_prompt": raw}
+
+    def _save_images_for_docker(self, image: Any) -> List[str]:
+        if image is None:
+            return []
+        rows = image if isinstance(image, list) else [image]
+        out: List[str] = []
+        for item in rows:
+            if not isinstance(item, Image.Image):
+                continue
+            name = f"remote_vlm_{uuid.uuid4().hex}.png"
+            local_path = self._temp_dir / name
+            item.convert("RGB").save(local_path, format="PNG")
+            try:
+                rel = local_path.resolve().relative_to(BASE_DIR.resolve())
+                docker_path = self._docker_backend_dir + "/" + str(rel).replace("\\", "/")
+            except Exception:
+                docker_path = str(local_path)
+            out.append(docker_path)
+        return out
+
+
+class _RemoteQwenServerModel:
+    def __init__(
+        self,
+        *,
+        base_url: str,
+        mode: str,
+        processor: _RemoteQwenServerProcessor,
+        model_id: str = "",
+    ) -> None:
+        self.base_url = str(base_url or "").rstrip("/")
+        self.mode = str(mode or "").strip().lower()
+        self.processor = processor
+        self.name_or_path = str(model_id or f"remote-qwen-server-{self.mode}")
+
+    def generate(self, **kwargs: Any) -> torch.Tensor:
+        payloads = kwargs.get("_remote_payloads")
+        image_paths = kwargs.get("_remote_image_paths")
+        payloads = payloads if isinstance(payloads, list) else []
+        image_paths = image_paths if isinstance(image_paths, list) else [[] for _ in payloads]
+        max_new_tokens = int(kwargs.get("max_new_tokens", 256) or 256)
+        temperature = float(kwargs.get("temperature", 0.0) or 0.0)
+        top_p = float(kwargs.get("top_p", 1.0) or 1.0)
+        use_tqdm = False
+
+        if self.mode == "vision":
+            requests_payload = []
+            for idx, payload in enumerate(payloads):
+                imgs = image_paths[idx] if idx < len(image_paths) and isinstance(image_paths[idx], list) else []
+                if not imgs:
+                    raise RuntimeError("remote vision generation requires at least one image")
+                requests_payload.append(
+                    {
+                        "prompt": str(payload.get("user_prompt", "") or ""),
+                        "images": imgs,
+                    }
+                )
+            body = {
+                "requests": requests_payload,
+                "system_prompt": str(payloads[0].get("system_prompt", "") or "") if payloads else None,
+                "generation": {
+                    "max_new_tokens": max_new_tokens,
+                    "temperature": temperature,
+                    "top_p": top_p,
+                    "top_k": -1,
+                    "skip_special_tokens": True,
+                },
+                "use_tqdm": use_tqdm,
+            }
+            path = "/generate/vision"
+        else:
+            body = {
+                "prompts": [str(payload.get("user_prompt", "") or "") for payload in payloads],
+                "system_prompt": str(payloads[0].get("system_prompt", "") or "") if payloads else None,
+                "generation": {
+                    "max_new_tokens": max_new_tokens,
+                    "temperature": temperature,
+                    "top_p": top_p,
+                    "top_k": -1,
+                    "skip_special_tokens": True,
+                },
+                "use_tqdm": use_tqdm,
+            }
+            path = "/generate/text"
+
+        import requests
+
+        response = requests.post(f"{self.base_url}{path}", json=body, timeout=1200)
+        response.raise_for_status()
+        result = response.json()
+        rows = result.get("responses") if isinstance(result, dict) else []
+        texts: List[str] = []
+        if isinstance(rows, list):
+            for row in rows:
+                texts.append(str((row or {}).get("text", "") or "") if isinstance(row, dict) else "")
+        self.processor._last_decoded = texts
+        return torch.zeros((max(1, len(texts)), 2), dtype=torch.long)
+
+
+def create_remote_qwen_server_bundle(
+    *,
+    base_url: str = "http://127.0.0.1:8009",
+    mode: str,
+    model_id: str = "",
+    temp_dir: Optional[str] = None,
+) -> Dict[str, Any]:
+    processor = _RemoteQwenServerProcessor(
+        base_url=base_url,
+        mode=mode,
+        temp_dir=Path(temp_dir) if temp_dir else None,
+    )
+    model = _RemoteQwenServerModel(
+        base_url=base_url,
+        mode=mode,
+        processor=processor,
+        model_id=model_id,
+    )
+    return {
+        "model_id": str(model_id or f"remote-qwen-server-{mode}"),
+        "backend": "remote_qwen_server",
+        "mode": str(mode or ""),
+        "model": model,
+        "processor": processor,
+        "tokenizer": processor,
+        "device": torch.device("cpu"),
     }
 
 
@@ -5179,22 +6718,37 @@ def build_cluster_visual_summary_prompt(
     refined_labels: List[str],
     cluster_payload: Dict[str, Any],
 ) -> str:
+    component_catalog = normalize_component_catalog(
+        cluster_payload.get("component_catalog") if isinstance(cluster_payload, dict) else None,
+        fallback_labels=refined_labels,
+    )
+    siglip_top_k = cluster_payload.get("siglip_top_k") if isinstance(cluster_payload, dict) else []
+    siglip_top_k = siglip_top_k if isinstance(siglip_top_k, list) else []
     return (
-        "You are making a compact visual reading of one diagram cluster from pixels.\n"
+        "You are making a compact visual-only reading of one diagram cluster from pixels.\n"
         "You are looking at a two-panel image.\n"
         "LEFT shows the isolated cluster render.\n"
         "RIGHT shows the full diagram with the same region boxed for context.\n"
         "Stay grounded in what is visibly present.\n"
-        "Describe structure, shape, density, topology, orientation, branching, cavities, pipes, membranes, loops, or other visible geometry when relevant.\n"
-        "You may interpret broad mechanical or biological-looking forms if the image strongly supports it, but do not force a canonical label.\n"
-        "Mention local surroundings or neighboring context when visible.\n\n"
+        "Do NOT name the component or choose a semantic label.\n"
+        "Describe only geometry, color, boundary, internal pattern, topology, orientation, density, and local visual surroundings.\n"
+        "If there are functional-looking clues, describe them without naming the part.\n\n"
         f"BASE_CONTEXT:\n{str(base_context or '').strip() or 'unknown'}\n\n"
-        "CANONICAL_LABEL_HINTS:\n"
-        f"{json.dumps([str(x).strip() for x in (refined_labels or []) if str(x).strip()][:80], ensure_ascii=False)}\n\n"
+        "COMPONENT_CATALOG_FOR_CONTEXT_ONLY_DO_NOT_CHOOSE_A_LABEL:\n"
+        f"{json.dumps(component_catalog[:80], ensure_ascii=False, indent=2)}\n\n"
+        "SIGLIP_TOP_K_FOR_CONTEXT_ONLY_DO_NOT_ECHO_BLINDLY:\n"
+        f"{json.dumps(siglip_top_k[:12], ensure_ascii=False, indent=2)}\n\n"
         "CLUSTER_METADATA:\n"
         f"{json.dumps(cluster_payload, ensure_ascii=False, indent=2)}\n\n"
         "Return JSON only with this schema:\n"
         "{"
+        "\"geometry\":\"pure geometry and topology\","
+        "\"dominant_colors\":[\"color\"],"
+        "\"boundary_shape\":\"outline/boundary description\","
+        "\"internal_pattern\":\"inside texture/pattern description\","
+        "\"surrounding_relation\":\"local relation to nearby structures\","
+        "\"salient_parts\":[\"visible subform\"],"
+        "\"notes_without_naming\":\"short visual note without semantic label\","
         "\"visual_summary\":\"compact but detailed visual description\","
         "\"bundle_reason\":\"why these strokes form one cluster\","
         "\"location\":\"short location phrase\","
@@ -5211,7 +6765,19 @@ def _parse_cluster_visual_summary(
     parsed_obj: Dict[str, Any],
     raw_text: str,
 ) -> Dict[str, Any]:
+    vlm_visual = {
+        "geometry": _clip_text_block(parsed_obj.get("geometry", ""), 260),
+        "dominant_colors": _coerce_unique_strs(parsed_obj.get("dominant_colors"), cap=8),
+        "boundary_shape": _clip_text_block(parsed_obj.get("boundary_shape", ""), 220),
+        "internal_pattern": _clip_text_block(parsed_obj.get("internal_pattern", ""), 260),
+        "surrounding_relation": _clip_text_block(parsed_obj.get("surrounding_relation", ""), 260),
+        "salient_parts": _coerce_unique_strs(parsed_obj.get("salient_parts"), cap=10),
+        "notes_without_naming": _clip_text_block(parsed_obj.get("notes_without_naming", ""), 260),
+    }
+    if not vlm_visual["geometry"]:
+        vlm_visual["geometry"] = _clip_text_block(parsed_obj.get("visual_summary", ""), 260)
     return {
+        "vlm_visual": vlm_visual,
         "visual_summary": _clip_text_block(parsed_obj.get("visual_summary", ""), 420),
         "bundle_reason": _clip_text_block(parsed_obj.get("bundle_reason", ""), 220),
         "location": _clip_text_block(parsed_obj.get("location", ""), 80),
@@ -5391,21 +6957,27 @@ def build_diagram_final_match_prompt(
     *,
     base_context: str,
     refined_labels: List[str],
+    component_catalog: List[Dict[str, Any]],
     snapshots: List[Dict[str, Any]],
     clusters: List[Dict[str, Any]],
     canonical_parts: List[Dict[str, Any]],
     stroke_lookup: Dict[str, Dict[str, Any]],
 ) -> str:
+    catalog = normalize_component_catalog(component_catalog, fallback_labels=refined_labels)
+    label_order = [str(x.get("label", "") or "").strip() for x in catalog if str(x.get("label", "") or "").strip()]
     return (
         "You are matching canonical diagram parts to exact stroke ids.\n"
+        "You are the FINAL text-only arbiter. Do not inspect raw pixels; use only the evidence packet.\n"
         "Work stroke-first.\n"
-        "You must produce exactly one match row for every canonical label.\n"
+        "You must produce exactly one match row for every component_catalog label.\n"
         "A match may come from:\n"
         "- one ready cluster,\n"
         "- one full snapshot,\n"
         "- a custom subset of strokes pulled from one or more snapshots,\n"
         "- one single stroke.\n"
         "Choose whichever is best.\n"
+        "Each cluster includes SigLIP top-k image/text ranks and a visual-only VLM description.\n"
+        "If SigLIP and the VLM disagree, explain which evidence dominated in evidence_used/reason.\n"
         "Use the cluster package when it is already a good bundle.\n"
         "Break clusters apart or recombine strokes when the cluster is too coarse or wrong.\n"
         "Use the snapshot mental map and the per-stroke notes to reason locally.\n"
@@ -5414,8 +6986,10 @@ def build_diagram_final_match_prompt(
         "Be explicit about which ids justify the match.\n"
         "Avoid reusing the same stroke ids for many labels unless the overlap is genuinely unavoidable.\n\n"
         f"BASE_CONTEXT:\n{str(base_context or '').strip() or 'unknown'}\n\n"
+        "COMPONENT_CATALOG:\n"
+        f"{json.dumps(catalog[:120], ensure_ascii=False, indent=2)}\n\n"
         "LABEL_ORDER:\n"
-        f"{json.dumps([str(x).strip() for x in (refined_labels or []) if str(x).strip()][:120], ensure_ascii=False)}\n\n"
+        f"{json.dumps(label_order[:120], ensure_ascii=False)}\n\n"
         "CANONICAL_PARTS:\n"
         "For each label, CANONICAL_VISUAL_PARTS is the direct description of the chosen canonical reference image.\n"
         "GENERAL_VISUAL_DESCRIPTION is the upstream refined textual description for that part.\n"
@@ -5438,7 +7012,9 @@ def build_diagram_final_match_prompt(
         "\"snapshot_ids\":[\"S1\"],"
         "\"cluster_ids\":[\"C1\"],"
         "\"confidence\":0.0,"
-        "\"reason\":\"short stroke-level explanation\""
+        "\"reason\":\"short stroke-level explanation\","
+        "\"alternatives\":[\"other catalog label\"],"
+        "\"evidence_used\":{\"siglip\":[\"short note\"],\"vlm_visual\":[\"short note\"],\"catalog\":[\"short note\"],\"stroke_context\":[\"short note\"]}"
         "}"
         "]"
         "}\n"
@@ -5451,7 +7027,7 @@ def _parse_diagram_final_matches(
     parsed_obj: Dict[str, Any],
     raw_text: str,
 ) -> Dict[str, Any]:
-    refined_labels = [str(x).strip() for x in (job.get("refined_labels") or []) if str(x).strip()]
+    refined_labels = component_catalog_labels(job.get("component_catalog"), fallback_labels=list(job.get("refined_labels") or []))
     label_set = {label.lower(): label for label in refined_labels}
     raw_matches = parsed_obj.get("matches") if isinstance(parsed_obj.get("matches"), list) else []
     by_label: Dict[str, Dict[str, Any]] = {}
@@ -5480,6 +7056,8 @@ def _parse_diagram_final_matches(
             "cluster_ids": _coerce_unique_strs(row.get("cluster_ids"), cap=12),
             "confidence": confidence if stroke_ids else 0.0,
             "reason": reason if reason else ("unmatched" if not stroke_ids else ""),
+            "alternatives": _coerce_unique_strs(row.get("alternatives"), cap=8),
+            "evidence_used": row.get("evidence_used") if isinstance(row.get("evidence_used"), dict) else {},
         }
         prev = by_label.get(label.lower())
         if prev is None or float(candidate["confidence"]) > float(prev.get("confidence", 0.0)):
@@ -5521,6 +7099,7 @@ def match_diagram_parts_text_model(
         prompt_builder=lambda job: build_diagram_final_match_prompt(
             base_context=str(job.get("base_context", "") or ""),
             refined_labels=list(job.get("refined_labels", []) or []),
+            component_catalog=list(job.get("component_catalog", []) or []),
             snapshots=list(job.get("snapshots", []) or []),
             clusters=list(job.get("clusters", []) or []),
             canonical_parts=list(job.get("canonical_parts", []) or []),

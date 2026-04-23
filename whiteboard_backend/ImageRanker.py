@@ -46,7 +46,7 @@ def open_rgb_image_with_webp_fallback(path: str) -> Image.Image:
 # keep your SiglipBackend as-is, but I strongly recommend this small safety tweak:
 # (this does NOT change your existing comments)
 class SiglipBackend:
-    def __init__(self, model_name: str = "google/siglip-base-patch16-384", device: Optional[str] = None):
+    def __init__(self, model_name: str = "google/siglip2-giant-opt-patch16-384", device: Optional[str] = None):
         import torch
         from transformers import SiglipProcessor, SiglipModel
 
