@@ -43,9 +43,9 @@ ANGLE_RAY_LOOKAHEAD_POINTS = 3
 
 # output compactness
 # Set these to an integer to re-enable truncation limits.
-TRACE_SENTENCE_LIMIT: Optional[int] = 30
-MAX_LINE_DESCRIPTION_CHARS: Optional[int] = None
-MAX_GROUP_DESCRIPTION_CHARS: Optional[int] = None
+TRACE_SENTENCE_LIMIT: Optional[int] = 4
+MAX_LINE_DESCRIPTION_CHARS: Optional[int] = 220
+MAX_GROUP_DESCRIPTION_CHARS: Optional[int] = 220
 
 
 def clamp(v: float, lo: float, hi: float) -> float:
@@ -280,6 +280,66 @@ def direction_phrase(angle_deg: float) -> str:
     return "up-right"
 
 
+def direction_abbrev(phrase: str) -> str:
+    mapping = {
+        "rightward": "R",
+        "down-right": "DR",
+        "downward": "D",
+        "down-left": "DL",
+        "leftward": "L",
+        "up-left": "UL",
+        "upward": "U",
+        "up-right": "UR",
+    }
+    return mapping.get(str(phrase or "").strip(), str(phrase or "").strip())
+
+
+def slope_abbrev(phrase: str) -> str:
+    mapping = {
+        "nearly horizontal": "horiz",
+        "nearly vertical": "vert",
+        "moderate diagonal": "diag",
+        "shallow diagonal": "shallow-diag",
+        "steep diagonal": "steep-diag",
+    }
+    return mapping.get(str(phrase or "").strip(), str(phrase or "").strip())
+
+
+def quadrant_abbrev(phrase: str) -> str:
+    mapping = {
+        "quadrant I (top-right)": "top-right",
+        "quadrant II (top-left)": "top-left",
+        "quadrant III (bottom-left)": "bottom-left",
+        "quadrant IV (bottom-right)": "bottom-right",
+        "on vertical axis band": "mid-x",
+        "on horizontal axis band": "mid-y",
+        "center-cross": "center",
+    }
+    return mapping.get(str(phrase or "").strip(), str(phrase or "").strip())
+
+
+def size_abbrev(phrase: str) -> str:
+    mapping = {
+        "very short": "vshort",
+        "short": "short",
+        "medium": "med",
+        "long": "long",
+        "very long": "vlong",
+    }
+    return mapping.get(str(phrase or "").strip(), str(phrase or "").strip())
+
+
+def distance_abbrev(phrase: str) -> str:
+    mapping = {
+        "very close": "vclose",
+        "close": "close",
+        "moderately separated": "mod",
+        "far": "far",
+        "very far": "vfar",
+    }
+    return mapping.get(str(phrase or "").strip(), str(phrase or "").strip())
+
+
 def slope_class_phrase(angle_deg: float) -> str:
     a = norm_angle_deg(angle_deg) % 180.0
     if a <= 10.0 or a >= 170.0:
@@ -377,7 +437,7 @@ def straight_phrase(start_pt: np.ndarray, end_pt: np.ndarray, angle_deg: float, 
         size = "medium"
     else:
         size = "long"
-    return f"straight {size}; {slope}; {direction}; {round2(length)} px"
+    return f"straight {size} {slope_abbrev(slope)} {direction_abbrev(direction)} {round2(length)}px"
 
 
 def curve_style_phrase(abs_turn: float, monotonicity: float, rel_len: float, signed_turn: float) -> str:
@@ -409,7 +469,14 @@ def curve_style_phrase(abs_turn: float, monotonicity: float, rel_len: float, sig
     else:
         span = "long"
 
-    return f"curve {span}; {balance}; {rot}; {base}; {round2(abs_turn)} deg"
+    rot_short = "cw" if signed_turn > 0 else "ccw"
+    balance_short = {
+        "clean": "clean",
+        "slightly uneven": "sl-uneven",
+        "uneven": "uneven",
+        "mixed": "mixed",
+    }.get(balance, balance)
+    return f"curve {span} {balance_short} {rot_short} {base} turn{round2(abs_turn)}"
 
 
 
@@ -892,15 +959,15 @@ def axis_relation(centered_centroid: Tuple[float, float], bbox: Tuple[float, flo
     dist_x_axis = abs(cy)
 
     if crosses_vertical and crosses_horizontal:
-        phrase = "crosses both axes"
+        phrase = "axes cross-both"
     elif crosses_vertical:
-        phrase = "crosses vertical axis"
+        phrase = "axis v-cross"
     elif crosses_horizontal:
-        phrase = "crosses horizontal axis"
+        phrase = "axis h-cross"
     else:
-        x_band = "near" if dist_x_axis <= 0.08 * height else "away from"
-        y_band = "near" if dist_y_axis <= 0.08 * width else "away from"
-        phrase = f"h-axis {x_band}; v-axis {y_band}"
+        x_band = "near" if dist_x_axis <= 0.08 * height else "away"
+        y_band = "near" if dist_y_axis <= 0.08 * width else "away"
+        phrase = f"axes h-{x_band}; v-{y_band}"
 
     return {
         "crosses_vertical_axis": crosses_vertical,
@@ -934,8 +1001,8 @@ def location_summary_for_line(poly: np.ndarray, bbox: Tuple[float, float, float,
         side_y = "y-aligned"
 
     location_phrase = (
-        f"loc {quad}; centered {pt_to_list(centered)}; {axis['phrase']}; {edge['phrase']}; "
-        f"q-center {distance_band(q_dist, diag)} ({side_x}, {side_y})"
+        f"{quadrant_abbrev(quad)} c{pt_to_list(centered)}; {axis['phrase']}; "
+        f"edge {str(edge['nearest_edge'])[0].upper()}; q {distance_abbrev(distance_band(q_dist, diag))}"
     )
 
     return {
@@ -1000,10 +1067,15 @@ def line_size_summary(poly: np.ndarray, bbox: Tuple[float, float, float, float],
     else:
         peer_rank = "among the smallest lines"
 
-    phrase = (
-        f"size {size_band}; len {round2(length)} px ({round2(rel)} diag); "
-        f"span {round2(span_w)}x{round2(span_h)} px {span_type}; peer {peer_rank}"
-    )
+    span_short = "h-span" if span_type == "horizontally dominant" else "v-span" if span_type == "vertically dominant" else "balanced"
+    peer_short = {
+        "among the longest lines": "peer-longest",
+        "longer than most nearby lines": "peer-long",
+        "middle-sized compared with peers": "peer-mid",
+        "shorter than most peers": "peer-small",
+        "among the smallest lines": "peer-tiny",
+    }.get(peer_rank, peer_rank)
+    phrase = f"{size_abbrev(size_band)} len{round2(length)} span{round2(span_w)}x{round2(span_h)} {span_short} {peer_short}"
 
     return {
         "length_px": round2(length),
@@ -1131,16 +1203,15 @@ def tracing_summary(line: PreparedStroke, width: int, height: int) -> Dict[str, 
         "direction": direction_phrase(line.end_heading_deg),
     }
     overall_angle_phrase = (
-        f"start {direction_phrase(line.start_heading_deg)} {round2(line.start_heading_deg)} deg; "
-        f"end {direction_phrase(line.end_heading_deg)} {round2(line.end_heading_deg)} deg; "
-        f"chord {round2(line.chord_heading_deg)} deg; turn abs {round2(abs_turn)} deg, signed {round2(signed_turn)} deg"
+        f"ends {direction_abbrev(direction_phrase(line.start_heading_deg))}->{direction_abbrev(direction_phrase(line.end_heading_deg))}; "
+        f"chord {direction_abbrev(direction_phrase(line.chord_heading_deg))}; turn {round2(abs_turn)}/{round2(signed_turn)}"
     )
 
     trace_phrase_cap: Optional[int] = None
     if MAX_LINE_DESCRIPTION_CHARS is not None and MAX_LINE_DESCRIPTION_CHARS > 0:
         trace_phrase_cap = MAX_LINE_DESCRIPTION_CHARS // 2
     phrase = clamp_text(
-        f"trace {trace_profile}; {overall_angle_phrase}".strip(),
+        f"{trace_profile}; {overall_angle_phrase}".strip(),
         trace_phrase_cap,
     )
 
@@ -1208,14 +1279,15 @@ def line_neighbor_relation(source: PreparedStroke, target: PreparedStroke, width
 
 
 def build_full_description(trace: Dict[str, Any], size: Dict[str, Any], location: Dict[str, Any], neighbors: Dict[str, Any]) -> str:
-    parts = [trace["phrase"], size["phrase"], location["phrase"]]
+    parts = [f"look {trace['phrase']}; {size['phrase']}", f"loc {location['phrase']}"]
     layer1 = neighbors.get("layer1", [])
-    layer2 = neighbors.get("layer2", [])
     if layer1:
-        parts.append("near " + " | ".join(n["phrase"] for n in layer1))
-    if layer2:
-        parts.append("next " + " | ".join(n["phrase"] for n in layer2))
-    return clamp_text(" || ".join(p for p in parts if p).strip(), MAX_LINE_DESCRIPTION_CHARS)
+        near_bits = [
+            f"{n['target_source_stroke_index']} {n['relative_direction']} {n['centroid_distance_band']} {n['orientation_relation']}"
+            for n in layer1[:1]
+        ]
+        parts.append("near " + " | ".join(near_bits))
+    return clamp_text(" | ".join(p for p in parts if p).strip(), MAX_LINE_DESCRIPTION_CHARS)
 
 
 
@@ -1370,6 +1442,92 @@ def polygon_like_name(node_count: int, aspect_ratio: float) -> str:
     return f"{node_count}-sided polygon-like loop"
 
 
+def describe_fallback_group_patterns(
+    group: Dict[str, Any],
+    strokes: List[PreparedStroke],
+    *,
+    bbox_w: float,
+    bbox_h: float,
+    aspect_ratio: float,
+    image_diag: float,
+) -> List[Dict[str, Any]]:
+    member_ids = [int(i) for i in group.get("member_line_indices", [])]
+    member_strokes = [strokes[i] for i in member_ids if 0 <= int(i) < len(strokes)]
+    if len(member_strokes) < 2:
+        return []
+
+    shapes: List[Dict[str, Any]] = []
+    headings = [float(s.chord_heading_deg) % 180.0 for s in member_strokes]
+    lengths = [float(s.length) for s in member_strokes]
+    compactness = max(bbox_w, bbox_h) / max(image_diag, 1e-6)
+
+    def _axis_spread(values: List[float]) -> float:
+        if not values:
+            return 0.0
+        vals = sorted(values)
+        raw = vals[-1] - vals[0]
+        wrapped = 180.0 - raw
+        return min(raw, wrapped)
+
+    heading_spread = _axis_spread(headings)
+    longish_count = sum(1 for length in lengths if length >= image_diag * 0.05)
+    curve_count = 0
+    for s in member_strokes:
+        abs_turn, _signed_turn = overall_turn_metrics(s.polyline)
+        if abs_turn >= 55.0:
+            curve_count += 1
+
+    if len(member_strokes) >= 3 and heading_spread <= 18.0:
+        dominant = direction_abbrev(direction_phrase(float(np.median(headings))))
+        spacing = "tight" if compactness <= 0.16 else "loose"
+        shapes.append(
+            {
+                "shape_type": "fallback_parallel_bundle",
+                "shape_name": "parallel stroke bundle",
+                "line_indices": member_ids,
+                "description": f"{len(member_ids)}-stroke {spacing} parallel bundle, axis {dominant}.",
+            }
+        )
+
+    if len(member_strokes) >= 3 and curve_count >= max(2, len(member_strokes) // 2):
+        if aspect_ratio > 1.55:
+            name = "stacked horizontal arcs"
+        elif aspect_ratio < 0.65:
+            name = "stacked vertical arcs"
+        else:
+            name = "curved local cluster"
+        shapes.append(
+            {
+                "shape_type": "fallback_curved_cluster",
+                "shape_name": name,
+                "line_indices": member_ids,
+                "description": f"{len(member_ids)}-stroke {name}, mostly curved/hooked.",
+            }
+        )
+
+    if len(member_strokes) >= 4 and compactness <= 0.18 and heading_spread >= 55.0:
+        shapes.append(
+            {
+                "shape_type": "fallback_dense_junction_cluster",
+                "shape_name": "dense mixed-angle cluster",
+                "line_indices": member_ids,
+                "description": f"{len(member_ids)}-stroke compact mixed-angle cluster.",
+            }
+        )
+
+    if len(member_strokes) >= 4 and longish_count >= 3 and 0.55 <= aspect_ratio <= 1.8:
+        shapes.append(
+            {
+                "shape_type": "fallback_partial_enclosure",
+                "shape_name": "partial enclosure",
+                "line_indices": member_ids,
+                "description": f"{len(member_ids)}-stroke partial enclosure / boundary-like form.",
+            }
+        )
+
+    return shapes
+
+
 
 def infer_group_shapes(group: Dict[str, Any], strokes: List[PreparedStroke], width: int, height: int) -> Dict[str, Any]:
     clusters, rec_to_cluster = endpoint_clusters_for_group(group, strokes, width, height)
@@ -1378,6 +1536,7 @@ def infer_group_shapes(group: Dict[str, Any], strokes: List[PreparedStroke], wid
     bbox_w = bbox[2] - bbox[0]
     bbox_h = bbox[3] - bbox[1]
     aspect_ratio = bbox_w / max(bbox_h, 1e-6)
+    image_diag = math.hypot(width, height)
 
     shapes: List[Dict[str, Any]] = []
 
@@ -1431,6 +1590,21 @@ def infer_group_shapes(group: Dict[str, Any], strokes: List[PreparedStroke], wid
                 "node_cluster_indices": sorted(comp_nodes),
                 "description": f"far-endpoint closed loop, {name}.",
             })
+
+    fallback_shapes = describe_fallback_group_patterns(
+        group,
+        strokes,
+        bbox_w=bbox_w,
+        bbox_h=bbox_h,
+        aspect_ratio=aspect_ratio,
+        image_diag=image_diag,
+    )
+    seen_descriptions = {str(shape.get("description", "")) for shape in shapes}
+    for shape in fallback_shapes:
+        desc = str(shape.get("description", ""))
+        if desc and desc not in seen_descriptions:
+            shapes.append(shape)
+            seen_descriptions.add(desc)
 
     endpoint_cluster_json = []
     for cl in clusters:
@@ -1507,12 +1681,16 @@ def describe_lines_and_groups(strokes: List[PreparedStroke], groups: List[Dict[s
         }
 
         full_text = build_full_description(trace, size, location, neighbors)
+        look_text = clamp_text(f"{trace['phrase']}; {size['phrase']}", 150)
+        location_text = clamp_text(str(location["phrase"]), 120)
         group_idx = line_to_group.get(idx)
         described_lines.append({
             "described_line_index": int(idx),
             "source_stroke_index": int(line.stroke_index),
             "group_index": int(group_idx) if group_idx is not None else None,
             "centroid": pt_to_list(line.centroid),
+            "look": look_text,
+            "location": location_text,
             "description": full_text,
         })
 
@@ -1523,12 +1701,16 @@ def describe_lines_and_groups(strokes: List[PreparedStroke], groups: List[Dict[s
     described_groups: List[Dict[str, Any]] = []
     for group in groups:
         shape_info = infer_group_shapes(group, strokes, width, height)
+        description = clamp_text(str(shape_info["shape_summary"]), MAX_GROUP_DESCRIPTION_CHARS)
+        member_line_indices = [int(i) for i in group["member_line_indices"]]
+        if len(member_line_indices) <= 1 and description == "no stable group-level shape beyond loose endpoint-touch grouping.":
+            continue
         described_groups.append({
             "group_index": int(group["group_index"]),
-            "member_line_indices": [int(i) for i in group["member_line_indices"]],
+            "member_line_indices": member_line_indices,
             "source_stroke_indices": [int(i) for i in group["source_stroke_indices"]],
             "centroid": pt_to_list(group["centroid"]),
-            "description": clamp_text(str(shape_info["shape_summary"]), MAX_GROUP_DESCRIPTION_CHARS),
+            "description": description,
         })
 
     described_groups.sort(key=lambda g: (min(g["member_line_indices"]) if g["member_line_indices"] else 10**9, int(g["group_index"])))

@@ -3016,14 +3016,38 @@ def run_orchestrator_bundle(
             qid=(str(row.get("qid", "") or "").strip() or None),
         )
         t0 = time.perf_counter()
-        report = orchestrator.run()
-        logger.info(
-            "C2 stage1 complete prompt=%r elapsed_s=%.3f accepted=%s target=%s",
-            prompt[:120],
-            time.perf_counter() - t0,
-            len(report.get("accepted_components") or []) if isinstance(report, dict) else None,
-            (report.get("target") or {}).get("label") if isinstance(report.get("target"), dict) else None,
-        )
+        skip_stage1 = bool(int(row.get("skip_stage1", 0) or 0) == 1)
+        verifier_missing = [
+            str(item).strip()
+            for item in (row.get("verifier_missing") or [])
+            if str(item).strip()
+        ]
+        if skip_stage1:
+            report = {
+                "target": {
+                    "label": prompt,
+                    "qid": str(row.get("qid", "") or "").strip(),
+                },
+                "accepted_components": [],
+                "stage1_skipped": True,
+                "stage1_skip_reason": "requested_components_verifier",
+                "verifier_missing": verifier_missing,
+            }
+            logger.info(
+                "C2 stage1 skipped prompt=%r elapsed_s=%.3f verifier_missing=%s",
+                prompt[:120],
+                time.perf_counter() - t0,
+                verifier_missing,
+            )
+        else:
+            report = orchestrator.run()
+            logger.info(
+                "C2 stage1 complete prompt=%r elapsed_s=%.3f accepted=%s target=%s",
+                prompt[:120],
+                time.perf_counter() - t0,
+                len(report.get("accepted_components") or []) if isinstance(report, dict) else None,
+                (report.get("target") or {}).get("label") if isinstance(report.get("target"), dict) else None,
+            )
         t_req = time.perf_counter()
         requested_rows = orchestrator.resolve_requested_components(requested_components)
         logger.info(
@@ -3039,6 +3063,8 @@ def run_orchestrator_bundle(
             for item in requested_components
             if str(item).strip()
         ]
+        if skip_stage1:
+            report["verifier_missing"] = verifier_missing
         if skip_visual_stage:
             logger.info("C2 visual stage skipped prompt=%r", prompt[:120])
             report["visual_stage"] = {

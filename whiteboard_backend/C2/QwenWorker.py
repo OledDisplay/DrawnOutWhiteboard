@@ -931,6 +931,7 @@ You receive:
 YOUR JOB
 Take the canonical Wikipedia visual description as the main base description.
 Then ADD any missing visible details from the candidate image descriptions into that base description.
+Keep the result compressed around the simple visual appearance of the component: what it looks like, how it is shaped, arranged, colored, textured, proportioned, and what stable visible subparts or repeated forms it has.
 
 This is not a rewrite-from-scratch task.
 This is not an averaging task.
@@ -950,6 +951,9 @@ IMPORTANT DISCIPLINE
 - The output should usually look like: base description, then missing details added in naturally.
 - Do not return the base description unchanged unless the candidates truly add nothing.
 - Output one short tightened description as one string.
+- Avoid source titles, article names, captions, brand/source phrasing, and functional explanation unless it directly states visible appearance.
+- Compress aggressively: keep only the visual side of things and remove anything that is not useful for recognizing how the component simply looks.
+- Aim for roughly one compact sentence, two only if needed.
 
 OUTPUT
 Return ONLY JSON:
@@ -959,7 +963,8 @@ Return ONLY JSON:
 
 RULES
 - keep one plain string only
-- preserve the base description structure, then extend it with missing visible details
+- preserve the useful visual content from the base description, then extend it with missing visible details
+- keep it tight and appearance-focused
 - no evidence fields
 - no markdown
 - no prose outside JSON

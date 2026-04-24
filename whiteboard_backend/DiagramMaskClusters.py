@@ -7,6 +7,7 @@ import math
 import os
 import shutil
 import time
+from collections import defaultdict
 from dataclasses import asdict, dataclass
 from pathlib import Path
 from typing import Any, Dict, Iterable, List, Optional, Sequence, Tuple
@@ -22,8 +23,10 @@ from transformers import AutoImageProcessor, Dinov2Model, Sam2Model, Sam2Process
 BASE_DIR = Path(__file__).resolve().parent
 PROCESSED_DIR = BASE_DIR / "ProccessedImages"
 CLUSTER_RENDER_DIR = BASE_DIR / "ClusterRenders"
-CLUSTER_MAP_DIR = BASE_DIR / "ClusterMaps"
+CLUSTER_MAP_DIR = BASE_DIR / "DiagramMaskClusterMaps"
 DEBUG_ROOT = BASE_DIR / "PipelineOutputs" / "diagram_mask_clusters"
+VECTORS_DIR = BASE_DIR / "StrokeVectors"
+SAM_DINO_RENDER_DIR = BASE_DIR / "sam_dino_renders"
 
 _PROCESSED_PLAIN_RE = __import__("re").compile(r"^(?:proccessed|processed)_(\d+)\.png$", __import__("re").IGNORECASE)
 
@@ -97,14 +100,21 @@ class DiagramMaskClusterConfig:
     inpaint_radius: int = _env_int("DIAGRAM_CLUSTER_INPAINT_RADIUS", 3)
 
     # sam2 proposal generation
-    point_grid_step: int = _env_int("DIAGRAM_CLUSTER_POINT_GRID_STEP", 112)
-    point_batch_size: int = _env_int("DIAGRAM_CLUSTER_POINT_BATCH_SIZE", 24)
-    sam_pred_iou_thresh: float = _env_float("DIAGRAM_CLUSTER_SAM_PRED_IOU_THRESH", 0.88)
-    sam_stability_score_thresh: float = _env_float("DIAGRAM_CLUSTER_SAM_STABILITY_SCORE_THRESH", 0.86)
+    point_grid_step: int = _env_int("DIAGRAM_CLUSTER_POINT_GRID_STEP", 64)
+    point_batch_size: int = _env_int("DIAGRAM_CLUSTER_POINT_BATCH_SIZE", 32)
+    sam_pred_iou_thresh: float = _env_float("DIAGRAM_CLUSTER_SAM_PRED_IOU_THRESH", 0.84)
+    sam_stability_score_thresh: float = _env_float("DIAGRAM_CLUSTER_SAM_STABILITY_SCORE_THRESH", 0.82)
     sam_mask_threshold: float = _env_float("DIAGRAM_CLUSTER_SAM_MASK_THRESHOLD", 0.0)
     sam_stability_offset: float = _env_float("DIAGRAM_CLUSTER_SAM_STABILITY_OFFSET", 0.05)
-    min_region_area_px: int = _env_int("DIAGRAM_CLUSTER_MIN_REGION_AREA_PX", 1800)
-    max_points: int = _env_int("DIAGRAM_CLUSTER_MAX_POINTS", 220)
+    min_region_area_px: int = _env_int("DIAGRAM_CLUSTER_MIN_REGION_AREA_PX", 320)
+    max_points: int = _env_int("DIAGRAM_CLUSTER_MAX_POINTS", 240)
+
+    # prompt-level mini-mask consolidation
+    prompt_keep_max_per_point: int = _env_int("DIAGRAM_CLUSTER_PROMPT_KEEP_MAX_PER_POINT", 3)
+    prompt_same_scale_area_ratio_max: float = _env_float("DIAGRAM_CLUSTER_PROMPT_SAME_SCALE_AREA_RATIO_MAX", 1.55)
+    prompt_same_scale_iou_thresh: float = _env_float("DIAGRAM_CLUSTER_PROMPT_SAME_SCALE_IOU_THRESH", 0.52)
+    prompt_parent_containment_thresh: float = _env_float("DIAGRAM_CLUSTER_PROMPT_PARENT_CONTAINMENT_THRESH", 0.86)
+    prompt_parent_max_area_ratio: float = _env_float("DIAGRAM_CLUSTER_PROMPT_PARENT_MAX_AREA_RATIO", 5.0)
 
     # cleanup / suppression
     annotation_overlap_drop_ratio: float = _env_float("DIAGRAM_CLUSTER_ANNOTATION_OVERLAP_DROP_RATIO", 0.45)
@@ -151,10 +161,28 @@ class DiagramMaskClusterConfig:
     refiner_duplicate_iou_thresh: float = _env_float("DIAGRAM_CLUSTER_REFINER_DUPLICATE_IOU_THRESH", 0.72)
     refiner_duplicate_containment_thresh: float = _env_float("DIAGRAM_CLUSTER_REFINER_DUPLICATE_CONTAINMENT_THRESH", 0.92)
 
+    # local island grouping over mini masks
+    local_group_max_neighbors: int = _env_int("DIAGRAM_CLUSTER_LOCAL_GROUP_MAX_NEIGHBORS", 6)
+    local_group_mutual_top_k: int = _env_int("DIAGRAM_CLUSTER_LOCAL_GROUP_MUTUAL_TOP_K", 4)
+    local_group_base_gap_px: float = _env_float("DIAGRAM_CLUSTER_LOCAL_GROUP_BASE_GAP_PX", 14.0)
+    local_group_gap_diag_scale: float = _env_float("DIAGRAM_CLUSTER_LOCAL_GROUP_GAP_DIAG_SCALE", 0.35)
+    local_group_max_center_factor: float = _env_float("DIAGRAM_CLUSTER_LOCAL_GROUP_MAX_CENTER_FACTOR", 2.3)
+    local_group_area_ratio_max: float = _env_float("DIAGRAM_CLUSTER_LOCAL_GROUP_AREA_RATIO_MAX", 2.8)
+    local_group_min_dino_cosine: float = _env_float("DIAGRAM_CLUSTER_LOCAL_GROUP_MIN_DINO_COSINE", 0.955)
+    local_group_min_color_similarity: float = _env_float("DIAGRAM_CLUSTER_LOCAL_GROUP_MIN_COLOR_SIM", 0.86)
+    local_group_min_shape_similarity: float = _env_float("DIAGRAM_CLUSTER_LOCAL_GROUP_MIN_SHAPE_SIM", 0.80)
+    local_group_min_combined_score: float = _env_float("DIAGRAM_CLUSTER_LOCAL_GROUP_MIN_COMBINED_SCORE", 0.90)
+    local_group_min_shared_neighbors: int = _env_int("DIAGRAM_CLUSTER_LOCAL_GROUP_MIN_SHARED_NEIGHBORS", 1)
+    local_group_border_radius_scale: float = _env_float("DIAGRAM_CLUSTER_LOCAL_GROUP_BORDER_RADIUS_SCALE", 1.6)
+
     # output
     png_compress_level: int = _env_int("DIAGRAM_CLUSTER_PNG_COMPRESS_LEVEL", 1)
     clear_existing_outputs: bool = _env_bool("DIAGRAM_CLUSTER_CLEAR_EXISTING_OUTPUTS", False)
     log_progress: bool = _env_bool("DIAGRAM_CLUSTER_LOG_PROGRESS", False)
+    stroke_coverage_min: float = _env_float("DIAGRAM_CLUSTER_STROKE_COVERAGE_MIN", 0.68)
+    stroke_sample_radius_px: int = _env_int("DIAGRAM_CLUSTER_STROKE_SAMPLE_RADIUS_PX", 1)
+    sam_dino_render_crop_pad_px: int = _env_int("DIAGRAM_CLUSTER_SAM_DINO_RENDER_CROP_PAD_PX", 12)
+    max_candidate_variants_per_island: int = _env_int("DIAGRAM_CLUSTER_MAX_CANDIDATE_VARIANTS_PER_ISLAND", 8)
 
     def to_public_dict(self) -> Dict[str, Any]:
         return asdict(self)
@@ -199,6 +227,27 @@ def _resolve_processed_png_path(processed_id_or_index: Any) -> Path:
         if p.name.lower() == want.lower():
             return p
     raise FileNotFoundError(f"Processed image not found: {want}")
+
+
+def _resolve_vector_json_path(processed_id_or_index: Any) -> Optional[Path]:
+    text = str(processed_id_or_index or "").strip()
+    if not text:
+        return None
+    if text.lower().startswith("processed_"):
+        stem = text[:-5] if text.lower().endswith(".json") else text
+    elif text.isdigit():
+        stem = f"processed_{int(text)}"
+    else:
+        stem = Path(text).stem
+    candidates = [
+        VECTORS_DIR / f"{stem}.json",
+        PROCESSED_DIR / f"{stem}.json",
+        BASE_DIR / "ProcessedImages" / f"{stem}.json",
+    ]
+    for path in candidates:
+        if path.is_file():
+            return path
+    return None
 
 
 def _load_rgb_image(path: Path) -> np.ndarray:
@@ -590,6 +639,10 @@ def _generate_sam2_candidate_masks(image_rgb: np.ndarray, cfg: DiagramMaskCluste
 
         for prompt_index in range(mask_arr.shape[0]):
             prompt_point = batch_points[prompt_index] if prompt_index < len(batch_points) else None
+            global_prompt_index = start + prompt_index
+            prompt_key = ""
+            if prompt_point is not None:
+                prompt_key = f"{int(round(float(prompt_point[0])))}_{int(round(float(prompt_point[1])))}"
             for mask_index in range(mask_arr.shape[1]):
                 mask = np.asarray(mask_arr[prompt_index, mask_index], dtype=bool)
                 area_px = _mask_area(mask)
@@ -607,6 +660,9 @@ def _generate_sam2_candidate_masks(image_rgb: np.ndarray, cfg: DiagramMaskCluste
                 proposals.append(
                     {
                         "prompt_point": list(prompt_point) if prompt_point is not None else None,
+                        "prompt_key": prompt_key,
+                        "prompt_index": int(global_prompt_index),
+                        "prompt_mask_index": int(mask_index),
                         "proposal_id": f"p{len(proposals):04d}",
                         "mask": mask,
                         "bbox_xyxy": bbox,
@@ -744,6 +800,325 @@ def _attach_dino_and_shape_features(
     return proposals
 
 
+def _bbox_center_xyxy(bbox: Sequence[int]) -> List[float]:
+    return [
+        (float(bbox[0]) + float(bbox[2])) / 2.0,
+        (float(bbox[1]) + float(bbox[3])) / 2.0,
+    ]
+
+
+def _bbox_diag_xyxy(bbox: Sequence[int]) -> float:
+    return math.hypot(float(bbox[2]) - float(bbox[0]), float(bbox[3]) - float(bbox[1]))
+
+
+def _area_ratio(a: float, b: float) -> float:
+    aa = max(1.0, float(a))
+    bb = max(1.0, float(b))
+    return max(aa, bb) / min(aa, bb)
+
+
+def _proposal_rank_key(row: Dict[str, Any]) -> Tuple[float, float, float]:
+    return (
+        float(row.get("sam_pred_iou", 0.0) or 0.0),
+        float(row.get("sam_stability_score", 0.0) or 0.0),
+        -float(row.get("mask_area_px", 0.0) or 0.0),
+    )
+
+
+def _annotate_basic_proposal_geometry(rows: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    for row in rows:
+        bbox = row.get("bbox_xyxy")
+        if not isinstance(bbox, list) or len(bbox) != 4:
+            continue
+        row["bbox_center_xy"] = _bbox_center_xyxy(bbox)
+        row["bbox_diag_px"] = float(_bbox_diag_xyxy(bbox))
+    return rows
+
+
+def _consolidate_prompt_level_proposals(
+    proposals: List[Dict[str, Any]],
+    cfg: DiagramMaskClusterConfig,
+) -> Tuple[List[Dict[str, Any]], List[Dict[str, Any]]]:
+    if not proposals:
+        return [], []
+
+    by_prompt: Dict[str, List[Dict[str, Any]]] = defaultdict(list)
+    for row in proposals:
+        prompt_key = str(row.get("prompt_key", "") or "")
+        if not prompt_key:
+            pt = row.get("prompt_point") if isinstance(row.get("prompt_point"), list) else [0.0, 0.0]
+            prompt_key = f"{int(round(float(pt[0])))}_{int(round(float(pt[1])))}"
+            row["prompt_key"] = prompt_key
+        by_prompt[prompt_key].append(row)
+
+    kept_all: List[Dict[str, Any]] = []
+    prompt_debug: List[Dict[str, Any]] = []
+    for prompt_key, rows in by_prompt.items():
+        rows_sorted = sorted(
+            [dict(row) for row in rows],
+            key=lambda row: (
+                float(row.get("mask_area_px", 0.0) or 0.0),
+                -float(row.get("sam_pred_iou", 0.0) or 0.0),
+                -float(row.get("sam_stability_score", 0.0) or 0.0),
+            ),
+        )
+        prompt_kept: List[Dict[str, Any]] = []
+        suppressed_ids: List[str] = []
+        parent_links: List[Dict[str, Any]] = []
+
+        for row in rows_sorted:
+            area_px = float(row.get("mask_area_px", 0.0) or 0.0)
+            duplicate_idx: Optional[int] = None
+            for idx, prev in enumerate(prompt_kept):
+                shared = _bbox_intersection_xyxy(row.get("bbox_xyxy"), prev.get("bbox_xyxy"))
+                if shared is None:
+                    continue
+                iou = _mask_iou(row["mask"], prev["mask"], row["bbox_xyxy"], prev["bbox_xyxy"])
+                containment = _mask_containment(row["mask"], prev["mask"], row["bbox_xyxy"], prev["bbox_xyxy"])
+                area_ratio = _area_ratio(area_px, float(prev.get("mask_area_px", 0.0) or 0.0))
+                if (
+                    area_ratio <= float(cfg.prompt_same_scale_area_ratio_max)
+                    and (iou >= float(cfg.prompt_same_scale_iou_thresh) or containment >= float(cfg.prompt_parent_containment_thresh))
+                ):
+                    if _proposal_rank_key(row) > _proposal_rank_key(prev):
+                        suppressed_ids.append(str(prev.get("proposal_id", "") or ""))
+                        prompt_kept[idx] = row
+                    else:
+                        suppressed_ids.append(str(row.get("proposal_id", "") or ""))
+                    duplicate_idx = idx
+                    break
+            if duplicate_idx is not None:
+                continue
+
+            child_ids: List[str] = []
+            for prev in prompt_kept:
+                prev_area = float(prev.get("mask_area_px", 0.0) or 0.0)
+                if prev_area >= area_px:
+                    continue
+                shared = _bbox_intersection_xyxy(row.get("bbox_xyxy"), prev.get("bbox_xyxy"))
+                if shared is None:
+                    continue
+                containment = _mask_containment(row["mask"], prev["mask"], row["bbox_xyxy"], prev["bbox_xyxy"])
+                if (
+                    containment >= float(cfg.prompt_parent_containment_thresh)
+                    and area_px <= prev_area * float(cfg.prompt_parent_max_area_ratio)
+                ):
+                    child_ids.append(str(prev.get("proposal_id", "") or ""))
+            if child_ids:
+                row["prompt_child_mask_ids"] = child_ids
+                for child_id in child_ids:
+                    parent_links.append({"parent_id": str(row.get("proposal_id", "") or ""), "child_id": child_id})
+
+            prompt_kept.append(row)
+
+        prompt_kept.sort(
+            key=lambda row: (
+                float(row.get("mask_area_px", 0.0) or 0.0),
+                -float(row.get("sam_pred_iou", 0.0) or 0.0),
+            )
+        )
+        if len(prompt_kept) > int(cfg.prompt_keep_max_per_point):
+            prompt_kept = prompt_kept[: int(cfg.prompt_keep_max_per_point)]
+        kept_all.extend(prompt_kept)
+        prompt_debug.append(
+            {
+                "prompt_key": prompt_key,
+                "raw_count": len(rows),
+                "kept_count": len(prompt_kept),
+                "suppressed_ids": [x for x in suppressed_ids if x],
+                "parent_links": list(parent_links),
+            }
+        )
+
+    kept_all = _annotate_basic_proposal_geometry(kept_all)
+    return kept_all, prompt_debug
+
+
+def _build_local_group_edge_candidates(
+    proposals: List[Dict[str, Any]],
+    cfg: DiagramMaskClusterConfig,
+) -> Tuple[Dict[int, List[Dict[str, Any]]], List[Dict[str, Any]]]:
+    neighbors: Dict[int, List[Dict[str, Any]]] = {idx: [] for idx in range(len(proposals))}
+    edge_debug: List[Dict[str, Any]] = []
+    for i in range(len(proposals)):
+        a = proposals[i]
+        for j in range(i + 1, len(proposals)):
+            b = proposals[j]
+            area_ratio = _area_ratio(a.get("mask_area_px", 1.0), b.get("mask_area_px", 1.0))
+            if area_ratio > float(cfg.local_group_area_ratio_max):
+                continue
+            metrics = _compute_pair_metrics(a, b)
+            center_a = a.get("bbox_center_xy") if isinstance(a.get("bbox_center_xy"), list) else _bbox_center_xyxy(a["bbox_xyxy"])
+            center_b = b.get("bbox_center_xy") if isinstance(b.get("bbox_center_xy"), list) else _bbox_center_xyxy(b["bbox_xyxy"])
+            center_dist = math.hypot(float(center_a[0]) - float(center_b[0]), float(center_a[1]) - float(center_b[1]))
+            local_gap = float(cfg.local_group_base_gap_px) + float(cfg.local_group_gap_diag_scale) * min(
+                float(a.get("bbox_diag_px", 0.0) or 0.0),
+                float(b.get("bbox_diag_px", 0.0) or 0.0),
+            )
+            if metrics["bbox_gap_px"] > local_gap:
+                continue
+            if center_dist > local_gap * float(cfg.local_group_max_center_factor):
+                continue
+            if metrics["dino_cosine"] < float(cfg.local_group_min_dino_cosine):
+                continue
+            if metrics["color_similarity"] < float(cfg.local_group_min_color_similarity):
+                continue
+            if metrics["shape_similarity"] < float(cfg.local_group_min_shape_similarity):
+                continue
+            if metrics["combined_feature_score"] < float(cfg.local_group_min_combined_score):
+                continue
+            edge = {
+                "other": int(j),
+                "bbox_gap_px": float(metrics["bbox_gap_px"]),
+                "center_dist_px": float(center_dist),
+                "score": float(metrics["combined_feature_score"]),
+                "dino_cosine": float(metrics["dino_cosine"]),
+                "color_similarity": float(metrics["color_similarity"]),
+                "shape_similarity": float(metrics["shape_similarity"]),
+                "area_ratio": float(area_ratio),
+            }
+            rev = dict(edge)
+            rev["other"] = int(i)
+            neighbors[i].append(edge)
+            neighbors[j].append(rev)
+            edge_debug.append(
+                {
+                    "a": str(a.get("proposal_id", "") or ""),
+                    "b": str(b.get("proposal_id", "") or ""),
+                    **{k: v for k, v in edge.items() if k != "other"},
+                }
+            )
+
+    for idx in range(len(proposals)):
+        neighbors[idx].sort(key=lambda row: (-float(row["score"]), float(row["bbox_gap_px"]), float(row["center_dist_px"])))
+        neighbors[idx] = neighbors[idx][: max(1, int(cfg.local_group_max_neighbors))]
+    return neighbors, edge_debug
+
+
+def _build_local_island_groups(
+    proposals: List[Dict[str, Any]],
+    cfg: DiagramMaskClusterConfig,
+) -> Tuple[List[Dict[str, Any]], List[Dict[str, Any]]]:
+    if not proposals:
+        return [], []
+
+    neighbors, edge_debug = _build_local_group_edge_candidates(proposals, cfg)
+    edge_lookup: Dict[Tuple[int, int], Dict[str, Any]] = {}
+    strong_sets: Dict[int, set[int]] = {}
+    top_k = max(1, int(cfg.local_group_mutual_top_k))
+    for idx, items in neighbors.items():
+        strong_sets[idx] = {int(item["other"]) for item in items[:top_k]}
+        for item in items:
+            edge_lookup[(int(idx), int(item["other"]))] = item
+
+    assigned: Dict[int, str] = {}
+    groups: List[Dict[str, Any]] = []
+    seed_order = sorted(
+        range(len(proposals)),
+        key=lambda idx: (
+            float(proposals[idx].get("sam_pred_iou", 0.0) or 0.0),
+            float(proposals[idx].get("sam_stability_score", 0.0) or 0.0),
+            -float(proposals[idx].get("mask_area_px", 0.0) or 0.0),
+        ),
+        reverse=True,
+    )
+
+    for seed_idx in seed_order:
+        if seed_idx in assigned:
+            continue
+        members: List[int] = [int(seed_idx)]
+        member_set = {int(seed_idx)}
+        seed_id = str(proposals[seed_idx].get("proposal_id", "") or "")
+        while True:
+            candidate_scores: List[Tuple[int, int, float, float]] = []
+            frontier = set()
+            for midx in members:
+                for item in neighbors.get(midx, []):
+                    other = int(item["other"])
+                    if other in assigned or other in member_set:
+                        continue
+                    frontier.add(other)
+            for cand_idx in frontier:
+                support_edges: List[Dict[str, Any]] = []
+                early_hits = 0
+                early_members = members[: min(3, len(members))]
+                shared_neighbor_hits = 0
+                for midx in members:
+                    edge = edge_lookup.get((midx, cand_idx))
+                    if edge is None:
+                        continue
+                    support_edges.append(edge)
+                    if midx in early_members:
+                        early_hits += 1
+                    shared_neighbors = strong_sets.get(midx, set()).intersection(strong_sets.get(cand_idx, set()))
+                    if shared_neighbors:
+                        shared_neighbor_hits += 1
+                if not support_edges:
+                    continue
+                support_edges.sort(key=lambda row: (-float(row["score"]), float(row["bbox_gap_px"])))
+                required_support = 1 if len(members) == 1 else min(2, len(members))
+                if len(support_edges) < required_support:
+                    continue
+                if len(members) > 1 and early_hits < required_support:
+                    continue
+                if len(members) > 1 and shared_neighbor_hits < int(cfg.local_group_min_shared_neighbors):
+                    continue
+                support_slice = support_edges[:required_support]
+                avg_score = float(sum(float(row["score"]) for row in support_slice) / float(len(support_slice)))
+                avg_gap = float(sum(float(row["bbox_gap_px"]) for row in support_slice) / float(len(support_slice)))
+                candidate_scores.append((cand_idx, len(support_edges), avg_score, avg_gap))
+            if not candidate_scores:
+                break
+            candidate_scores.sort(key=lambda row: (row[1], row[2], -row[3]), reverse=True)
+            best_idx = int(candidate_scores[0][0])
+            members.append(best_idx)
+            member_set.add(best_idx)
+
+        group_id = f"group_{len(groups):04d}"
+        for midx in members:
+            assigned[midx] = group_id
+        border_candidates: List[Tuple[str, float]] = []
+        member_mask_ids = [str(proposals[midx].get("proposal_id", "") or "") for midx in members]
+        local_radius = max(
+            float(cfg.local_group_base_gap_px),
+            float(np.median([float(proposals[midx].get("bbox_diag_px", 0.0) or 0.0) for midx in members])) * float(cfg.local_group_border_radius_scale),
+        )
+        for other_idx, row in enumerate(proposals):
+            if other_idx in member_set:
+                continue
+            best_gap: Optional[float] = None
+            best_score: float = 0.0
+            for midx in members:
+                metrics = _compute_pair_metrics(proposals[midx], row)
+                if metrics["bbox_gap_px"] <= local_radius:
+                    if best_gap is None or float(metrics["bbox_gap_px"]) < best_gap:
+                        best_gap = float(metrics["bbox_gap_px"])
+                    best_score = max(best_score, float(metrics["combined_feature_score"]))
+            if best_gap is None:
+                continue
+            if best_score >= float(cfg.local_group_min_combined_score):
+                continue
+            border_candidates.append((str(row.get("proposal_id", "") or ""), float(best_gap)))
+        border_candidates.sort(key=lambda row: row[1])
+        groups.append(
+            {
+                "group_id": group_id,
+                "seed_mask_id": seed_id,
+                "member_mask_ids": member_mask_ids,
+                "member_count": len(member_mask_ids),
+                "border_mask_ids": [mask_id for mask_id, _gap in border_candidates[:12] if mask_id],
+                "group_quality": float(np.mean([
+                    float(proposals[midx].get("sam_pred_iou", 0.0) or 0.0)
+                    for midx in members
+                ])) if members else 0.0,
+            }
+        )
+
+    for idx, row in enumerate(proposals):
+        row["group_id"] = assigned.get(idx)
+    return groups, edge_debug
+
+
 def _mask_centroid(mask: np.ndarray) -> Optional[List[float]]:
     ys, xs = np.where(np.asarray(mask, dtype=bool))
     if xs.size == 0 or ys.size == 0:
@@ -766,6 +1141,307 @@ def _expand_bbox_xyxy(
         min(int(width), x1 + int(pad)),
         min(int(height), y1 + int(pad)),
     ]
+
+
+def _eval_cubic(p0: Tuple[float, float], c1: Tuple[float, float], c2: Tuple[float, float], p1: Tuple[float, float], t: float) -> Tuple[float, float]:
+    mt = 1.0 - float(t)
+    mt2 = mt * mt
+    t2 = float(t) * float(t)
+    x = (mt2 * mt) * p0[0] + 3.0 * (mt2 * float(t)) * c1[0] + 3.0 * (mt * t2) * c2[0] + (t2 * float(t)) * p1[0]
+    y = (mt2 * mt) * p0[1] + 3.0 * (mt2 * float(t)) * c1[1] + 3.0 * (mt * t2) * c2[1] + (t2 * float(t)) * p1[1]
+    return x, y
+
+
+def _stroke_samples_json_from_beziers(stroke: Dict[str, Any]) -> List[Tuple[float, float]]:
+    segs = stroke.get("segments") or []
+    if not isinstance(segs, list) or not segs:
+        return []
+    pts: List[Tuple[float, float]] = []
+    last: Optional[Tuple[float, float]] = None
+    for seg in segs:
+        if not isinstance(seg, list) or len(seg) < 8:
+            continue
+        p0 = (float(seg[0]), float(seg[1]))
+        c1 = (float(seg[2]), float(seg[3]))
+        c2 = (float(seg[4]), float(seg[5]))
+        p1 = (float(seg[6]), float(seg[7]))
+        for i in range(19):
+            x, y = _eval_cubic(p0, c1, c2, p1, i / 18.0)
+            if last is not None and (abs(x - last[0]) + abs(y - last[1]) < 0.05):
+                continue
+            pts.append((x, y))
+            last = (x, y)
+    return pts
+
+
+def _stroke_samples_json_from_polyline(stroke: Dict[str, Any]) -> List[Tuple[float, float]]:
+    pts = stroke.get("points") or []
+    if not isinstance(pts, list) or len(pts) < 2:
+        return []
+    out: List[Tuple[float, float]] = []
+    for p in pts:
+        if isinstance(p, list) and len(p) >= 2:
+            out.append((float(p[0]), float(p[1])))
+    if len(out) < 2:
+        return []
+    step = max(1, len(out) // 120)
+    return out[::step]
+
+
+def _load_vector_stroke_samples(
+    processed_id: str,
+    *,
+    image_width: int,
+    image_height: int,
+) -> Tuple[List[Optional[np.ndarray]], Optional[str], Dict[str, Any]]:
+    vector_path = _resolve_vector_json_path(processed_id)
+    if vector_path is None:
+        return [], None, {"error": f"vector json not found for {processed_id}"}
+    try:
+        data = json.loads(vector_path.read_text(encoding="utf-8"))
+    except Exception as exc:
+        return [], str(vector_path), {"error": f"{type(exc).__name__}: {exc}"}
+
+    strokes = data.get("strokes") if isinstance(data, dict) else []
+    if not isinstance(strokes, list):
+        return [], str(vector_path), {"error": "vector json has no strokes list"}
+    fmt = str((data or {}).get("vector_format") or "bezier_cubic").lower()
+    src_w = float((data or {}).get("width") or image_width or 1)
+    src_h = float((data or {}).get("height") or image_height or 1)
+    scale_x = float(image_width) / src_w if src_w > 0 else 1.0
+    scale_y = float(image_height) / src_h if src_h > 0 else 1.0
+
+    samples: List[Optional[np.ndarray]] = []
+    for stroke in strokes:
+        if not isinstance(stroke, dict):
+            samples.append(None)
+            continue
+        if fmt == "bezier_cubic":
+            raw_pts = _stroke_samples_json_from_beziers(stroke)
+        else:
+            raw_pts = _stroke_samples_json_from_polyline(stroke)
+        if len(raw_pts) < 2:
+            samples.append(None)
+            continue
+        pts = np.asarray(
+            [(int(round(x * scale_x)), int(round(y * scale_y))) for x, y in raw_pts],
+            dtype=np.int32,
+        )
+        if pts.shape[0] >= 2:
+            d = np.abs(np.diff(pts, axis=0)).sum(axis=1)
+            keep = np.concatenate(([True], d > 0))
+            pts = pts[keep]
+        samples.append(pts if pts.shape[0] >= 2 else None)
+    return samples, str(vector_path), {"stroke_count": len(strokes), "vector_format": fmt}
+
+
+def _mask_with_sample_radius(mask: np.ndarray, radius_px: int) -> np.ndarray:
+    mask_bool = np.asarray(mask, dtype=bool)
+    radius = max(0, int(radius_px))
+    if radius <= 0:
+        return mask_bool
+    kernel = np.ones((2 * radius + 1, 2 * radius + 1), dtype=np.uint8)
+    return cv2.dilate(mask_bool.astype(np.uint8), kernel, iterations=1) > 0
+
+
+def _stroke_indexes_inside_mask(
+    union_mask: np.ndarray,
+    stroke_samples: Sequence[Optional[np.ndarray]],
+    *,
+    coverage_min: float,
+    sample_radius_px: int,
+) -> Tuple[List[int], Dict[str, float]]:
+    if not stroke_samples:
+        return [], {}
+    h, w = union_mask.shape[:2]
+    test_mask = _mask_with_sample_radius(union_mask, int(sample_radius_px))
+    threshold = float(coverage_min)
+    stroke_indexes: List[int] = []
+    coverage_by_stroke: Dict[str, float] = {}
+    for idx, pts in enumerate(stroke_samples):
+        if pts is None or pts.size <= 0:
+            continue
+        xs = np.clip(pts[:, 0].astype(np.int32), 0, max(0, w - 1))
+        ys = np.clip(pts[:, 1].astype(np.int32), 0, max(0, h - 1))
+        coverage = float(np.count_nonzero(test_mask[ys, xs])) / float(max(1, len(xs)))
+        if coverage >= threshold:
+            stroke_indexes.append(int(idx))
+            coverage_by_stroke[str(int(idx))] = round(float(coverage), 4)
+    return stroke_indexes, coverage_by_stroke
+
+
+def _union_masks_for_ids(mask_ids: Sequence[str], proposals_by_id: Dict[str, Dict[str, Any]], shape: Tuple[int, int]) -> np.ndarray:
+    union_mask = np.zeros(shape, dtype=bool)
+    for mask_id in mask_ids:
+        row = proposals_by_id.get(str(mask_id))
+        if not isinstance(row, dict):
+            continue
+        union_mask |= np.asarray(row.get("mask"), dtype=bool)
+    return union_mask
+
+
+def _build_mask_candidate_specs(
+    proposals: List[Dict[str, Any]],
+    island_groups: List[Dict[str, Any]],
+    cfg: DiagramMaskClusterConfig,
+) -> List[Dict[str, Any]]:
+    proposals_by_id = {str(row.get("proposal_id", "") or ""): row for row in proposals if str(row.get("proposal_id", "") or "")}
+    if not proposals_by_id:
+        return []
+    specs: List[Dict[str, Any]] = []
+    seen: set[Tuple[str, ...]] = set()
+
+    def push(group_id: str, source_kind: str, mask_ids: Sequence[str], quality: float) -> None:
+        clean_ids = [str(mask_id) for mask_id in mask_ids if str(mask_id) in proposals_by_id]
+        key = tuple(sorted(set(clean_ids)))
+        if not key or key in seen:
+            return
+        seen.add(key)
+        specs.append(
+            {
+                "source_group_id": str(group_id or ""),
+                "source_kind": str(source_kind or "island"),
+                "mask_ids": list(key),
+                "group_quality": float(quality),
+            }
+        )
+
+    max_variants = max(1, int(cfg.max_candidate_variants_per_island))
+    for group in island_groups:
+        if not isinstance(group, dict):
+            continue
+        group_id = str(group.get("group_id", "") or f"group_{len(specs):04d}")
+        quality = float(group.get("group_quality", 0.0) or 0.0)
+        member_ids = [str(x) for x in (group.get("member_mask_ids") or []) if str(x) in proposals_by_id]
+        border_ids = [str(x) for x in (group.get("border_mask_ids") or []) if str(x) in proposals_by_id]
+        before = len(specs)
+        push(group_id, "island", member_ids, quality)
+
+        # Ambiguous junctions get alternative local slices, so downstream matching can pick
+        # the right object even when the big island is too fused or too coarse.
+        if len(member_ids) > 1:
+            seed_id = str(group.get("seed_mask_id", "") or member_ids[0])
+            for mask_id in member_ids:
+                if len(specs) - before >= max_variants:
+                    break
+                push(group_id, "single_mask_variant", [mask_id], quality)
+            for mask_id in member_ids:
+                if len(specs) - before >= max_variants:
+                    break
+                if mask_id != seed_id:
+                    push(group_id, "seed_pair_variant", [seed_id, mask_id], quality)
+        for mask_id in border_ids[:3]:
+            if len(specs) - before >= max_variants:
+                break
+            push(group_id, "island_plus_boundary_variant", member_ids + [mask_id], quality)
+
+    if not specs:
+        for row in proposals:
+            mask_id = str(row.get("proposal_id", "") or "")
+            if mask_id:
+                push("ungrouped", "single_mask_fallback", [mask_id], float(row.get("sam_pred_iou", 0.0) or 0.0))
+    for idx, spec in enumerate(specs):
+        spec["candidate_id"] = f"sam_dino_{idx:04d}"
+    return specs
+
+
+def _save_sam_dino_candidate_render(
+    *,
+    image_rgb: np.ndarray,
+    union_mask: np.ndarray,
+    processed_id: str,
+    candidate_id: str,
+    cfg: DiagramMaskClusterConfig,
+) -> Tuple[str, str, List[int]]:
+    bbox = _mask_bbox(union_mask)
+    if not bbox:
+        return "", "", [0, 0, 0, 0]
+    h, w = union_mask.shape[:2]
+    x0, y0, x1, y1 = _expand_bbox_xyxy(bbox, int(cfg.sam_dino_render_crop_pad_px), w, h)
+    crop_rgb = np.asarray(image_rgb[y0:y1, x0:x1], dtype=np.uint8)
+    crop_mask = np.asarray(union_mask[y0:y1, x0:x1], dtype=bool)
+    gray = cv2.cvtColor(cv2.cvtColor(crop_rgb, cv2.COLOR_RGB2GRAY), cv2.COLOR_GRAY2RGB)
+    out = gray.copy()
+    out[crop_mask] = crop_rgb[crop_mask]
+    render_dir = SAM_DINO_RENDER_DIR / str(processed_id)
+    render_dir.mkdir(parents=True, exist_ok=True)
+    render_name = f"{candidate_id}.png"
+    render_path = render_dir / render_name
+    Image.fromarray(out).save(render_path, compress_level=int(cfg.png_compress_level))
+    return render_name, str(render_path), [int(x0), int(y0), int(x1), int(y1)]
+
+
+def _build_stroke_candidate_outputs(
+    *,
+    image_rgb: np.ndarray,
+    processed_id: str,
+    proposals: List[Dict[str, Any]],
+    island_groups: List[Dict[str, Any]],
+    cfg: DiagramMaskClusterConfig,
+) -> Dict[str, Any]:
+    h, w = image_rgb.shape[:2]
+    stroke_samples, vector_path, vector_debug = _load_vector_stroke_samples(processed_id, image_width=w, image_height=h)
+    proposals_by_id = {str(row.get("proposal_id", "") or ""): row for row in proposals if str(row.get("proposal_id", "") or "")}
+    specs = _build_mask_candidate_specs(proposals, island_groups, cfg)
+    candidates: List[Dict[str, Any]] = []
+    seen_stroke_sets: set[Tuple[int, ...]] = set()
+    for spec in specs:
+        union_mask = _union_masks_for_ids(spec.get("mask_ids") or [], proposals_by_id, (h, w))
+        if _mask_area(union_mask) <= 0:
+            continue
+        stroke_indexes, coverage = _stroke_indexes_inside_mask(
+            union_mask,
+            stroke_samples,
+            coverage_min=float(cfg.stroke_coverage_min),
+            sample_radius_px=int(cfg.stroke_sample_radius_px),
+        )
+        stroke_key = tuple(stroke_indexes)
+        if not stroke_key:
+            continue
+        if stroke_key in seen_stroke_sets and str(spec.get("source_kind", "") or "") != "island":
+            continue
+        seen_stroke_sets.add(stroke_key)
+        render_name, render_path, bbox = _save_sam_dino_candidate_render(
+            image_rgb=image_rgb,
+            union_mask=union_mask,
+            processed_id=processed_id,
+            candidate_id=str(spec.get("candidate_id") or f"sam_dino_{len(candidates):04d}"),
+            cfg=cfg,
+        )
+        candidates.append(
+            {
+                "candidate_id": str(spec.get("candidate_id") or f"sam_dino_{len(candidates):04d}"),
+                "processed_id": str(processed_id),
+                "source": "sam_dino_mask_group",
+                "source_kind": str(spec.get("source_kind", "") or "island"),
+                "source_group_id": str(spec.get("source_group_id", "") or ""),
+                "mask_ids": [str(x) for x in (spec.get("mask_ids") or [])],
+                "stroke_indexes": [int(x) for x in stroke_indexes],
+                "stroke_coverage": coverage,
+                "bbox_xyxy": bbox,
+                "render_file": render_name,
+                "render_path": render_path,
+                "group_quality": float(spec.get("group_quality", 0.0) or 0.0),
+                "mask_area_px": int(_mask_area(union_mask)),
+            }
+        )
+    candidates.sort(
+        key=lambda row: (
+            len(row.get("stroke_indexes") or []),
+            float(row.get("group_quality", 0.0) or 0.0),
+            int(row.get("mask_area_px", 0) or 0),
+        ),
+        reverse=True,
+    )
+    return {
+        "processed_id": str(processed_id),
+        "vector_path": vector_path or "",
+        "vector_debug": vector_debug,
+        "coverage_min": float(cfg.stroke_coverage_min),
+        "sample_radius_px": int(cfg.stroke_sample_radius_px),
+        "render_dir": str(SAM_DINO_RENDER_DIR / str(processed_id)),
+        "candidates": candidates,
+    }
 
 
 def _extract_distance_peak_points(mask: np.ndarray, count: int) -> List[List[float]]:
@@ -1480,14 +2156,22 @@ def _cluster_entry_from_row(row: Dict[str, Any], cluster_index: int, mask_name: 
         "color_name": "mask",
         "group_index_in_color": int(cluster_index),
         "stroke_indexes": [int(v) for v in (row.get("stroke_indexes") or [])],
-        "bbox_xyxy": [int(v) for v in row["crop_bbox_xyxy"]],
+        "bbox_xyxy": [int(v) for v in row.get("crop_bbox_xyxy", row.get("bbox_xyxy", [0, 0, 0, 0]))],
         "crop_file_mask": mask_name,
-        "pipeline": "sam2_dinov2",
+        "pipeline": "sam2_dinov2_mini_mask_groups_v1",
         "mask_area_px": int(row["mask_area_px"]),
         "sam_stability_score": float(row["sam_stability_score"]),
         "sam_pred_iou": float(row["sam_pred_iou"]),
         "merged_from_mask_ids": list(row.get("merged_from_mask_ids", []) or []),
         "feature_cluster_id": str(row.get("feature_cluster_id", "") or ""),
+        "proposal_id": str(row.get("proposal_id", "") or f"mask_{cluster_index:04d}"),
+        "prompt_key": str(row.get("prompt_key", "") or ""),
+        "prompt_index": row.get("prompt_index"),
+        "prompt_mask_index": row.get("prompt_mask_index"),
+        "prompt_child_mask_ids": list(row.get("prompt_child_mask_ids", []) or []),
+        "group_id": row.get("group_id"),
+        "bbox_center_xy": [float(v) for v in (row.get("bbox_center_xy") or _bbox_center_xyxy(row.get("bbox_xyxy", [0, 0, 0, 0])))],
+        "bbox_diag_px": float(row.get("bbox_diag_px", 0.0) or 0.0),
     }
     optional_keys = [
         "refined_from_cluster_ids",
@@ -1513,10 +2197,10 @@ def _write_outputs_for_processed(
     removed_overlay_rgb: np.ndarray,
     removed_mask: np.ndarray,
     proposals: List[Dict[str, Any]],
-    pair_debug: List[Dict[str, Any]],
-    coarse_merged: List[Dict[str, Any]],
-    merged: List[Dict[str, Any]],
-    refine_debug: List[Dict[str, Any]],
+    prompt_debug: List[Dict[str, Any]],
+    island_groups: List[Dict[str, Any]],
+    island_edge_debug: List[Dict[str, Any]],
+    stroke_candidates: Optional[Dict[str, Any]],
     cfg: DiagramMaskClusterConfig,
 ) -> Dict[str, Any]:
     render_dir = CLUSTER_RENDER_DIR / f"processed_{int(idx)}"
@@ -1532,9 +2216,10 @@ def _write_outputs_for_processed(
 
     cluster_entries: List[Dict[str, Any]] = []
     renders_mask_rgb: Dict[str, np.ndarray] = {}
-    for cluster_index, row in enumerate(merged):
-        mask_name = f"mask_{cluster_index:04d}.png"
-        rgba = np.asarray(row["crop_rgba"], dtype=np.uint8)
+    for cluster_index, row in enumerate(proposals):
+        mask_name = f"mini_{cluster_index:04d}.png"
+        rgba, crop_bbox, _crop_mask = _extract_mask_crop_rgba(image_rgb, np.asarray(row["mask"], dtype=bool), int(cfg.crop_pad_px))
+        row["crop_bbox_xyxy"] = crop_bbox
         renders_mask_rgb[mask_name] = rgba[..., :3]
         Image.fromarray(rgba, mode="RGBA").save(render_dir / mask_name, compress_level=int(cfg.png_compress_level))
         cluster_entries.append(_cluster_entry_from_row(row, cluster_index, mask_name))
@@ -1542,8 +2227,16 @@ def _write_outputs_for_processed(
     cluster_map = {
         "image_index": int(idx),
         "image_size": [int(image_rgb.shape[1]), int(image_rgb.shape[0])],
-        "pipeline": "sam2_dinov2",
+        "pipeline": "sam2_dinov2_mini_mask_groups_v1",
         "clusters": cluster_entries,
+        "mini_masks": cluster_entries,
+        "groups": list(island_groups or []),
+        "stroke_candidates": (stroke_candidates or {}).get("candidates", []),
+        "stroke_candidate_meta": {
+            key: value
+            for key, value in dict(stroke_candidates or {}).items()
+            if key != "candidates"
+        },
     }
     (map_dir / "clusters.json").write_text(json.dumps(cluster_map, ensure_ascii=False, indent=2), encoding="utf-8")
 
@@ -1560,22 +2253,10 @@ def _write_outputs_for_processed(
             }
             for row in proposals
         ],
-        "merge_pairs": pair_debug,
-        "coarse_merged_clusters": [
-            {
-                k: v for k, v in row.items()
-                if k not in {"mask", "crop_rgba"}
-            }
-            for row in coarse_merged
-        ],
-        "merged_clusters": [
-            {
-                k: v for k, v in row.items()
-                if k not in {"mask", "crop_rgba"}
-            }
-            for row in merged
-        ],
-        "refine_debug": list(refine_debug or []),
+        "prompt_consolidation": list(prompt_debug or []),
+        "island_groups": list(island_groups or []),
+        "island_edge_debug": list(island_edge_debug or []),
+        "stroke_candidates": stroke_candidates or {},
     }
     (debug_dir / "manifest.json").write_text(json.dumps(manifest, ensure_ascii=False, indent=2), encoding="utf-8")
     return {
@@ -1584,20 +2265,46 @@ def _write_outputs_for_processed(
         "debug_dir": debug_dir,
         "cluster_map_path": map_dir / "clusters.json",
         "render_dir": render_dir,
+        "groups": list(island_groups or []),
     }
 
 
-def _build_in_memory_cluster_contract(merged: List[Dict[str, Any]]) -> Dict[str, Any]:
+def _build_in_memory_cluster_contract(
+    image_rgb_or_rows: Any,
+    proposals: Optional[List[Dict[str, Any]]] = None,
+    island_groups: Optional[List[Dict[str, Any]]] = None,
+    cfg: Optional[DiagramMaskClusterConfig] = None,
+) -> Dict[str, Any]:
+    if proposals is None and isinstance(image_rgb_or_rows, list):
+        rows = list(image_rgb_or_rows)
+        cluster_entries: List[Dict[str, Any]] = []
+        renders_mask_rgb: Dict[str, np.ndarray] = {}
+        for cluster_index, row in enumerate(rows):
+            mask_name = f"mask_{cluster_index:04d}.png"
+            rgba = np.asarray(row["crop_rgba"], dtype=np.uint8)
+            renders_mask_rgb[mask_name] = rgba[..., :3]
+            cluster_entries.append(_cluster_entry_from_row(row, cluster_index, mask_name))
+        return {
+            "cluster_entries": cluster_entries,
+            "renders_mask_rgb": renders_mask_rgb,
+            "groups": list(island_groups or []),
+        }
+
+    image_rgb = np.asarray(image_rgb_or_rows, dtype=np.uint8)
+    cfg = cfg or build_config()
+    proposals = list(proposals or [])
     cluster_entries: List[Dict[str, Any]] = []
     renders_mask_rgb: Dict[str, np.ndarray] = {}
-    for cluster_index, row in enumerate(merged):
-        mask_name = f"mask_{cluster_index:04d}.png"
-        rgba = np.asarray(row["crop_rgba"], dtype=np.uint8)
+    for cluster_index, row in enumerate(proposals):
+        mask_name = f"mini_{cluster_index:04d}.png"
+        rgba, crop_bbox, _crop_mask = _extract_mask_crop_rgba(image_rgb, np.asarray(row["mask"], dtype=bool), int(cfg.crop_pad_px))
+        row["crop_bbox_xyxy"] = crop_bbox
         renders_mask_rgb[mask_name] = rgba[..., :3]
         cluster_entries.append(_cluster_entry_from_row(row, cluster_index, mask_name))
     return {
         "cluster_entries": cluster_entries,
         "renders_mask_rgb": renders_mask_rgb,
+        "groups": list(island_groups or []),
     }
 
 
@@ -1615,22 +2322,28 @@ def cluster_image_rgb(
     cleaned_rgb = cleanup["cleaned_rgb"]
     removed_mask = cleanup["removed_mask"]
     _progress_log(cfg, f"preclean done removed_px={int(np.count_nonzero(removed_mask))} elapsed_s={time.perf_counter() - t0:.1f}")
-    proposals = _generate_sam2_candidate_masks(cleaned_rgb, cfg)
-    _progress_log(cfg, f"proposal generation done proposals={len(proposals)} elapsed_s={time.perf_counter() - t0:.1f}")
-    proposals = _suppress_redundant_proposals(proposals, removed_mask, cfg)
-    _progress_log(cfg, f"proposal suppression done proposals={len(proposals)} elapsed_s={time.perf_counter() - t0:.1f}")
+    raw_proposals = _generate_sam2_candidate_masks(cleaned_rgb, cfg)
+    _progress_log(cfg, f"proposal generation done raw_proposals={len(raw_proposals)} elapsed_s={time.perf_counter() - t0:.1f}")
+    raw_proposals = _suppress_redundant_proposals(raw_proposals, removed_mask, cfg)
+    _progress_log(cfg, f"proposal suppression done raw_proposals={len(raw_proposals)} elapsed_s={time.perf_counter() - t0:.1f}")
+    proposals, prompt_debug = _consolidate_prompt_level_proposals(raw_proposals, cfg)
+    _progress_log(cfg, f"prompt consolidation done mini_masks={len(proposals)} elapsed_s={time.perf_counter() - t0:.1f}")
     proposals = _attach_dino_and_shape_features(cleaned_rgb, proposals, cfg)
-    _progress_log(cfg, f"feature attach done proposals={len(proposals)} elapsed_s={time.perf_counter() - t0:.1f}")
-    coarse_merged, pair_debug = _merge_component_proposals(image_rgb, proposals, cfg)
-    _progress_log(cfg, f"coarse merge done coarse_clusters={len(coarse_merged)} elapsed_s={time.perf_counter() - t0:.1f}")
-    merged, refine_debug = _refine_merged_clusters_samrefiner_style(
-        image_rgb,
-        cleaned_rgb,
-        removed_mask,
-        coarse_merged,
-        cfg,
+    proposals = _annotate_basic_proposal_geometry(proposals)
+    _progress_log(cfg, f"feature attach done mini_masks={len(proposals)} elapsed_s={time.perf_counter() - t0:.1f}")
+    island_groups, island_edge_debug = _build_local_island_groups(proposals, cfg)
+    _progress_log(cfg, f"island grouping done groups={len(island_groups)} mini_masks={len(proposals)} elapsed_s={time.perf_counter() - t0:.1f}")
+    stroke_candidates = _build_stroke_candidate_outputs(
+        image_rgb=image_rgb,
+        processed_id=str(processed_id),
+        proposals=proposals,
+        island_groups=island_groups,
+        cfg=cfg,
     )
-    _progress_log(cfg, f"refiner stage done final_clusters={len(merged)} elapsed_s={time.perf_counter() - t0:.1f}")
+    _progress_log(
+        cfg,
+        f"stroke candidates done candidates={len(stroke_candidates.get('candidates') or [])} elapsed_s={time.perf_counter() - t0:.1f}",
+    )
 
     idx = _extract_index_from_processed_name(f"{processed_id}.png")
     out: Dict[str, Any] = {
@@ -1639,13 +2352,20 @@ def cluster_image_rgb(
         "cleaned_rgb": cleaned_rgb,
         "removed_mask": removed_mask,
         "removed_overlay_rgb": cleanup["removed_overlay_rgb"],
+        "raw_proposals": raw_proposals,
         "proposals": proposals,
-        "coarse_merged_clusters": coarse_merged,
-        "merged_clusters": merged,
-        "merge_pairs": pair_debug,
-        "refine_debug": refine_debug,
+        "mini_mask_proposals": proposals,
+        "prompt_consolidation": prompt_debug,
+        "groups": island_groups,
+        "island_groups": island_groups,
+        "island_edge_debug": island_edge_debug,
+        "coarse_merged_clusters": [],
+        "merged_clusters": [],
+        "merge_pairs": [],
+        "refine_debug": [],
+        "stroke_candidates": stroke_candidates,
     }
-    out.update(_build_in_memory_cluster_contract(merged))
+    out.update(_build_in_memory_cluster_contract(image_rgb, proposals, island_groups, cfg))
     if save_outputs and idx is not None:
         out.update(
             _write_outputs_for_processed(
@@ -1655,14 +2375,14 @@ def cluster_image_rgb(
                 removed_overlay_rgb=cleanup["removed_overlay_rgb"],
                 removed_mask=removed_mask,
                 proposals=proposals,
-                pair_debug=pair_debug,
-                coarse_merged=coarse_merged,
-                merged=merged,
-                refine_debug=refine_debug,
+                prompt_debug=prompt_debug,
+                island_groups=island_groups,
+                island_edge_debug=island_edge_debug,
+                stroke_candidates=stroke_candidates,
                 cfg=cfg,
             )
         )
-    _progress_log(cfg, f"cluster done processed_id={processed_id} final_clusters={len(merged)} total_elapsed_s={time.perf_counter() - t0:.1f}")
+    _progress_log(cfg, f"cluster done processed_id={processed_id} mini_masks={len(proposals)} groups={len(island_groups)} total_elapsed_s={time.perf_counter() - t0:.1f}")
     return out
 
 
@@ -1708,6 +2428,9 @@ def cluster_diagrams_in_memory(
         )
         out[int(idx)] = {
             "clusters": row.get("cluster_entries", []),
+            "mini_masks": row.get("cluster_entries", []),
+            "groups": row.get("groups", []),
+            "stroke_candidates": row.get("stroke_candidates", {}),
             "renders_mask_rgb": row.get("renders_mask_rgb", {}),
             "debug_dir": str(row.get("debug_dir")) if row.get("debug_dir") else None,
             "cluster_map_path": str(row.get("cluster_map_path")) if row.get("cluster_map_path") else None,
@@ -1741,6 +2464,7 @@ __all__ = [
     "DEBUG_ROOT",
     "CLUSTER_MAP_DIR",
     "CLUSTER_RENDER_DIR",
+    "SAM_DINO_RENDER_DIR",
     "DiagramMaskClusterConfig",
     "build_config",
     "build_overlay_rgb",

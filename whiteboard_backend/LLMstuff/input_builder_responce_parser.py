@@ -12,6 +12,11 @@ from LLMstuff.prompts import (
     TEXT_REQUEST_SCHEMA,
     chapter_speech_system_prompt,
     image_request_system_prompt,
+    qwen_c2_component_verifier_system_prompt,
+    qwen_diagram_component_stroke_match_system_prompt,
+    qwen_diagram_action_planner_system_prompt,
+    qwen_non_semantic_image_description_system_prompt,
+    qwen_stroke_meaning_filter_system_prompt,
     logical_timeline_system_prompt,
     qwen_space_planner_system_prompt,
     qwen_step_rewrite_system_prompt,
@@ -367,6 +372,221 @@ def build_qwen_space_planner_prompt(
     return qwen_space_planner_system_prompt(), prompt
 
 
+def build_qwen_diagram_action_planner_prompt(
+    *,
+    step_id: str,
+    speech: str,
+    images: Sequence[Dict[str, Any]],
+) -> Tuple[str, str]:
+    payload = {
+        "step_id": normalize_ws(step_id),
+        "speech": str(speech or "").strip(),
+        "images": list(images or []),
+    }
+    prompt = (
+        "Input JSON (compact, no extra whitespace):\n"
+        f"{json.dumps(payload, ensure_ascii=False, separators=(',', ':'))}"
+    )
+    return qwen_diagram_action_planner_system_prompt(), prompt
+
+
+def build_qwen_c2_component_verifier_prompt(
+    *,
+    prompt: str,
+    required_objects: Sequence[str],
+) -> Tuple[str, str]:
+    payload = {
+        "prompt": normalize_ws(prompt),
+        "required_objects": [normalize_ws(item) for item in (required_objects or []) if normalize_ws(item)],
+    }
+    user = (
+        "Diagram prompt and required object list:\n"
+        f"{json.dumps(payload, ensure_ascii=False, indent=2)}"
+    )
+    return qwen_c2_component_verifier_system_prompt(), user
+
+
+def _clip_compact_text(value: Any, max_chars: int) -> str:
+    text = normalize_ws(value)
+    if max_chars <= 0 or len(text) <= max_chars:
+        return text
+    return text[: max(0, max_chars - 3)].rstrip() + "..."
+
+
+def compact_stroke_description_map(stroke_description_payload: Dict[str, Any]) -> Dict[str, str]:
+    out: Dict[str, str] = {}
+    rows = stroke_description_payload.get("described_lines")
+    if not isinstance(rows, list):
+        return out
+    for row in rows:
+        if not isinstance(row, dict):
+            continue
+        try:
+            stroke_id = int(row.get("source_stroke_index", row.get("described_line_index")))
+        except Exception:
+            continue
+        look = normalize_ws(row.get("look"))
+        loc = normalize_ws(row.get("location"))
+        if look or loc:
+            text = f"{look}; loc {loc}".strip("; ")
+        else:
+            text = normalize_ws(row.get("description"))
+        if text:
+            out[str(stroke_id)] = _clip_compact_text(text, 220)
+    return dict(sorted(out.items(), key=lambda item: int(item[0]) if str(item[0]).isdigit() else 10**9))
+
+
+def compact_group_description_map(stroke_description_payload: Dict[str, Any]) -> Dict[str, str]:
+    out: Dict[str, str] = {}
+    rows = stroke_description_payload.get("groups")
+    if not isinstance(rows, list):
+        return out
+    for row in rows:
+        if not isinstance(row, dict):
+            continue
+        try:
+            group_id = int(row.get("group_index"))
+        except Exception:
+            continue
+        stroke_ids = []
+        for value in row.get("source_stroke_indices") if isinstance(row.get("source_stroke_indices"), list) else []:
+            try:
+                stroke_ids.append(int(value))
+            except Exception:
+                continue
+        desc = _clip_compact_text(row.get("description"), 150)
+        if stroke_ids and desc:
+            out[str(group_id)] = f"strokes {','.join(str(x) for x in stroke_ids)}; {desc}"
+    return dict(sorted(out.items(), key=lambda item: int(item[0]) if str(item[0]).isdigit() else 10**9))
+
+
+def build_qwen_stroke_meaning_filter_prompt(
+    *,
+    diagram_name: str,
+    components: Sequence[str],
+    stroke_description_payload: Dict[str, Any],
+) -> Tuple[str, str]:
+    payload = {
+        "diagram": normalize_ws(diagram_name),
+        "components": [normalize_ws(item) for item in (components or []) if normalize_ws(item)][:80],
+        "strokes": compact_stroke_description_map(stroke_description_payload),
+        "groups": compact_group_description_map(stroke_description_payload),
+    }
+    user = (
+        "Compact diagram stroke map:\n"
+        f"{json.dumps(payload, ensure_ascii=False, separators=(',', ':'))}\n\n"
+        "Return the compressed accepted/groups/rejected JSON now."
+    )
+    return qwen_stroke_meaning_filter_system_prompt(), user
+
+
+def build_qwen_non_semantic_image_description_prompt() -> Tuple[str, str]:
+    return qwen_non_semantic_image_description_system_prompt(), "Describe the colored non-grayscale visual content in this image now."
+
+
+def parse_qwen_non_semantic_image_description_output(raw_text: str) -> Dict[str, Any]:
+    payload = _extract_first_json_object(raw_text)
+    description = _clip_compact_text(payload.get("description"), 900)
+    if not description:
+        description = _clip_compact_text(str(raw_text or ""), 900)
+    return {"description": description}
+
+
+def _compact_component_description(value: Any, max_chars: int = 700) -> str:
+    return _clip_compact_text(value, max(80, int(max_chars or 700)))
+
+
+def build_qwen_diagram_component_stroke_match_prompt(
+    *,
+    diagram_name: str,
+    candidate_objects: Sequence[Dict[str, Any]],
+    stroke_description_payload: Dict[str, Any],
+    stroke_meaning_payload: Optional[Dict[str, Any]] = None,
+    components: Sequence[Dict[str, Any]],
+    refined_visual_description_max_chars: int = 700,
+) -> Tuple[str, str]:
+    candidates_out: List[Dict[str, Any]] = []
+    for index, row in enumerate(candidate_objects or [], start=1):
+        if not isinstance(row, dict):
+            continue
+        stroke_ids = _coerce_int_list_light(row.get("stroke_indexes", row.get("stroke_ids")), cap=500)
+        if not stroke_ids:
+            continue
+        xy = row.get("xy")
+        if not isinstance(xy, list) or len(xy) != 2:
+            bbox = row.get("bbox_xyxy") if isinstance(row.get("bbox_xyxy"), list) else []
+            if len(bbox) == 4:
+                try:
+                    xy = [round((float(bbox[0]) + float(bbox[2])) / 2.0, 2), round((float(bbox[1]) + float(bbox[3])) / 2.0, 2)]
+                except Exception:
+                    xy = [None, None]
+            else:
+                xy = [None, None]
+        desc = _clip_compact_text(
+            row.get("qwen_visual_description")
+            or row.get("visual_description")
+            or row.get("non_semantic_visual_description"),
+            900,
+        )
+        if not desc:
+            continue
+        candidates_out.append(
+            {
+                "id": normalize_ws(row.get("candidate_id")) or f"C{index}",
+                "stroke_ids": stroke_ids,
+                "xy": xy,
+                "visual": desc,
+            }
+        )
+
+    component_rows: List[Dict[str, Any]] = []
+    seen_components: set[str] = set()
+    for row in components or []:
+        if not isinstance(row, dict):
+            continue
+        name = normalize_ws(row.get("name") or row.get("label"))
+        if not name or name.casefold() in seen_components:
+            continue
+        seen_components.add(name.casefold())
+        component_rows.append(
+            {
+                "name": name,
+                "image_visual": _compact_component_description(
+                    row.get("qwen_visual_description") or row.get("image_visual_description"),
+                    max_chars=900,
+                ),
+                "refined_visual": _compact_component_description(
+                    row.get("refined_visual_description"),
+                    max_chars=refined_visual_description_max_chars,
+                ),
+            }
+        )
+
+    line_map = {
+        "strokes": compact_stroke_description_map(stroke_description_payload),
+        "groups": compact_group_description_map(stroke_description_payload),
+    }
+    if isinstance(stroke_meaning_payload, dict):
+        optimized = stroke_meaning_payload.get("optimized") if isinstance(stroke_meaning_payload.get("optimized"), dict) else stroke_meaning_payload
+        line_map["filtered"] = {
+            "accepted": list((optimized or {}).get("accepted") or []),
+            "groups": list((optimized or {}).get("groups") or []),
+        }
+
+    payload = {
+        "diagram": normalize_ws(diagram_name),
+        "candidate_objects": candidates_out,
+        "line_descriptors": line_map,
+        "components": component_rows,
+    }
+    user = (
+        "Diagram component matching input:\n"
+        f"{json.dumps(payload, ensure_ascii=False, separators=(',', ':'))}\n\n"
+        "Return the component-to-stroke match JSON now."
+    )
+    return qwen_diagram_component_stroke_match_system_prompt(), user
+
+
 def parse_qwen_step_output(
     raw_text: str,
     *,
@@ -419,7 +639,7 @@ def parse_qwen_step_output(
 
 def extract_pause_markers(speech_text: str) -> List[Dict[str, Any]]:
     out: List[Dict[str, Any]] = []
-    for index, match in enumerate(re.finditer(r"%(\d+(?:\.\d{3}))", str(speech_text or ""))):
+    for index, match in enumerate(re.finditer(r"%(?:\s*)(\d+(?:\.\d+)?|\.\d+)", str(speech_text or ""))):
         try:
             seconds = float(match.group(1))
         except Exception:
@@ -434,3 +654,432 @@ def extract_pause_markers(speech_text: str) -> List[Dict[str, Any]]:
             }
         )
     return out
+
+
+def _extract_action_objects_from_truncated_json(raw_text: str, *, field_name: str = "actions") -> List[Dict[str, Any]]:
+    text = str(raw_text or "")
+    field_pos = text.find(f'"{field_name}"')
+    if field_pos < 0:
+        return []
+    bracket_pos = text.find("[", field_pos)
+    if bracket_pos < 0:
+        return []
+
+    out: List[Dict[str, Any]] = []
+    in_string = False
+    escape = False
+    object_depth = 0
+    buffer: List[str] = []
+
+    for ch in text[bracket_pos + 1 :]:
+        if object_depth == 0:
+            if ch == "{":
+                object_depth = 1
+                buffer = ["{"]
+            elif ch == "]":
+                break
+            continue
+
+        buffer.append(ch)
+        if escape:
+            escape = False
+            continue
+        if ch == "\\":
+            escape = True
+            continue
+        if ch == '"':
+            in_string = not in_string
+            continue
+        if in_string:
+            continue
+        if ch == "{":
+            object_depth += 1
+            continue
+        if ch == "}":
+            object_depth -= 1
+            if object_depth == 0:
+                try:
+                    parsed = json.loads("".join(buffer))
+                except Exception:
+                    parsed = None
+                if isinstance(parsed, dict):
+                    out.append(parsed)
+                buffer = []
+    return out
+
+
+def parse_qwen_space_planner_output(raw_text: str) -> Dict[str, Any]:
+    actions_raw: Any = None
+    try:
+        payload = json.loads(raw_text)
+        actions_raw = payload.get("actions")
+    except Exception:
+        actions_raw = _extract_action_objects_from_truncated_json(raw_text, field_name="actions")
+
+    if not isinstance(actions_raw, list):
+        actions_raw = []
+
+    out_actions: List[Dict[str, Any]] = []
+    for row in actions_raw:
+        if not isinstance(row, dict):
+            continue
+        name = normalize_ws(row.get("name"))
+        action_type = normalize_ws(row.get("type")).lower()
+        corners = row.get("corners")
+        if not name or action_type not in {"image", "text"} or not isinstance(corners, list) or len(corners) < 2:
+            continue
+        try:
+            draw = 1 if int(row.get("draw", 0) or 0) == 1 else 0
+            if row.get("start") is None and row.get("sync_index") is not None:
+                start = max(0, int(row.get("sync_index", 0) or 0))
+            else:
+                start = max(0, int(row.get("start", 0) or 0))
+            if row.get("end") is None and row.get("sync_index") is not None:
+                end = start
+            else:
+                end = max(0, int(row.get("end", start) or start))
+            span = max(0, int(row.get("range", max(0, end - start)) or max(0, end - start)))
+        except Exception:
+            continue
+        cleaned_corners: List[List[int]] = []
+        valid = True
+        for corner in corners:
+            if not isinstance(corner, (list, tuple)) or len(corner) != 2:
+                valid = False
+                break
+            try:
+                cleaned_corners.append([int(corner[0]), int(corner[1])])
+            except Exception:
+                valid = False
+                break
+        if not valid:
+            continue
+        if len(cleaned_corners) == 2:
+            xs = [int(cleaned_corners[0][0]), int(cleaned_corners[1][0])]
+            ys = [int(cleaned_corners[0][1]), int(cleaned_corners[1][1])]
+            cleaned_corners = [
+                [min(xs), min(ys)],
+                [min(xs), max(ys)],
+                [max(xs), min(ys)],
+                [max(xs), max(ys)],
+            ]
+        elif len(cleaned_corners) != 4:
+            xs = [corner[0] for corner in cleaned_corners]
+            ys = [corner[1] for corner in cleaned_corners]
+            cleaned_corners = [
+                [min(xs), min(ys)],
+                [min(xs), max(ys)],
+                [max(xs), min(ys)],
+                [max(xs), max(ys)],
+            ]
+        out_actions.append(
+            {
+                "draw": draw,
+                "type": action_type,
+                "name": name,
+                "start": start,
+                "end": max(start, end),
+                "range": span,
+                "corners": cleaned_corners,
+            }
+        )
+
+    if not out_actions:
+        raise ValueError("space planner output is missing actions")
+    return {"actions": out_actions}
+
+
+def parse_qwen_diagram_action_planner_output(raw_text: str) -> Dict[str, Any]:
+    actions_raw: Any = None
+    try:
+        payload = json.loads(raw_text)
+        actions_raw = payload.get("actions")
+    except Exception:
+        actions_raw = _extract_action_objects_from_truncated_json(raw_text, field_name="actions")
+
+    if not isinstance(actions_raw, list):
+        actions_raw = []
+
+    allowed_types = {
+        "highlight_image",
+        "write_text_image",
+        "highlight_component",
+        "zoom_component",
+        "label_component",
+        "connect_component_to_component",
+        "write_text_component",
+    }
+    out_actions: List[Dict[str, Any]] = []
+    for row in actions_raw:
+        if not isinstance(row, dict):
+            continue
+        action_type = normalize_ws(row.get("type"))
+        target = str(row.get("target", "") or "").strip()
+        data = str(row.get("data", "") or "")
+        if action_type not in allowed_types or not target:
+            continue
+        try:
+            sync_index = max(1, int(row.get("sync_index", 1) or 1))
+            init = 1 if int(row.get("init", 0) or 0) == 1 else 0
+        except Exception:
+            continue
+        out_actions.append(
+            {
+                "type": action_type,
+                "target": target,
+                "data": data,
+                "sync_index": sync_index,
+                "init": init,
+            }
+        )
+    return {"actions": out_actions}
+
+
+def parse_qwen_c2_component_verifier_output(raw_text: str) -> Dict[str, Any]:
+    try:
+        payload = json.loads(raw_text)
+    except Exception:
+        payload = {}
+    skip_stage1 = 1 if int(payload.get("skip_stage1", 0) or 0) == 1 else 0
+    missing_raw = payload.get("missing")
+    missing = [normalize_ws(item) for item in (missing_raw if isinstance(missing_raw, list) else []) if normalize_ws(item)]
+    if skip_stage1 == 1:
+        missing = []
+    return {
+        "skip_stage1": skip_stage1,
+        "missing": missing,
+    }
+
+
+def _extract_first_json_object(raw_text: str) -> Dict[str, Any]:
+    text = str(raw_text or "").strip()
+    if not text:
+        return {}
+    try:
+        payload = json.loads(text)
+        return payload if isinstance(payload, dict) else {}
+    except Exception:
+        pass
+
+    start = text.find("{")
+    if start < 0:
+        return {}
+    in_string = False
+    escape = False
+    depth = 0
+    for index in range(start, len(text)):
+        ch = text[index]
+        if escape:
+            escape = False
+            continue
+        if ch == "\\":
+            escape = True
+            continue
+        if ch == '"':
+            in_string = not in_string
+            continue
+        if in_string:
+            continue
+        if ch == "{":
+            depth += 1
+        elif ch == "}":
+            depth -= 1
+            if depth == 0:
+                try:
+                    payload = json.loads(text[start:index + 1])
+                    return payload if isinstance(payload, dict) else {}
+                except Exception:
+                    return {}
+    return {}
+
+
+def _coerce_int_list_light(value: Any, *, cap: int = 1000) -> List[int]:
+    raw_items: List[Any]
+    if isinstance(value, list):
+        raw_items = value
+    elif isinstance(value, str):
+        raw_items = re.findall(r"-?\d+", value)
+    else:
+        raw_items = []
+    out: List[int] = []
+    seen: set[int] = set()
+    for item in raw_items:
+        try:
+            number = int(item)
+        except Exception:
+            continue
+        if number < 0 or number in seen:
+            continue
+        seen.add(number)
+        out.append(number)
+        if len(out) >= cap:
+            break
+    return out
+
+
+def _stroke_lookup_from_description_payload(stroke_description_payload: Dict[str, Any]) -> Dict[int, Dict[str, Any]]:
+    lookup: Dict[int, Dict[str, Any]] = {}
+    for row in stroke_description_payload.get("described_lines") if isinstance(stroke_description_payload.get("described_lines"), list) else []:
+        if not isinstance(row, dict):
+            continue
+        try:
+            stroke_id = int(row.get("source_stroke_index", row.get("described_line_index")))
+        except Exception:
+            continue
+        lookup[stroke_id] = row
+    return lookup
+
+
+def _fallback_stroke_summary(row: Dict[str, Any]) -> Tuple[str, str]:
+    look = _clip_compact_text(row.get("look") or row.get("description"), 140)
+    loc = _clip_compact_text(row.get("location"), 80)
+    if not loc:
+        loc = "from descriptor"
+    return look, loc
+
+
+def parse_qwen_stroke_meaning_filter_output(
+    raw_text: str,
+    *,
+    stroke_description_payload: Dict[str, Any],
+) -> Dict[str, Any]:
+    payload = _extract_first_json_object(raw_text)
+    stroke_lookup = _stroke_lookup_from_description_payload(stroke_description_payload)
+    valid_strokes = set(stroke_lookup.keys())
+
+    accepted_by_stroke: Dict[int, Dict[str, Any]] = {}
+    accepted_raw = payload.get("accepted")
+    if isinstance(accepted_raw, dict):
+        accepted_iter = [
+            {"s": key, "d": value}
+            for key, value in accepted_raw.items()
+        ]
+    elif isinstance(accepted_raw, list):
+        accepted_iter = accepted_raw
+    else:
+        accepted_iter = []
+
+    for row in accepted_iter:
+        if isinstance(row, dict):
+            raw_id = row.get("s", row.get("stroke", row.get("stroke_id", row.get("id"))))
+            try:
+                stroke_id = int(raw_id)
+            except Exception:
+                continue
+            if stroke_id not in valid_strokes:
+                continue
+            fallback_d, fallback_loc = _fallback_stroke_summary(stroke_lookup[stroke_id])
+            accepted_by_stroke[stroke_id] = {
+                "stroke": stroke_id,
+                "d": _clip_compact_text(row.get("d", row.get("description", fallback_d)), 160) or fallback_d,
+                "loc": _clip_compact_text(row.get("loc", row.get("location", fallback_loc)), 90) or fallback_loc,
+            }
+
+    parsed_groups: List[Dict[str, Any]] = []
+    groups_raw = payload.get("groups")
+    if not isinstance(groups_raw, list):
+        groups_raw = []
+    for index, row in enumerate(groups_raw, start=1):
+        if not isinstance(row, dict):
+            continue
+        stroke_ids = _coerce_int_list_light(row.get("strokes", row.get("stroke_ids")), cap=500)
+        stroke_ids = [sid for sid in stroke_ids if sid in valid_strokes]
+        if not stroke_ids:
+            continue
+        for sid in stroke_ids:
+            if sid not in accepted_by_stroke:
+                fallback_d, fallback_loc = _fallback_stroke_summary(stroke_lookup[sid])
+                accepted_by_stroke[sid] = {
+                    "stroke": sid,
+                    "d": fallback_d,
+                    "loc": fallback_loc,
+                    "auto_accepted_from_group": True,
+                }
+        parsed_groups.append(
+            {
+                "id": normalize_ws(row.get("id")) or f"G{index}",
+                "strokes": stroke_ids,
+                "d": _clip_compact_text(row.get("d", row.get("description", "")), 180),
+                "source": _clip_compact_text(row.get("source", "new"), 40) or "new",
+            }
+        )
+
+    rejected_ranges: List[Dict[str, Any]] = []
+    rejected_raw = payload.get("rejected")
+    if not isinstance(rejected_raw, list):
+        rejected_raw = []
+    for row in rejected_raw:
+        if not isinstance(row, dict):
+            continue
+        rng = _coerce_int_list_light(row.get("range"), cap=2)
+        if len(rng) < 2:
+            continue
+        start, end = sorted([rng[0], rng[1]])
+        rejected_ranges.append(
+            {
+                "range": [start, end],
+                "why": _clip_compact_text(row.get("why", row.get("reason", "")), 120),
+            }
+        )
+
+    accepted = [accepted_by_stroke[sid] for sid in sorted(accepted_by_stroke.keys())]
+    return {
+        "accepted": accepted,
+        "groups": parsed_groups,
+        "rejected": rejected_ranges,
+        "stats": {
+            "accepted_strokes": len(accepted),
+            "groups": len(parsed_groups),
+            "rejected_ranges": len(rejected_ranges),
+            "source_strokes": len(valid_strokes),
+        },
+    }
+
+
+def parse_qwen_diagram_component_stroke_match_output(
+    raw_text: str,
+    *,
+    component_names: Sequence[str],
+) -> Dict[str, Any]:
+    payload = _extract_first_json_object(raw_text)
+    raw_components = payload.get("components")
+    if isinstance(raw_components, list):
+        converted: Dict[str, Any] = {}
+        for row in raw_components:
+            if not isinstance(row, dict):
+                continue
+            name = normalize_ws(row.get("name") or row.get("component"))
+            if name:
+                converted[name] = row
+        raw_components = converted
+    if not isinstance(raw_components, dict):
+        raw_components = {}
+
+    expected = [normalize_ws(name) for name in (component_names or []) if normalize_ws(name)]
+    expected_lookup = {name.casefold(): name for name in expected}
+    out_components: Dict[str, Dict[str, Any]] = {}
+    for raw_name, raw_value in raw_components.items():
+        name = expected_lookup.get(normalize_ws(raw_name).casefold()) or normalize_ws(raw_name)
+        if not name or name not in expected:
+            continue
+        row = raw_value if isinstance(raw_value, dict) else {}
+        raw_strokes = row.get("stroke_ids", row.get("strokes", row.get("stroke_indexes")))
+        stroke_ids = None if raw_strokes is None else _coerce_int_list_light(raw_strokes, cap=1000)
+        out_components[name] = {
+            "stroke_ids": stroke_ids,
+            "visual_description_of_match": _clip_compact_text(
+                row.get("visual_description_of_match", row.get("visual", row.get("match_visual_description", ""))),
+                1000,
+            ),
+            "reason": _clip_compact_text(row.get("reason", ""), 1200),
+        }
+
+    for name in expected:
+        if name not in out_components:
+            out_components[name] = {
+                "stroke_ids": None,
+                "visual_description_of_match": "",
+                "reason": "missing from raw Qwen output",
+            }
+
+    return {"components": out_components}
