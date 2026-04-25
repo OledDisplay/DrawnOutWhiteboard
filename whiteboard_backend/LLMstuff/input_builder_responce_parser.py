@@ -15,6 +15,7 @@ from LLMstuff.prompts import (
     qwen_c2_component_verifier_system_prompt,
     qwen_diagram_component_stroke_match_system_prompt,
     qwen_diagram_action_planner_system_prompt,
+    qwen_full_speech_action_sync_system_prompt,
     qwen_non_semantic_image_description_system_prompt,
     qwen_stroke_meaning_filter_system_prompt,
     logical_timeline_system_prompt,
@@ -149,12 +150,41 @@ def build_chapter_speech_request(topic: str, chapter: Dict[str, Any]) -> Tuple[L
 
 def parse_chapter_speech_output(raw_text: str, *, chapter: Dict[str, Any]) -> "OrderedDict[str, str]":
     payload = json.loads(raw_text)
-    steps_raw = payload.get("steps")
-    if not isinstance(steps_raw, dict):
-        raise ValueError("chapter speech output is missing steps")
-
     expected_steps = list((chapter.get("steps") or {}).keys())
     chapter_id = normalize_ws(chapter.get("chapter_id"))
+
+    steps_raw = payload.get("steps") if isinstance(payload, dict) else None
+    if not isinstance(steps_raw, dict) and isinstance(payload, dict):
+        for key in ("speech_steps", "step_speech", "parsed"):
+            candidate = payload.get(key)
+            if isinstance(candidate, dict):
+                steps_raw = candidate
+                break
+    if not isinstance(steps_raw, dict) and isinstance(payload, dict):
+        direct_step_map = {
+            str(key): value
+            for key, value in payload.items()
+            if normalize_step_id(key, chapter_id=chapter_id, fallback_index=1) in expected_steps
+        }
+        if direct_step_map:
+            steps_raw = direct_step_map
+    if not isinstance(steps_raw, dict) and isinstance(payload, dict):
+        rows = payload.get("steps")
+        if isinstance(rows, list):
+            converted: Dict[str, str] = {}
+            for index, row in enumerate(rows, start=1):
+                if not isinstance(row, dict):
+                    continue
+                raw_id = row.get("step_id") or row.get("id") or row.get("step") or row.get("name")
+                text = row.get("speech") or row.get("text") or row.get("content")
+                step_id = normalize_step_id(raw_id, chapter_id=chapter_id, fallback_index=index)
+                if step_id in expected_steps and normalize_ws(text):
+                    converted[step_id] = normalize_ws(text)
+            if converted:
+                steps_raw = converted
+    if not isinstance(steps_raw, dict):
+        raise ValueError(f"chapter speech output is missing steps; top-level keys={list(payload.keys()) if isinstance(payload, dict) else type(payload).__name__}")
+
     out: "OrderedDict[str, str]" = OrderedDict()
     alias_map = {step_id: step_id for step_id in expected_steps}
     for step_id in expected_steps:
@@ -406,6 +436,26 @@ def build_qwen_c2_component_verifier_prompt(
     return qwen_c2_component_verifier_system_prompt(), user
 
 
+def build_qwen_full_speech_action_sync_prompt(
+    *,
+    step_id: str,
+    compressed_speech: str,
+    full_speech: str,
+    actions: Sequence[Dict[str, Any]],
+) -> Tuple[str, str]:
+    payload = {
+        "step_id": normalize_ws(step_id),
+        "compressed_speech": str(compressed_speech or "").strip(),
+        "full_speech": str(full_speech or "").strip(),
+        "actions": list(actions or []),
+    }
+    user = (
+        "Input JSON (compact, no extra whitespace):\n"
+        f"{json.dumps(payload, ensure_ascii=False, separators=(',', ':'))}"
+    )
+    return qwen_full_speech_action_sync_system_prompt(), user
+
+
 def _clip_compact_text(value: Any, max_chars: int) -> str:
     text = normalize_ws(value)
     if max_chars <= 0 or len(text) <= max_chars:
@@ -585,6 +635,40 @@ def build_qwen_diagram_component_stroke_match_prompt(
         "Return the component-to-stroke match JSON now."
     )
     return qwen_diagram_component_stroke_match_system_prompt(), user
+
+
+def parse_qwen_full_speech_action_sync_output(
+    raw_text: str,
+    *,
+    action_ids: Iterable[str],
+) -> Dict[str, Any]:
+    payload = _extract_first_json_object(raw_text)
+    allowed = {str(action_id): str(action_id) for action_id in action_ids if str(action_id).strip()}
+    rows = payload.get("actions")
+    if not isinstance(rows, list):
+        rows = []
+
+    out_actions: List[Dict[str, Any]] = []
+    seen: set[str] = set()
+    for row in rows:
+        if not isinstance(row, dict):
+            continue
+        action_id = allowed.get(str(row.get("action_id", "") or "").strip())
+        if not action_id or action_id in seen:
+            continue
+        try:
+            full_word_index = int(row.get("full_word_index"))
+        except Exception:
+            continue
+        seen.add(action_id)
+        out_actions.append(
+            {
+                "action_id": action_id,
+                "full_word_index": max(1, full_word_index),
+            }
+        )
+
+    return {"actions": out_actions}
 
 
 def parse_qwen_step_output(

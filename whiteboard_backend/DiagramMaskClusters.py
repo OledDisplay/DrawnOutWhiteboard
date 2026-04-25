@@ -80,7 +80,11 @@ def _torch_device() -> torch.device:
 
 @dataclass
 class DiagramMaskClusterConfig:
-    sam_model_id: str = os.environ.get("DIAGRAM_CLUSTER_SAM2_MODEL_ID", "facebook/sam2.1-hiera-small")
+    sam_model_id: str = (
+        os.environ.get("DIAGRAM_CLUSTER_SAM_MODEL_ID")
+        or os.environ.get("DIAGRAM_CLUSTER_SAM2_MODEL_ID")
+        or "facebook/sam2.1-hiera-large"
+    )
     dino_model_id: str = os.environ.get("DIAGRAM_CLUSTER_DINO_MODEL_ID", "facebook/dinov2-base")
     refiner_model_id: str = os.environ.get("DIAGRAM_CLUSTER_REFINER_MODEL_ID", "").strip()
     device: str = str(_torch_device())
@@ -138,11 +142,12 @@ class DiagramMaskClusterConfig:
     merge_similarity_only_min_color_similarity: float = _env_float("DIAGRAM_CLUSTER_MERGE_SIMILARITY_ONLY_MIN_COLOR_SIM", 0.88)
     merge_similarity_only_min_shape_similarity: float = _env_float("DIAGRAM_CLUSTER_MERGE_SIMILARITY_ONLY_MIN_SHAPE_SIM", 0.84)
     merge_similarity_only_min_score: float = _env_float("DIAGRAM_CLUSTER_MERGE_SIMILARITY_ONLY_MIN_SCORE", 0.90)
-    merge_similarity_only_bbox_gap_px: float = _env_float("DIAGRAM_CLUSTER_MERGE_SIMILARITY_ONLY_BBOX_GAP_PX", 160.0)
+    merge_similarity_only_bbox_gap_px: float = _env_float("DIAGRAM_CLUSTER_MERGE_SIMILARITY_ONLY_BBOX_GAP_PX", 42.0)
+    merge_similarity_only_bbox_growth_max: float = _env_float("DIAGRAM_CLUSTER_MERGE_SIMILARITY_ONLY_BBOX_GROWTH_MAX", 0.30)
     merge_iou_thresh: float = _env_float("DIAGRAM_CLUSTER_MERGE_IOU_THRESH", 0.18)
     merge_containment_thresh: float = _env_float("DIAGRAM_CLUSTER_MERGE_CONTAINMENT_THRESH", 0.84)
-    merge_bbox_gap_px: float = _env_float("DIAGRAM_CLUSTER_MERGE_BBOX_GAP_PX", 26.0)
-    merge_bbox_growth_max: float = _env_float("DIAGRAM_CLUSTER_MERGE_BBOX_GROWTH_MAX", 0.55)
+    merge_bbox_gap_px: float = _env_float("DIAGRAM_CLUSTER_MERGE_BBOX_GAP_PX", 22.0)
+    merge_bbox_growth_max: float = _env_float("DIAGRAM_CLUSTER_MERGE_BBOX_GROWTH_MAX", 0.40)
 
     # samrefiner-style post-filter
     refiner_enabled: bool = _env_bool("DIAGRAM_CLUSTER_REFINER_ENABLED", False)
@@ -174,6 +179,9 @@ class DiagramMaskClusterConfig:
     local_group_min_combined_score: float = _env_float("DIAGRAM_CLUSTER_LOCAL_GROUP_MIN_COMBINED_SCORE", 0.90)
     local_group_min_shared_neighbors: int = _env_int("DIAGRAM_CLUSTER_LOCAL_GROUP_MIN_SHARED_NEIGHBORS", 1)
     local_group_border_radius_scale: float = _env_float("DIAGRAM_CLUSTER_LOCAL_GROUP_BORDER_RADIUS_SCALE", 1.6)
+    local_group_max_members: int = _env_int("DIAGRAM_CLUSTER_LOCAL_GROUP_MAX_MEMBERS", 6)
+    local_group_min_inner_consistency_score: float = _env_float("DIAGRAM_CLUSTER_LOCAL_GROUP_MIN_INNER_CONSISTENCY_SCORE", 0.88)
+    local_group_max_score_drop: float = _env_float("DIAGRAM_CLUSTER_LOCAL_GROUP_MAX_SCORE_DROP", 0.045)
 
     # output
     png_compress_level: int = _env_int("DIAGRAM_CLUSTER_PNG_COMPRESS_LEVEL", 1)
@@ -499,6 +507,38 @@ def _get_dino_bundle(cfg: DiagramMaskClusterConfig) -> Dict[str, Any]:
         "model_id": cfg.dino_model_id,
     }
     return _DINO_BUNDLE
+
+
+def unload_hot_models() -> None:
+    global _SAM2_BUNDLE, _DINO_BUNDLE
+    for bundle_name in ("_SAM2_BUNDLE", "_DINO_BUNDLE"):
+        bundle = _SAM2_BUNDLE if bundle_name == "_SAM2_BUNDLE" else _DINO_BUNDLE
+        if not isinstance(bundle, dict):
+            continue
+        model = bundle.get("model")
+        processor = bundle.get("processor")
+        try:
+            if model is not None:
+                model.to("cpu")
+        except Exception:
+            pass
+        try:
+            del model
+        except Exception:
+            pass
+        try:
+            del processor
+        except Exception:
+            pass
+    _SAM2_BUNDLE = None
+    _DINO_BUNDLE = None
+    try:
+        gc = getattr(torch, "cuda", None)
+        if gc is not None and torch.cuda.is_available():
+            torch.cuda.empty_cache()
+            torch.cuda.ipc_collect()
+    except Exception:
+        pass
 
 
 def _build_point_grid(width: int, height: int, step: int, max_points: int) -> List[Tuple[float, float]]:
@@ -1030,6 +1070,8 @@ def _build_local_island_groups(
         member_set = {int(seed_idx)}
         seed_id = str(proposals[seed_idx].get("proposal_id", "") or "")
         while True:
+            if len(members) >= max(1, int(cfg.local_group_max_members)):
+                break
             candidate_scores: List[Tuple[int, int, float, float]] = []
             frontier = set()
             for midx in members:
@@ -1066,6 +1108,27 @@ def _build_local_island_groups(
                 support_slice = support_edges[:required_support]
                 avg_score = float(sum(float(row["score"]) for row in support_slice) / float(len(support_slice)))
                 avg_gap = float(sum(float(row["bbox_gap_px"]) for row in support_slice) / float(len(support_slice)))
+
+                if len(members) > 1:
+                    inner_scores = []
+                    candidate_to_all_scores = []
+                    for pos, left_idx in enumerate(members):
+                        for right_idx in members[pos + 1:]:
+                            edge = edge_lookup.get((left_idx, right_idx)) or edge_lookup.get((right_idx, left_idx))
+                            if edge is not None:
+                                inner_scores.append(float(edge.get("score", 0.0) or 0.0))
+                        edge_to_candidate = edge_lookup.get((left_idx, cand_idx)) or edge_lookup.get((cand_idx, left_idx))
+                        if edge_to_candidate is not None:
+                            candidate_to_all_scores.append(float(edge_to_candidate.get("score", 0.0) or 0.0))
+                    if candidate_to_all_scores:
+                        avg_all = float(sum(candidate_to_all_scores) / float(len(candidate_to_all_scores)))
+                        worst_all = float(min(candidate_to_all_scores))
+                        if worst_all < float(cfg.local_group_min_inner_consistency_score):
+                            continue
+                        if inner_scores:
+                            inner_avg = float(sum(inner_scores) / float(len(inner_scores)))
+                            if avg_all < inner_avg - float(cfg.local_group_max_score_drop):
+                                continue
                 candidate_scores.append((cand_idx, len(support_edges), avg_score, avg_gap))
             if not candidate_scores:
                 break
@@ -1668,7 +1731,10 @@ def _should_merge_pair(a: Dict[str, Any], b: Dict[str, Any], cfg: DiagramMaskClu
 
     spatial_ok = (
         metrics["iou"] >= float(cfg.merge_iou_thresh)
-        or metrics["containment"] >= float(cfg.merge_containment_thresh)
+        or (
+            metrics["containment"] >= float(cfg.merge_containment_thresh)
+            and metrics["bbox_growth"] <= float(cfg.merge_bbox_growth_max)
+        )
         or (metrics["bbox_gap_px"] <= float(cfg.merge_bbox_gap_px) and metrics["bbox_growth"] <= float(cfg.merge_bbox_growth_max))
     )
     strict_feature_ok = (
@@ -1682,12 +1748,15 @@ def _should_merge_pair(a: Dict[str, Any], b: Dict[str, Any], cfg: DiagramMaskClu
         and metrics["contrast_color_similarity"] >= float(cfg.merge_min_contrast_color_similarity)
         and metrics["combined_feature_score"] >= float(cfg.merge_combined_feature_score)
     )
+    # Similar-looking islands were previously allowed to chain-merge across the
+    # diagram too easily. Keep this path much tighter than the main spatial merge.
     similarity_only_ok = (
         metrics["dino_cosine"] >= float(cfg.merge_similarity_only_min_dino_cosine)
         and metrics["color_similarity"] >= float(cfg.merge_similarity_only_min_color_similarity)
         and metrics["shape_similarity"] >= float(cfg.merge_similarity_only_min_shape_similarity)
         and metrics["combined_feature_score"] >= float(cfg.merge_similarity_only_min_score)
         and metrics["bbox_gap_px"] <= float(cfg.merge_similarity_only_bbox_gap_px)
+        and metrics["bbox_growth"] <= float(cfg.merge_similarity_only_bbox_growth_max)
     )
     feature_ok = strict_feature_ok or soft_feature_ok
     merge_ok = (spatial_ok and feature_ok) or similarity_only_ok
@@ -2472,6 +2541,7 @@ __all__ = [
     "cluster_image_rgb",
     "ensure_processed_clusters",
     "get_diagram_cluster_backend",
+    "unload_hot_models",
     "_preclean_diagram_copy",
     "_suppress_redundant_proposals",
     "_merge_component_proposals",

@@ -3,10 +3,13 @@ from __future__ import annotations
 import difflib
 import argparse
 import hashlib
+import importlib
+import importlib.util
 import json
 import math
 import os
 import re
+import sys
 import threading
 import time
 from collections import OrderedDict
@@ -18,12 +21,17 @@ from typing import Any, Dict, List, Optional, Sequence, Tuple
 from dotenv import load_dotenv
 from openai import OpenAI
 
+BACKEND_DIR = Path(__file__).resolve().parent
+if str(BACKEND_DIR) not in sys.path:
+    sys.path.insert(0, str(BACKEND_DIR))
+
 from LLMstuff.input_builder_responce_parser import (
     build_chapter_speech_request,
     build_image_request_request,
     build_qwen_c2_component_verifier_prompt,
     build_qwen_diagram_component_stroke_match_prompt,
     build_qwen_diagram_action_planner_prompt,
+    build_qwen_full_speech_action_sync_prompt,
     build_qwen_non_semantic_image_description_prompt,
     build_qwen_stroke_meaning_filter_prompt,
     build_logical_timeline_request,
@@ -39,6 +47,7 @@ from LLMstuff.input_builder_responce_parser import (
     parse_qwen_c2_component_verifier_output,
     parse_qwen_diagram_component_stroke_match_output,
     parse_qwen_diagram_action_planner_output,
+    parse_qwen_full_speech_action_sync_output,
     parse_qwen_non_semantic_image_description_output,
     parse_qwen_space_planner_output,
     parse_qwen_stroke_meaning_filter_output,
@@ -60,6 +69,21 @@ DEFAULT_QWEN_MODEL = str(os.getenv("QWEN_VISION_MODEL_ID", os.getenv("QWEN_TEXT_
 DEFAULT_QWEN_CONTEXT_LEN = int(os.getenv("QWEN_SERVER_MAX_MODEL_LEN", "20000") or 20000)
 DEFAULT_QWEN_GPU_UTIL = float(os.getenv("QWEN_SERVER_GPU_UTIL", "0.80") or 0.80)
 DEFAULT_COMPONENT_REFINED_VISUAL_DESC_MAX_CHARS = int(os.getenv("NEWTIMELINE_COMPONENT_REFINED_VISUAL_DESC_MAX_CHARS", "700") or 700)
+
+
+def _env_bool(name: str, default: bool = False) -> bool:
+    raw = os.getenv(name)
+    if raw is None:
+        return bool(default)
+    text = str(raw).strip().lower()
+    if text in {"1", "true", "yes", "on"}:
+        return True
+    if text in {"0", "false", "no", "off"}:
+        return False
+    return bool(default)
+
+
+DEFAULT_PRELOAD_SIGLIP_TEXT = _env_bool("NEWTIMELINE_PRELOAD_SIGLIP_TEXT", False)
 
 
 @dataclass
@@ -191,7 +215,7 @@ class NewTimelineFirstModule:
         if not self.debug_print:
             return
         if data is None:
-            print(f"[NEWtimeline][DBG] {message}")
+            print(f"[NEWtimeline][DBG] {message}", flush=True)
             return
         try:
             text = json.dumps(data, ensure_ascii=False)
@@ -200,6 +224,26 @@ class NewTimelineFirstModule:
         except Exception:
             text = "<unserializable>"
         print(f"[NEWtimeline][DBG] {message} | {text}", flush=True)
+
+    def _import_image_researcher(self):
+        for module_name in ("ImageResearcher", "Imageresearcher"):
+            try:
+                module = importlib.import_module(module_name)
+                sys.modules.setdefault("ImageResearcher", module)
+                return module
+            except ModuleNotFoundError:
+                continue
+        for path in (BACKEND_DIR / "Imageresearcher.py", BACKEND_DIR / "ImageResearcher.py"):
+            if not path.is_file():
+                continue
+            spec = importlib.util.spec_from_file_location("ImageResearcher", path)
+            if spec is None or spec.loader is None:
+                continue
+            module = importlib.util.module_from_spec(spec)
+            sys.modules["ImageResearcher"] = module
+            spec.loader.exec_module(module)
+            return module
+        raise ModuleNotFoundError("No module named 'ImageResearcher' or 'Imageresearcher'")
 
     def _gpu_memory_snapshot(self) -> Dict[str, Any]:
         try:
@@ -760,7 +804,16 @@ class NewTimelineFirstModule:
         return thread, state
 
     def _start_siglip_text_loader(self) -> Tuple[threading.Thread, Dict[str, Any]]:
-        state: Dict[str, Any] = {"ok": None, "error": None}
+        state: Dict[str, Any] = {"ok": True, "error": None, "skipped": True, "reason": "disabled"}
+        if not DEFAULT_PRELOAD_SIGLIP_TEXT:
+            def _skip() -> None:
+                return None
+
+            thread = threading.Thread(target=_skip, name="newtimeline_preload_siglip_text_skipped", daemon=False)
+            thread.start()
+            return thread, state
+
+        state = {"ok": None, "error": None, "skipped": False}
 
         def _load() -> None:
             before = self._gpu_memory_snapshot()
@@ -790,7 +843,9 @@ class NewTimelineFirstModule:
     def _start_qwen_text_loader(self) -> Tuple[Optional[threading.Thread], Dict[str, Any]]:
         with self._qwen_load_lock:
             if self._qwen_load_thread is not None:
-                return self._qwen_load_thread, self._qwen_load_state
+                if self._qwen_load_thread.is_alive() or self._qwen_load_state.get("ready"):
+                    return self._qwen_load_thread, self._qwen_load_state
+                self._qwen_load_thread = None
 
             self._qwen_load_state = {
                 "started": True,
@@ -802,7 +857,13 @@ class NewTimelineFirstModule:
 
             def _load() -> None:
                 try:
-                    if self._qwen_sleeping:
+                    status = self.qwen_client.status()
+                    loaded = bool(status.get("loaded"))
+                    sleeping = bool(status.get("sleeping"))
+                    mode = str(status.get("mode") or status.get("sleep_mode") or "").strip()
+                    if loaded and not sleeping and mode in {"vision", "text"}:
+                        response = {"ok": True, "mode": mode, "already_loaded": True, "status": status}
+                    elif loaded and sleeping and mode == "vision":
                         response = self.qwen_client.wake_vision(
                             model=self.qwen_model,
                             warmup=False,
@@ -810,12 +871,12 @@ class NewTimelineFirstModule:
                             max_model_len=DEFAULT_QWEN_CONTEXT_LEN,
                         )
                     else:
-                        response = self.qwen_client.load_vision(
-                            model=self.qwen_model,
-                            warmup=False,
-                            gpu_memory_utilization=DEFAULT_QWEN_GPU_UTIL,
-                            max_model_len=DEFAULT_QWEN_CONTEXT_LEN,
-                        )
+                        response = {
+                            "ok": False,
+                            "error": "qwen_worker_not_hot",
+                            "message": "NEWtimeline assumes the Qwen server worker is already loaded; no load/reload was attempted.",
+                            "status": status,
+                        }
                     self._qwen_sleeping = False
                     self._qwen_load_state["response"] = response
                     self._qwen_load_state["ready"] = bool(response.get("ok", False))
@@ -825,7 +886,7 @@ class NewTimelineFirstModule:
                     self._qwen_load_state["ready"] = False
                     self._qwen_load_state["error"] = f"{type(exc).__name__}: {exc}"
 
-            self._qwen_load_thread = threading.Thread(target=_load, name="newtimeline_qwen_text_load", daemon=False)
+            self._qwen_load_thread = threading.Thread(target=_load, name="newtimeline_qwen_status_wake", daemon=False)
             self._qwen_load_thread.start()
             return self._qwen_load_thread, self._qwen_load_state
 
@@ -847,7 +908,13 @@ class NewTimelineFirstModule:
         if state.get("ready"):
             return dict(state)
         try:
-            if self._qwen_sleeping:
+            status = self.qwen_client.status()
+            loaded = bool(status.get("loaded"))
+            sleeping = bool(status.get("sleeping"))
+            mode = str(status.get("mode") or status.get("sleep_mode") or "").strip()
+            if loaded and not sleeping and mode in {"vision", "text"}:
+                response = {"ok": True, "mode": mode, "already_loaded": True, "status": status}
+            elif loaded and sleeping and mode == "vision":
                 response = self.qwen_client.wake_vision(
                     model=self.qwen_model,
                     warmup=False,
@@ -855,12 +922,12 @@ class NewTimelineFirstModule:
                     max_model_len=DEFAULT_QWEN_CONTEXT_LEN,
                 )
             else:
-                response = self.qwen_client.load_vision(
-                    model=self.qwen_model,
-                    warmup=False,
-                    gpu_memory_utilization=DEFAULT_QWEN_GPU_UTIL,
-                    max_model_len=DEFAULT_QWEN_CONTEXT_LEN,
-                )
+                response = {
+                    "ok": False,
+                    "error": "qwen_worker_not_hot",
+                    "message": "NEWtimeline assumes the Qwen server worker is already loaded; no load/reload was attempted.",
+                    "status": status,
+                }
             self._qwen_sleeping = False
             state["response"] = response
             state["ready"] = bool(response.get("ok", False))
@@ -1069,7 +1136,13 @@ class NewTimelineFirstModule:
     def _get_legacy_group_helper(self):
         if self._legacy_group_helper is not None:
             return self._legacy_group_helper
-        from timeline import LessonTimeline
+        try:
+            from timeline import LessonTimeline
+        except ModuleNotFoundError:
+            try:
+                from UNUSED.timeline import LessonTimeline
+            except ModuleNotFoundError:
+                from whiteboard_backend.UNUSED.timeline import LessonTimeline
 
         self._legacy_group_helper = LessonTimeline(
             model_candidates=list(self.model_candidates),
@@ -1180,7 +1253,7 @@ class NewTimelineFirstModule:
 
         def _research() -> None:
             try:
-                import ImageResearcher
+                ImageResearcher = self._import_image_researcher()
 
                 research_many = getattr(ImageResearcher, "research_many_mechanical", None)
                 if callable(research_many):
@@ -1253,7 +1326,7 @@ class NewTimelineFirstModule:
             }
 
         response = self._generate_qwen_text_batch_cached(
-            stage_name="full_chunk_speech_action_sync",
+            stage_name="speech_compression",
             prompts=prompts,
             system_prompt=system_prompt,
             generation={
@@ -1326,6 +1399,43 @@ class NewTimelineFirstModule:
             "synced_objects": synced_objects,
         }
 
+    def _ensure_first_module_qwen_sync(self, first_module_result: Dict[str, Any]) -> Dict[str, Any]:
+        chapters_out = list(first_module_result.get("chapters") or [])
+        existing_synced = list(first_module_result.get("synced_objects") or [])
+        existing_qwen_steps = 0
+        for chapter in chapters_out:
+            qwen_steps = chapter.get("qwen_steps") if isinstance(chapter, dict) and isinstance(chapter.get("qwen_steps"), dict) else {}
+            existing_qwen_steps += len(qwen_steps)
+        if existing_synced and existing_qwen_steps:
+            return {
+                "enabled": True,
+                "reused": True,
+                "synced_objects": existing_synced,
+                "existing_qwen_steps": existing_qwen_steps,
+            }
+        self._dbg(
+            "First module cache missing Qwen speech sync; running speech compression now",
+            data={"chapters": len(chapters_out), "existing_synced_objects": len(existing_synced), "existing_qwen_steps": existing_qwen_steps},
+        )
+        qwen_debug = self.run_qwen_step_batch(chapters_out=chapters_out)
+        first_module_result["chapters"] = chapters_out
+        first_module_result["synced_objects"] = list(qwen_debug.get("synced_objects") or [])
+        first_module_result["qwen"] = {
+            key: value
+            for key, value in qwen_debug.items()
+            if key != "responses"
+        }
+        self._dbg(
+            "First module Qwen speech sync ready",
+            data={
+                "request_count": int(qwen_debug.get("request_count", 0) or 0),
+                "synced_objects": len(first_module_result.get("synced_objects") or []),
+                "cache_hits": int(qwen_debug.get("cache_hits", 0) or 0),
+                "cache_misses": int(qwen_debug.get("cache_misses", 0) or 0),
+            },
+        )
+        return qwen_debug
+
     def run_first_module(self, topic: str) -> Dict[str, Any]:
         run_started_at = time.time()
         cached_result, cached_path = self._load_first_module_result_cache(topic)
@@ -1363,8 +1473,11 @@ class NewTimelineFirstModule:
         preload_threads: List[Tuple[str, threading.Thread, Dict[str, Any]]] = []
         minilm_thread, minilm_state = self._start_minilm_loader()
         preload_threads.append(("minilm", minilm_thread, minilm_state))
-        siglip_thread, siglip_state = self._start_siglip_text_loader()
-        preload_threads.append(("siglip_text", siglip_thread, siglip_state))
+        if DEFAULT_PRELOAD_SIGLIP_TEXT:
+            siglip_thread, siglip_state = self._start_siglip_text_loader()
+            preload_threads.append(("siglip_text", siglip_thread, siglip_state))
+        else:
+            self._dbg("SigLIP text preload skipped", data={"env": "NEWTIMELINE_PRELOAD_SIGLIP_TEXT", "default": False})
         qwen_thread, qwen_state = self._start_qwen_text_loader()
         if qwen_thread is not None:
             preload_threads.append(("qwen_text", qwen_thread, qwen_state))
@@ -1376,7 +1489,6 @@ class NewTimelineFirstModule:
 
         repeat_filter_debug = self.apply_repeating_diagram_filter(topic=topic, chapters_out=chapters_out)
         research_state = self.start_diagram_research(topic=topic, chapters_out=chapters_out)
-        qwen_debug = self.run_qwen_step_batch(chapters_out=chapters_out)
 
         result = {
             "topic": normalize_ws(topic),
@@ -1403,11 +1515,11 @@ class NewTimelineFirstModule:
             "diagram_repeat_filter": repeat_filter_debug,
             "diagram_research": research_state,
             "qwen": {
-                key: value
-                for key, value in qwen_debug.items()
-                if key != "responses"
+                "enabled": True,
+                "request_count": 0,
+                "note": "deferred_until_after_research_c2_siglip",
             },
-            "synced_objects": list(qwen_debug.get("synced_objects") or []),
+            "synced_objects": [],
         }
         cache_path = self._store_first_module_result_cache(topic, result)
         if cache_path:
@@ -2047,11 +2159,18 @@ class NewTimelineFirstModule:
         self._dbg("Diagram object candidates starting", data={"processed_ids": processed_ids})
         if pipeline_handle is not None:
             try:
-                wait_fn = getattr(pipeline_handle, "wait_colours", None)
-                if callable(wait_fn):
-                    self._dbg("Diagram object candidates waiting for image pipeline colours")
-                    wait_fn(timeout=None)
-                    self._dbg("Diagram object candidates image pipeline colours ready")
+                pipeline_done_evt = getattr(pipeline_handle, "pipeline_done", None)
+                wait_pipeline = getattr(pipeline_done_evt, "wait", None)
+                if callable(wait_pipeline):
+                    self._dbg("Diagram object candidates waiting for image pipeline clusters")
+                    wait_pipeline(timeout=None)
+                    self._dbg("Diagram object candidates image pipeline clusters ready")
+                else:
+                    wait_fn = getattr(pipeline_handle, "wait_colours", None)
+                    if callable(wait_fn):
+                        self._dbg("Diagram object candidates waiting for image pipeline colours fallback")
+                        wait_fn(timeout=None)
+                        self._dbg("Diagram object candidates image pipeline colours fallback ready")
             except Exception as exc:
                 out["errors"]["image_pipeline_wait"] = f"{type(exc).__name__}: {exc}"
 
@@ -3098,9 +3217,24 @@ class NewTimelineFirstModule:
         state = dict(self._diagram_research_state or {})
         thread = self._diagram_research_thread
         if thread is not None:
+            self._dbg("Waiting for diagram research thread", data={"prompts": state.get("prompts", [])})
             thread.join()
             state["finished"] = True
+            self._dbg("Diagram research thread finished", data={"error": state.get("error")})
+            self._diagram_research_thread = None
+            self._diagram_research_state = dict(state)
         return state
+
+    def _unload_diagram_mask_cluster_models(self) -> Optional[str]:
+        try:
+            import DiagramMaskClusters
+
+            unload_fn = getattr(DiagramMaskClusters, "unload_hot_models", None)
+            if callable(unload_fn):
+                unload_fn()
+            return None
+        except Exception as exc:
+            return f"{type(exc).__name__}: {exc}"
 
     def _run_c2_component_verifier_batch(
         self,
@@ -3232,15 +3366,9 @@ class NewTimelineFirstModule:
         return None
 
     def _unload_qwen_server(self) -> Optional[str]:
-        try:
-            self.qwen_client.unload()
-            self._qwen_sleeping = False
-            self._reset_qwen_text_loader_state()
-            return None
-        except Exception as exc:
-            self._qwen_sleeping = False
-            self._reset_qwen_text_loader_state()
-            return f"{type(exc).__name__}: {exc}"
+        # The Qwen worker is intentionally kept resident. Heavy stages may ask
+        # for this legacy helper, but the correct behavior is sleep, not unload.
+        return self._sleep_qwen_text_worker()
 
     def _unload_siglip_text(self) -> Optional[str]:
         try:
@@ -3296,7 +3424,7 @@ class NewTimelineFirstModule:
                 for key, value in cached.items()
                 if isinstance(key, str)
             }
-        import ImageResearcher
+        ImageResearcher = self._import_image_researcher()
 
         finalize_fn = getattr(ImageResearcher, "finalize_research_from_saved_ranker_state", None)
         if not callable(finalize_fn):
@@ -4111,7 +4239,12 @@ class NewTimelineFirstModule:
             out[pause_index] = max(1, int(word_count))
         return out
 
-    def _build_step_sync_contexts(self, *, chapters_out: List[Dict[str, Any]]) -> Dict[str, Dict[str, Any]]:
+    def _build_step_sync_contexts(
+        self,
+        *,
+        chapters_out: List[Dict[str, Any]],
+        use_full_speech: bool = False,
+    ) -> Dict[str, Dict[str, Any]]:
         out: Dict[str, Dict[str, Any]] = {}
         lesson_word_offset = 0
         lesson_pause_offset = 0
@@ -4124,7 +4257,10 @@ class NewTimelineFirstModule:
             step_order = [str(step_id) for step_id in logical_steps.keys()] or [str(step_id) for step_id in speech_steps.keys()]
             for step_id in step_order:
                 qwen_row = qwen_steps.get(step_id) if isinstance(qwen_steps.get(step_id), dict) else {}
-                speech = str((qwen_row or {}).get("speech") or speech_steps.get(step_id) or "").strip()
+                if use_full_speech:
+                    speech = str(speech_steps.get(step_id) or (qwen_row or {}).get("speech") or "").strip()
+                else:
+                    speech = str((qwen_row or {}).get("speech") or speech_steps.get(step_id) or "").strip()
                 word_count = max(1, self._count_spoken_words(speech))
                 pause_map = self._pause_index_to_local_word_map(speech)
                 pause_markers = list((qwen_row or {}).get("pause_markers") or extract_pause_markers(speech))
@@ -4142,6 +4278,196 @@ class NewTimelineFirstModule:
                 chapter_word_offset += word_count
                 lesson_word_offset += word_count
                 lesson_pause_offset += int(len(pause_markers))
+        return out
+
+    def _fallback_full_speech_word_index(
+        self,
+        *,
+        compressed_word_index: int,
+        compressed_speech: str,
+        full_speech: str,
+    ) -> int:
+        compressed_count = max(1, self._count_spoken_words(compressed_speech))
+        full_count = max(1, self._count_spoken_words(full_speech))
+        compressed_local = max(1, min(compressed_count, int(compressed_word_index or 1)))
+        if compressed_count <= 1 or full_count <= 1:
+            return max(1, min(full_count, compressed_local))
+        scale = float(max(0, full_count - 1)) / float(max(1, compressed_count - 1))
+        return max(1, min(full_count, 1 + int(round((compressed_local - 1) * scale))))
+
+    def _run_full_speech_action_sync_batch(
+        self,
+        *,
+        chapters_out: List[Dict[str, Any]],
+        actions_by_step: Dict[str, List[Dict[str, Any]]],
+    ) -> Dict[str, Any]:
+        prompts: List[str] = []
+        metas: List[Dict[str, Any]] = []
+        system_prompt: Optional[str] = None
+        chapter_map = {
+            str(chapter.get("chapter_id", "") or "").strip(): chapter
+            for chapter in chapters_out or []
+            if isinstance(chapter, dict)
+        }
+
+        for chapter in chapters_out or []:
+            chapter_id = str(chapter.get("chapter_id", "") or "").strip()
+            speech_steps = chapter.get("speech_steps") if isinstance(chapter.get("speech_steps"), dict) else {}
+            qwen_steps = chapter.get("qwen_steps") if isinstance(chapter.get("qwen_steps"), dict) else {}
+            logical_steps = chapter.get("logical_steps") if isinstance(chapter.get("logical_steps"), dict) else {}
+            step_order = [str(step_id) for step_id in logical_steps.keys()] or [str(step_id) for step_id in speech_steps.keys()]
+            for step_id in step_order:
+                step_actions = [dict(row) for row in (actions_by_step.get(step_id) or []) if isinstance(row, dict)]
+                if not step_actions:
+                    continue
+                compressed_speech = str(((qwen_steps.get(step_id) or {}) if isinstance(qwen_steps.get(step_id), dict) else {}).get("speech") or speech_steps.get(step_id) or "").strip()
+                full_speech = str(speech_steps.get(step_id) or compressed_speech).strip()
+                action_payload = [
+                    {
+                        "action_id": str(row.get("action_id", "") or "").strip(),
+                        "kind": str(row.get("kind", "") or "").strip(),
+                        "action": str(row.get("action", "") or "").strip(),
+                        "type": str(row.get("type", "") or "").strip(),
+                        "name": str(row.get("name", row.get("target", "")) or "").strip(),
+                        "data": str(row.get("data", "") or "").strip(),
+                        "compressed_word_index": max(1, int(row.get("compressed_local_step_sync_word_index", 1) or 1)),
+                    }
+                    for row in step_actions
+                    if str(row.get("action_id", "") or "").strip()
+                ]
+                if not action_payload:
+                    continue
+                prompt_system, prompt_text = build_qwen_full_speech_action_sync_prompt(
+                    step_id=step_id,
+                    compressed_speech=compressed_speech,
+                    full_speech=full_speech,
+                    actions=action_payload,
+                )
+                system_prompt = system_prompt or prompt_system
+                prompts.append(prompt_text)
+                metas.append(
+                    {
+                        "chapter_id": chapter_id,
+                        "step_id": step_id,
+                        "compressed_speech": compressed_speech,
+                        "full_speech": full_speech,
+                        "actions": action_payload,
+                    }
+                )
+
+        if not prompts:
+            out = {
+                "enabled": True,
+                "request_count": 0,
+                "by_step": {},
+                "rows": [],
+                "raw_io_path": None,
+                "cache_hits": 0,
+                "cache_misses": 0,
+                "qwen_ready": None,
+            }
+            out["saved_path"] = self._write_json_file(self._internal_runtime_dir() / "full_chunk_speech_action_sync.json", out)
+            return out
+
+        result = self._generate_qwen_text_batch_cached(
+            stage_name="full_chunk_speech_action_sync",
+            prompts=prompts,
+            system_prompt=str(system_prompt or ""),
+            generation={
+                "max_new_tokens": int(os.getenv("QWEN_FULL_SPEECH_ACTION_SYNC_MAX_NEW_TOKENS", "2200") or 2200),
+                "temperature": 0.0,
+                "top_p": 1.0,
+                "top_k": -1,
+                "repetition_penalty": 1.02,
+            },
+        )
+        responses = result.get("responses") if isinstance(result.get("responses"), list) else []
+        if len(responses) != len(prompts):
+            raise RuntimeError("Qwen full_chunk_speech_action_sync response count does not match request count")
+
+        by_step: Dict[str, Dict[str, Any]] = {}
+        rows_out: List[Dict[str, Any]] = []
+        raw_io_rows: List[Dict[str, Any]] = []
+        for index, (meta, prompt_text, raw_row) in enumerate(zip(metas, prompts, responses), start=1):
+            raw_text = str((raw_row or {}).get("text", "") or "").strip()
+            parsed: Dict[str, Any]
+            parse_error: Optional[str] = None
+            try:
+                parsed = parse_qwen_full_speech_action_sync_output(
+                    raw_text,
+                    action_ids=[str(row.get("action_id", "") or "").strip() for row in meta["actions"]],
+                )
+            except Exception as exc:
+                parse_error = f"{type(exc).__name__}: {exc}"
+                parsed = {"actions": []}
+
+            full_count = max(1, self._count_spoken_words(str(meta.get("full_speech", "") or "")))
+            sync_lookup = {
+                str(row.get("action_id", "") or "").strip(): max(1, min(full_count, int(row.get("full_word_index", 1) or 1)))
+                for row in list(parsed.get("actions") or [])
+                if isinstance(row, dict) and str(row.get("action_id", "") or "").strip()
+            }
+            resolved_actions: List[Dict[str, Any]] = []
+            for action in meta["actions"]:
+                action_id = str(action.get("action_id", "") or "").strip()
+                compressed_word_index = max(1, int(action.get("compressed_word_index", 1) or 1))
+                full_word_index = sync_lookup.get(action_id)
+                if full_word_index is None:
+                    full_word_index = self._fallback_full_speech_word_index(
+                        compressed_word_index=compressed_word_index,
+                        compressed_speech=str(meta.get("compressed_speech", "") or ""),
+                        full_speech=str(meta.get("full_speech", "") or ""),
+                    )
+                resolved_actions.append(
+                    {
+                        "action_id": action_id,
+                        "compressed_word_index": compressed_word_index,
+                        "full_word_index": max(1, min(full_count, int(full_word_index or 1))),
+                    }
+                )
+
+            step_key = str(meta.get("step_id", "") or "").strip()
+            by_step[step_key] = {
+                "chapter_id": str(meta.get("chapter_id", "") or "").strip(),
+                "step_id": step_key,
+                "compressed_speech": str(meta.get("compressed_speech", "") or ""),
+                "full_speech": str(meta.get("full_speech", "") or ""),
+                "actions": resolved_actions,
+                "parse_error": parse_error,
+            }
+            rows_out.append(by_step[step_key])
+            raw_io_rows.append(
+                {
+                    "request_index": index,
+                    "chapter_id": meta.get("chapter_id"),
+                    "step_id": meta.get("step_id"),
+                    "prompt": prompt_text,
+                    "raw_response": raw_text,
+                    "parsed": parsed,
+                    "resolved_actions": resolved_actions,
+                    "parse_error": parse_error,
+                    "usage": raw_row,
+                }
+            )
+
+        raw_io_path = self._write_json_file(
+            self._internal_runtime_dir() / "qwen_raw_io" / "full_chunk_speech_action_sync.json",
+            {
+                "system_prompt": system_prompt,
+                "rows": raw_io_rows,
+            },
+        )
+        out = {
+            "enabled": True,
+            "request_count": len(prompts),
+            "by_step": by_step,
+            "rows": rows_out,
+            "raw_io_path": raw_io_path,
+            "cache_hits": int(result.get("cache_hits", 0) or 0),
+            "cache_misses": int(result.get("cache_misses", 0) or 0),
+            "qwen_ready": result.get("qwen_ready"),
+        }
+        out["saved_path"] = self._write_json_file(self._internal_runtime_dir() / "full_chunk_speech_action_sync.json", out)
         return out
 
     def _local_pause_to_word_index(self, *, context: Dict[str, Any], pause_index: int) -> int:
@@ -4391,32 +4717,55 @@ class NewTimelineFirstModule:
         space_planner_result: Dict[str, Any],
         diagram_action_result: Dict[str, Any],
     ) -> Dict[str, Any]:
-        step_contexts = self._build_step_sync_contexts(chapters_out=chapters_out)
-        silence_actions: List[Dict[str, Any]] = []
-        for step_id, context in step_contexts.items():
+        compressed_step_contexts = self._build_step_sync_contexts(chapters_out=chapters_out, use_full_speech=False)
+        full_step_contexts = self._build_step_sync_contexts(chapters_out=chapters_out, use_full_speech=True)
+        step_order = [
+            str(step_id)
+            for chapter in chapters_out or []
+            for step_id in (
+                list((chapter.get("logical_steps") or {}).keys())
+                or list((chapter.get("speech_steps") or {}).keys())
+            )
+        ]
+
+        actions_by_step: Dict[str, List[Dict[str, Any]]] = {}
+        next_action_number = 1
+
+        def _register_step_action(step_id: str, row: Dict[str, Any]) -> None:
+            nonlocal next_action_number
+            clean_step_id = str(step_id or "").strip()
+            if not clean_step_id:
+                return
+            payload = dict(row)
+            payload["step_id"] = clean_step_id
+            payload["action_id"] = f"A{next_action_number}"
+            next_action_number += 1
+            actions_by_step.setdefault(clean_step_id, []).append(payload)
+
+        for step_id in step_order:
+            context = compressed_step_contexts.get(step_id)
+            if context is None:
+                continue
             speech = str(context.get("speech", "") or "")
             pause_markers = extract_pause_markers(speech)
             for marker in pause_markers:
                 pause_index = int(marker.get("pause_index", 0) or 0)
                 local_word = self._local_pause_to_word_index(context=context, pause_index=pause_index)
-                silence_actions.append(
+                _register_step_action(
+                    step_id,
                     {
+                        "kind": "silence",
                         "action": "silence",
                         "type": "silence",
                         "chunk_id": str(context.get("chapter_id", "") or ""),
                         "chapter_id": str(context.get("chapter_id", "") or ""),
-                        "step_id": step_id,
                         "pause_index": pause_index,
                         "global_pause_index": int(context.get("global_pause_offset", 0) or 0) + pause_index,
                         "length": float(marker.get("seconds", 0.0) or 0.0),
-                        "local_step_sync_word_index": local_word,
-                        "chapter_sync_word_index": int(context.get("chapter_word_offset", 0) or 0) + local_word - 1,
-                        "sync_word_index": int(context.get("lesson_word_offset", 0) or 0) + local_word - 1,
-                        "compressed_sync_word_index": int(context.get("chapter_word_offset", 0) or 0) + local_word - 1,
-                    }
+                        "compressed_local_step_sync_word_index": local_word,
+                    },
                 )
 
-        space_actions: List[Dict[str, Any]] = []
         for chunk in list(space_planner_result.get("chunks") or []):
             if not isinstance(chunk, dict):
                 continue
@@ -4425,10 +4774,14 @@ class NewTimelineFirstModule:
             for action in list(chunk.get("actions") or []):
                 if not isinstance(action, dict):
                     continue
-                pause_index = int(action.get("start", 0) or 0) if int(action.get("draw", 0) or 0) == 1 else int(action.get("end", action.get("start", 0)) or action.get("start", 0) or 0)
+                pause_index = (
+                    int(action.get("start", 0) or 0)
+                    if int(action.get("draw", 0) or 0) == 1
+                    else int(action.get("end", action.get("start", 0)) or action.get("start", 0) or 0)
+                )
                 step_row = self._locate_step_for_global_pause(step_silence_rows=step_rows, pause_index=pause_index)
                 step_id = str(step_row.get("step_id", "") or "").strip()
-                context = step_contexts.get(step_id, {})
+                context = compressed_step_contexts.get(step_id, {})
                 local_pause = max(0, pause_index - int(step_row.get("global_silence_offset", 0) or 0))
                 local_word = self._local_pause_to_word_index(context=context, pause_index=local_pause) if context else 1
                 allocated_space = self._node_corners_to_allocated_space(
@@ -4441,55 +4794,103 @@ class NewTimelineFirstModule:
                     xs = [float(corner[0]) for corner in corners_px]
                     ys = [float(corner[1]) for corner in corners_px]
                     location = {"x": float((min(xs) + max(xs)) / 2.0), "y": float((min(ys) + max(ys)) / 2.0)}
-                space_actions.append(
+                _register_step_action(
+                    step_id,
                     {
+                        "kind": "space",
                         "action": "draw" if int(action.get("draw", 0) or 0) == 1 else "delete",
                         "chunk_id": str(chunk.get("chunk_id", "") or ""),
                         "chapter_id": str(chunk.get("chapter_id", "") or ""),
-                        "step_id": step_id,
                         "name": str(action.get("name", "") or "").strip(),
                         "type": str(action.get("type", "") or "").strip(),
                         "global_pause_index": pause_index,
                         "local_step_silence_index": local_pause,
-                        "local_step_sync_word_index": local_word,
-                        "chapter_sync_word_index": int(context.get("chapter_word_offset", 0) or 0) + local_word - 1,
-                        "sync_word_index": int(context.get("lesson_word_offset", 0) or 0) + local_word - 1,
-                        "compressed_sync_word_index": int(context.get("chapter_word_offset", 0) or 0) + local_word - 1,
+                        "compressed_local_step_sync_word_index": local_word,
                         "location": location,
                         "allocated_space": allocated_space,
-                    }
+                    },
                 )
 
-        diagram_actions: List[Dict[str, Any]] = []
         for row in list(diagram_action_result.get("rows") or []):
             if not isinstance(row, dict):
                 continue
             step_id = str(row.get("step_id", "") or "").strip()
-            context = step_contexts.get(step_id)
+            context = compressed_step_contexts.get(step_id)
             if context is None:
                 continue
-            raw_indexes = [max(1, int(action.get("sync_index", 1) or 1)) for action in list(row.get("actions") or []) if isinstance(action, dict)]
-            spread_indexes = self._spread_local_action_indexes(indexes=raw_indexes, word_count=max(1, int(context.get("word_count", 1) or 1)))
+            raw_indexes = [
+                max(1, int(action.get("sync_index", 1) or 1))
+                for action in list(row.get("actions") or [])
+                if isinstance(action, dict)
+            ]
+            spread_indexes = self._spread_local_action_indexes(
+                indexes=raw_indexes,
+                word_count=max(1, int(context.get("word_count", 1) or 1)),
+            )
             spread_iter = iter(spread_indexes)
             for action in list(row.get("actions") or []):
                 if not isinstance(action, dict):
                     continue
                 local_word = next(spread_iter, max(1, int(action.get("sync_index", 1) or 1)))
-                diagram_actions.append(
+                _register_step_action(
+                    step_id,
                     {
+                        "kind": "diagram",
                         "action": str(action.get("type", "") or "").strip(),
                         "chunk_id": str(context.get("chapter_id", "") or ""),
                         "chapter_id": str(context.get("chapter_id", "") or ""),
-                        "step_id": step_id,
                         "target": str(action.get("target", "") or "").strip(),
+                        "type": str(action.get("type", "") or "").strip(),
                         "data": str(action.get("data", "") or ""),
                         "init": 1 if int(action.get("init", 0) or 0) == 1 else 0,
-                        "local_step_sync_word_index": local_word,
-                        "chapter_sync_word_index": int(context.get("chapter_word_offset", 0) or 0) + local_word - 1,
-                        "sync_word_index": int(context.get("lesson_word_offset", 0) or 0) + local_word - 1,
-                        "compressed_sync_word_index": int(context.get("chapter_word_offset", 0) or 0) + local_word - 1,
-                    }
+                        "compressed_local_step_sync_word_index": local_word,
+                    },
                 )
+
+        sync_result = self._run_full_speech_action_sync_batch(
+            chapters_out=chapters_out,
+            actions_by_step=actions_by_step,
+        )
+        sync_by_step = sync_result.get("by_step") if isinstance(sync_result.get("by_step"), dict) else {}
+
+        silence_actions: List[Dict[str, Any]] = []
+        space_actions: List[Dict[str, Any]] = []
+        diagram_actions: List[Dict[str, Any]] = []
+
+        for step_id in step_order:
+            full_context = full_step_contexts.get(step_id, {})
+            compressed_context = compressed_step_contexts.get(step_id, {})
+            resolved_rows = list((sync_by_step.get(step_id) or {}).get("actions") or [])
+            resolved_lookup = {
+                str(row.get("action_id", "") or "").strip(): max(1, int(row.get("full_word_index", 1) or 1))
+                for row in resolved_rows
+                if isinstance(row, dict) and str(row.get("action_id", "") or "").strip()
+            }
+            for action_row in list(actions_by_step.get(step_id) or []):
+                if not isinstance(action_row, dict):
+                    continue
+                action_id = str(action_row.get("action_id", "") or "").strip()
+                compressed_local_word = max(1, int(action_row.get("compressed_local_step_sync_word_index", 1) or 1))
+                full_local_word = resolved_lookup.get(action_id)
+                if full_local_word is None:
+                    full_local_word = self._fallback_full_speech_word_index(
+                        compressed_word_index=compressed_local_word,
+                        compressed_speech=str(compressed_context.get("speech", "") or ""),
+                        full_speech=str(full_context.get("speech", "") or compressed_context.get("speech", "") or ""),
+                    )
+                base_row = dict(action_row)
+                base_row["local_step_sync_word_index"] = full_local_word
+                base_row["compressed_local_step_sync_word_index"] = compressed_local_word
+                base_row["chapter_sync_word_index"] = int(full_context.get("chapter_word_offset", 0) or 0) + full_local_word - 1
+                base_row["sync_word_index"] = int(full_context.get("lesson_word_offset", 0) or 0) + full_local_word - 1
+                base_row["compressed_sync_word_index"] = int(compressed_context.get("lesson_word_offset", 0) or 0) + compressed_local_word - 1
+                base_row["compressed_chapter_sync_word_index"] = int(compressed_context.get("chapter_word_offset", 0) or 0) + compressed_local_word - 1
+                if base_row.get("kind") == "silence":
+                    silence_actions.append(base_row)
+                elif base_row.get("kind") == "space":
+                    space_actions.append(base_row)
+                elif base_row.get("kind") == "diagram":
+                    diagram_actions.append(base_row)
 
         lesson_actions = list(silence_actions) + list(space_actions) + list(diagram_actions)
         lesson_actions.sort(
@@ -4503,36 +4904,35 @@ class NewTimelineFirstModule:
         )
         for action_index, row in enumerate(lesson_actions):
             row["action_index"] = int(action_index)
-            row["action_id"] = int(action_index + 1)
+            row["action_order_id"] = int(action_index + 1)
 
         sync_chunks: List[Dict[str, Any]] = []
-        diagram_actions_by_step: Dict[str, List[Dict[str, Any]]] = {}
-        for row in diagram_actions:
-            diagram_actions_by_step.setdefault(str(row.get("step_id", "") or ""), []).append(row)
-        for step_id, rows in diagram_actions_by_step.items():
-            rows.sort(key=lambda row: (int(row.get("local_step_sync_word_index", 0) or 0), int(row.get("action_index", 0) or 0)))
+        for step_id in step_order:
+            rows = [row for row in lesson_actions if str(row.get("step_id", "") or "") == step_id]
+            if not rows:
+                continue
+            rows.sort(
+                key=lambda row: (
+                    int(row.get("local_step_sync_word_index", 0) or 0),
+                    int(row.get("action_index", 0) or 0),
+                )
+            )
+            full_context = full_step_contexts.get(step_id, {})
             sync_chunks.append(
                 {
-                    "chunk_id": str(step_contexts.get(step_id, {}).get("chapter_id", "") or ""),
-                    "chapter_id": str(step_contexts.get(step_id, {}).get("chapter_id", "") or ""),
+                    "chunk_id": str(full_context.get("chapter_id", "") or ""),
+                    "chapter_id": str(full_context.get("chapter_id", "") or ""),
                     "step_id": step_id,
                     "action_indexes": {
-                        str(idx): int(row.get("chapter_sync_word_index", 0) or 0)
-                        for idx, row in enumerate(rows)
+                        str(row.get("action_id", "") or ""): int(row.get("chapter_sync_word_index", 0) or 0)
+                        for row in rows
+                        if str(row.get("action_id", "") or "").strip()
                     },
                     "refined_count": max(0, len({int(row.get("chapter_sync_word_index", 0) or 0) for row in rows}) - 1),
                 }
             )
         sync_chunks.sort(key=lambda row: (str(row.get("chapter_id", "")), str(row.get("step_id", ""))))
 
-        full_chunk_sync_path = self._write_json_file(
-            self._internal_runtime_dir() / "full_chunk_speech_action_sync.json",
-            {
-                "schema": "full_chunk_speech_action_sync_v4_deterministic",
-                "chunks": sync_chunks,
-                "lesson_actions": lesson_actions,
-            },
-        )
         saved_path = self._write_json_file(
             Path(self.debug_out_dir) / "final_actions_by_global_word_index.json",
             {
@@ -4541,7 +4941,7 @@ class NewTimelineFirstModule:
                 "space_actions": space_actions,
                 "diagram_actions": diagram_actions,
                 "silence_actions": silence_actions,
-                "full_chunk_speech_action_sync_path": full_chunk_sync_path,
+                "full_chunk_speech_action_sync_path": sync_result.get("saved_path"),
             },
         )
         return {
@@ -4551,8 +4951,11 @@ class NewTimelineFirstModule:
             "diagram_actions": diagram_actions,
             "silence_actions": silence_actions,
             "full_chunk_speech_action_sync": {
-                "saved_path": full_chunk_sync_path,
+                "saved_path": sync_result.get("saved_path"),
+                "raw_io_path": sync_result.get("raw_io_path"),
                 "chunks": sync_chunks,
+                "cache_hits": int(sync_result.get("cache_hits", 0) or 0),
+                "cache_misses": int(sync_result.get("cache_misses", 0) or 0),
             },
         }
 
@@ -4573,24 +4976,77 @@ class NewTimelineFirstModule:
             "diagram_prompts": diagram_prompts,
             "non_diagram_prompts": [prompt for prompt in prompt_meta.keys() if prompt not in diagram_prompts],
             "pipeline_errors": {},
+            "qwen_speech_sync": {"status": "pending_until_after_research_c2_siglip"},
         }
 
+        if diagram_prompts and self._diagram_research_thread is None:
+            self._dbg("Starting diagram research from post-research stage", data={"prompts": diagram_prompts})
+            self.start_diagram_research(topic=topic, chapters_out=chapters_out)
+
         cached_c2_bundle = self._load_c2_bundle_cache_for_rows(c2_rows)
-        c2_verifier_result: Dict[str, Any] = {"enabled": True, "by_prompt": {}, "qwen_ready": None, "cache_hits": 0, "cache_misses": 0}
-        if isinstance(cached_c2_bundle, dict):
-            c2_verifier_result = {"enabled": False, "by_prompt": {}, "qwen_ready": None, "cache_hits": 0, "cache_misses": 0, "note": "skipped_existing_c2_bundle_cache"}
-        else:
+        c2_branch_holder: Dict[str, Any] = {
+            "verifier": {"enabled": False, "by_prompt": {}, "qwen_ready": None, "cache_hits": 0, "cache_misses": 0, "note": "not_started"},
+            "bundle": {"ok": True, "prompts": {}, "errors": {}, "count": 0},
+            "errors": {},
+        }
+
+        def _run_c2_branch() -> None:
+            branch_rows = [dict(row) for row in c2_rows]
+            verifier_result: Dict[str, Any] = {"enabled": False, "by_prompt": {}, "qwen_ready": None, "cache_hits": 0, "cache_misses": 0}
+            if isinstance(cached_c2_bundle, dict):
+                verifier_result = {
+                    "enabled": False,
+                    "by_prompt": {},
+                    "qwen_ready": None,
+                    "cache_hits": 0,
+                    "cache_misses": 0,
+                    "note": "skipped_existing_c2_bundle_cache",
+                }
+                c2_branch_holder["verifier"] = verifier_result
+                c2_branch_holder["bundle"] = cached_c2_bundle
+                return
+
+            if _env_bool("NEWTIMELINE_RUN_C2_VERIFIER", True):
+                try:
+                    verifier_result = self._run_c2_component_verifier_batch(c2_bundle_rows=branch_rows)
+                except Exception as exc:
+                    verifier_result = {"enabled": False, "error": f"{type(exc).__name__}: {exc}", "by_prompt": {}}
+                    c2_branch_holder["errors"]["verifier"] = verifier_result["error"]
+            else:
+                verifier_result = {
+                    "enabled": False,
+                    "by_prompt": {},
+                    "qwen_ready": None,
+                    "cache_hits": 0,
+                    "cache_misses": 0,
+                    "note": "disabled_by_env",
+                }
+            c2_branch_holder["verifier"] = verifier_result
+
+            verifier_by_prompt = dict(verifier_result.get("by_prompt") or {})
+            for row in branch_rows:
+                prompt = normalize_ws(row.get("prompt"))
+                verdict = verifier_by_prompt.get(prompt) or {}
+                row["skip_stage1"] = 1 if int(verdict.get("skip_stage1", 0) or 0) == 1 else 0
+                row["verifier_missing"] = list(verdict.get("missing") or [])
+
             try:
-                c2_verifier_result = self._run_c2_component_verifier_batch(c2_bundle_rows=c2_rows)
+                c2_branch_holder["bundle"] = self._run_c2_bundle(c2_bundle_rows=branch_rows)
             except Exception as exc:
-                debug["pipeline_errors"]["c2_component_verifier"] = f"{type(exc).__name__}: {exc}"
-                c2_verifier_result = {"enabled": False, "error": f"{type(exc).__name__}: {exc}", "by_prompt": {}}
+                err = f"{type(exc).__name__}: {exc}"
+                c2_branch_holder["errors"]["bundle"] = err
+                c2_branch_holder["bundle"] = {"ok": False, "prompts": {}, "errors": {"bundle": err}, "count": 0}
+
+        c2_thread = threading.Thread(target=_run_c2_branch, name="newtimeline_c2_branch", daemon=False)
+        c2_thread.start()
+        research_state = self._await_diagram_research()
+        c2_thread.join()
+
+        c2_verifier_result = dict(c2_branch_holder.get("verifier") or {})
         verifier_by_prompt = dict(c2_verifier_result.get("by_prompt") or {})
-        for row in c2_rows:
-            prompt = normalize_ws(row.get("prompt"))
-            verdict = verifier_by_prompt.get(prompt) or {}
-            row["skip_stage1"] = 1 if int(verdict.get("skip_stage1", 0) or 0) == 1 else 0
-            row["verifier_missing"] = list(verdict.get("missing") or [])
+        c2_result_holder = dict(c2_branch_holder.get("bundle") or {})
+
+        debug["diagram_research"] = research_state
         debug["c2_component_verifier"] = {
             "enabled": bool(c2_verifier_result.get("enabled", True)),
             "saved_path": c2_verifier_result.get("saved_path"),
@@ -4606,34 +5062,14 @@ class NewTimelineFirstModule:
                 if prompt in verifier_by_prompt
             ],
         }
-
-        c2_result_holder: Dict[str, Any] = {"ok": True, "prompts": {}, "errors": {}, "count": 0}
-        c2_error: Optional[str] = None
-
-        def _run_c2() -> None:
-            nonlocal c2_result_holder, c2_error
-            if isinstance(cached_c2_bundle, dict):
-                c2_result_holder = cached_c2_bundle
-                return
-            try:
-                c2_result_holder = self._run_c2_bundle(c2_bundle_rows=c2_rows)
-            except Exception as exc:
-                c2_error = f"{type(exc).__name__}: {exc}"
-                c2_result_holder = {"ok": False, "prompts": {}, "errors": {"bundle": c2_error}, "count": 0}
-
-        c2_thread = threading.Thread(target=_run_c2, name="newtimeline_c2_bundle", daemon=False)
-        c2_thread.start()
-        research_state = self._await_diagram_research()
-        c2_thread.join()
-
-        debug["diagram_research"] = research_state
         debug["c2_bundle"] = {
             "ok": bool(c2_result_holder.get("ok", True)),
             "count": int(c2_result_holder.get("count", 0) or 0),
             "errors": c2_result_holder.get("errors", {}),
         }
-        if c2_error:
-            debug["pipeline_errors"]["c2_bundle"] = c2_error
+        if c2_branch_holder.get("errors"):
+            for key, value in dict(c2_branch_holder.get("errors") or {}).items():
+                debug["pipeline_errors"][f"c2_{key}"] = value
         if research_state.get("error"):
             debug["pipeline_errors"]["diagram_research"] = research_state.get("error")
 
@@ -4689,15 +5125,16 @@ class NewTimelineFirstModule:
             "comfy": {"hit": comfy_cache_hit, "key": comfy_cache_key[:12]},
         }
 
-        qwen_unloaded_for_heavy_stage = False
+        qwen_slept_for_heavy_stage = False
         if not (siglip_cache_hit and comfy_cache_hit):
-            qwen_unload_error = self._unload_qwen_server()
-            qwen_unloaded_for_heavy_stage = True
-            if qwen_unload_error:
-                debug["pipeline_errors"]["qwen_unload_before_heavy_stages"] = qwen_unload_error
-            siglip_text_unload_error = self._unload_siglip_text()
-            if siglip_text_unload_error:
-                debug["pipeline_errors"]["siglip_text_unload_before_heavy_stages"] = siglip_text_unload_error
+            qwen_sleep_error = self._sleep_qwen_text_worker()
+            qwen_slept_for_heavy_stage = True
+            if qwen_sleep_error:
+                debug["pipeline_errors"]["qwen_sleep_before_heavy_stages"] = qwen_sleep_error
+            if DEFAULT_PRELOAD_SIGLIP_TEXT:
+                siglip_text_unload_error = self._unload_siglip_text()
+                if siglip_text_unload_error:
+                    debug["pipeline_errors"]["siglip_text_unload_before_heavy_stages"] = siglip_text_unload_error
 
         siglip_bundle = None
         siglip_load_error = None
@@ -4817,14 +5254,14 @@ class NewTimelineFirstModule:
             comfy_unload_error = self._unload_comfy_models()
             if comfy_unload_error:
                 debug["pipeline_errors"]["comfy_unload_after_generation"] = comfy_unload_error
-        if qwen_unloaded_for_heavy_stage:
-            qwen_reload_thread, qwen_reload_state = self._start_qwen_text_loader()
-            debug["qwen_reload_after_comfy"] = {
-                "started": bool(qwen_reload_thread is not None or qwen_reload_state.get("started")),
-                "state": dict(qwen_reload_state or {}),
+        if qwen_slept_for_heavy_stage:
+            qwen_wake_thread, qwen_wake_state = self._start_qwen_text_loader()
+            debug["qwen_wake_after_comfy"] = {
+                "started": bool(qwen_wake_thread is not None or qwen_wake_state.get("started")),
+                "state": dict(qwen_wake_state or {}),
             }
         else:
-            debug["qwen_reload_after_comfy"] = {
+            debug["qwen_wake_after_comfy"] = {
                 "started": False,
                 "state": {"ready": True, "note": "qwen_kept_loaded_due_to_heavy_stage_cache_hits"},
             }
@@ -4909,6 +5346,25 @@ class NewTimelineFirstModule:
         debug["selected_ids_by_prompt"] = selected_ids_by_prompt
         debug["accepted_processed_ids_by_base_context"] = accepted_processed_ids_by_base_context
         debug["pipeline_started"] = True
+
+        self._dbg("Qwen speech sync/compression starting after research/C2/SigLIP")
+        qwen_sync_debug = self._ensure_first_module_qwen_sync(first_module_result)
+        chapters_out = list(first_module_result.get("chapters") or chapters_out)
+        debug["qwen_speech_sync"] = {
+            key: value
+            for key, value in (qwen_sync_debug or {}).items()
+            if key != "responses"
+        }
+        self._dbg(
+            "Qwen speech sync/compression done",
+            data={
+                "requests": int((qwen_sync_debug or {}).get("request_count", 0) or 0),
+                "synced_objects": len(first_module_result.get("synced_objects") or []),
+                "cache_hits": int((qwen_sync_debug or {}).get("cache_hits", 0) or 0),
+                "cache_misses": int((qwen_sync_debug or {}).get("cache_misses", 0) or 0),
+            },
+        )
+
         self._dbg("Preparing space planner objects")
         prepared_objects_bundle = self._prepare_space_planner_objects(
             first_module_result=first_module_result,
@@ -4964,6 +5420,31 @@ class NewTimelineFirstModule:
             "cache_hits": int(diagram_action_result.get("cache_hits", 0) or 0),
             "cache_misses": int(diagram_action_result.get("cache_misses", 0) or 0),
         }
+        self._dbg("Full speech action sync + combined lesson actions starting")
+        combined_actions = self._build_combined_lesson_action_payload(
+            chapters_out=chapters_out,
+            space_planner_result=space_planner_result,
+            diagram_action_result=diagram_action_result,
+        )
+        self._dbg(
+            "Full speech action sync + combined lesson actions done",
+            data={
+                "lesson_actions": len(combined_actions.get("lesson_actions") or []),
+                "sync_cache_hits": int(((combined_actions.get("full_chunk_speech_action_sync") or {}).get("cache_hits", 0) or 0)),
+                "sync_cache_misses": int(((combined_actions.get("full_chunk_speech_action_sync") or {}).get("cache_misses", 0) or 0)),
+            },
+        )
+        debug["combined_lesson_actions"] = {
+            "saved_path": combined_actions.get("saved_path"),
+            "lesson_action_count": len(combined_actions.get("lesson_actions") or []),
+            "space_action_count": len(combined_actions.get("space_actions") or []),
+            "diagram_action_count": len(combined_actions.get("diagram_actions") or []),
+            "silence_action_count": len(combined_actions.get("silence_actions") or []),
+            "full_chunk_speech_action_sync_path": ((combined_actions.get("full_chunk_speech_action_sync") or {}).get("saved_path")),
+            "full_chunk_speech_action_sync_raw_io_path": ((combined_actions.get("full_chunk_speech_action_sync") or {}).get("raw_io_path")),
+            "full_chunk_speech_action_sync_cache_hits": int(((combined_actions.get("full_chunk_speech_action_sync") or {}).get("cache_hits", 0) or 0)),
+            "full_chunk_speech_action_sync_cache_misses": int(((combined_actions.get("full_chunk_speech_action_sync") or {}).get("cache_misses", 0) or 0)),
+        }
         self._dbg("Diagram stroke meaning batch starting")
         stroke_meaning_result = self.run_diagram_stroke_meaning_filter_batch(
             prompt_meta=prompt_meta,
@@ -5014,6 +5495,12 @@ class NewTimelineFirstModule:
         }
         if diagram_object_candidates.get("errors"):
             debug["pipeline_errors"]["diagram_object_candidates"] = diagram_object_candidates.get("errors")
+
+        self._dbg("Diagram SAM/DINO unload before Qwen vision descriptions starting")
+        sam_dino_unload_error = self._unload_diagram_mask_cluster_models()
+        self._dbg("Diagram SAM/DINO unload before Qwen vision descriptions done", data={"error": sam_dino_unload_error})
+        if sam_dino_unload_error:
+            debug["pipeline_errors"]["diagram_sam_dino_unload_before_qwen_vision"] = sam_dino_unload_error
 
         self._dbg("Diagram visual description batch starting")
         diagram_visual_descriptions = self.run_diagram_visual_description_batch(
@@ -5067,19 +5554,6 @@ class NewTimelineFirstModule:
         }
         if diagram_component_stroke_matches.get("errors"):
             debug["pipeline_errors"]["diagram_component_stroke_matches"] = diagram_component_stroke_matches.get("errors")
-
-        combined_actions = self._build_combined_lesson_action_payload(
-            chapters_out=chapters_out,
-            space_planner_result=space_planner_result,
-            diagram_action_result=diagram_action_result,
-        )
-        debug["combined_lesson_actions"] = {
-            "saved_path": combined_actions.get("saved_path"),
-            "lesson_action_count": len(combined_actions.get("lesson_actions") or []),
-            "space_action_count": len(combined_actions.get("space_actions") or []),
-            "diagram_action_count": len(combined_actions.get("diagram_actions") or []),
-            "full_chunk_speech_action_sync_path": ((combined_actions.get("full_chunk_speech_action_sync") or {}).get("saved_path")),
-        }
         return {
             "topic": normalize_ws(topic),
             "prompt_meta": prompt_meta,

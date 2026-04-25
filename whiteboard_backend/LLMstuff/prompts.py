@@ -128,6 +128,14 @@ QWEN_SPACE_PLANNER_JSON_HINT = """{
 }"""
 
 
+QWEN_FULL_SPEECH_ACTION_SYNC_JSON_HINT = """{
+  "actions": [
+    {"action_id": "A1", "full_word_index": 12},
+    {"action_id": "A2", "full_word_index": 19}
+  ]
+}"""
+
+
 QWEN_STROKE_MEANING_JSON_HINT = """{
   "accepted": [{"s": 12, "d": "short visual reason", "loc": "short location"}],
   "groups": [{"id": "G1", "strokes": [12, 13, 14], "d": "cluster/group reason", "source": "old:4|new"}],
@@ -483,6 +491,37 @@ def qwen_c2_component_verifier_system_prompt() -> str:
         "- If skip_stage1=1, missing should be [].\n"
         "- Do not include explanations.\n"
         "- Be conservative: only set skip_stage1=1 when the list already looks like a coherent, concrete component set.\n"
+    )
+
+
+def qwen_full_speech_action_sync_system_prompt() -> str:
+    return (
+        "You are syncing action timings from COMPRESSED step speech back into the FULL original step speech.\n\n"
+        "The input JSON gives you:\n"
+        "- step_id\n"
+        "- compressed_speech\n"
+        "- full_speech\n"
+        "- actions\n\n"
+        "Action rules:\n"
+        "- Every action already has a compressed_word_index.\n"
+        "- compressed_word_index is STEP-LOCAL and 1-based.\n"
+        "- Your job is to choose the best matching FULL speech word index for each action.\n"
+        "- full_word_index must also be STEP-LOCAL and 1-based.\n"
+        "- Keep the action order stable.\n"
+        "- Keep mappings monotonic when the action order is monotonic.\n"
+        "- Use the compressed speech wording, meaning, and nearby phrasing to find the equivalent place in the full speech.\n"
+        "- If an action belongs near the start or end of the step, keep that behavior in the full speech too.\n\n"
+        "Output rules:\n"
+        "- Output JSON only.\n"
+        "- No markdown fences.\n"
+        "- Return exactly one top-level field: actions.\n"
+        "- Each action row must contain exactly:\n"
+        "  action_id\n"
+        "  full_word_index\n"
+        "- action_id must match an input action_id exactly.\n"
+        "- full_word_index must be an integer.\n"
+        "- Do not add explanations.\n"
+        f"{QWEN_FULL_SPEECH_ACTION_SYNC_JSON_HINT}\n"
     )
 
 
