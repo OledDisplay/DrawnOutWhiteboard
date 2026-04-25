@@ -44,6 +44,7 @@ USER_AGENT = os.environ.get(
     "VISUAL_STAGE_UA",
     "WikidataVisualDescriptionStage/1.0 (component-visual-stage; contact: local-script)",
 )
+REFINED_VISUAL_DESCRIPTION_MAX_CHARS = max(120, int(os.environ.get("C2_REFINED_VISUAL_DESCRIPTION_MAX_CHARS", "700") or 700))
 
 
 def _clean_text(value: Any) -> str:
@@ -840,7 +841,7 @@ class VisualDescriptionStage:
                 continue
             candidates = state.get("all_candidates", []) or []
             if not candidates or self._should_skip_refinement(state):
-                state["refined_description"] = state.get("wikipedia_description", "")
+                state["refined_description"] = _shorten(state.get("wikipedia_description", ""), REFINED_VISUAL_DESCRIPTION_MAX_CHARS)
                 continue
             payloads.append(
                 {
@@ -871,7 +872,10 @@ class VisualDescriptionStage:
             self.logger.exception("visual description refinement batch failed")
             results = [{"refined_description": ""} for _ in payloads]
         for state, result in zip(mapped, results):
-            state["refined_description"] = _clean_text(result.get("refined_description", "")) or state.get("wikipedia_description", "")
+            state["refined_description"] = _shorten(
+                _clean_text(result.get("refined_description", "")) or state.get("wikipedia_description", ""),
+                REFINED_VISUAL_DESCRIPTION_MAX_CHARS,
+            )
 
     def _should_skip_refinement(self, state: Dict[str, Any]) -> bool:
         if not self.fast_refinement_skip:
@@ -1270,7 +1274,10 @@ class VisualDescriptionStage:
             ],
         }
         result = self.worker.infer(task="visual_description_refinement", mode=self.mode, payload=payload)
-        return _clean_text(result.get("refined_description", "")) or wikipedia_description
+        return _shorten(
+            _clean_text(result.get("refined_description", "")) or wikipedia_description,
+            REFINED_VISUAL_DESCRIPTION_MAX_CHARS,
+        )
 
     def _assign_candidate_ids(self, candidates: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
         out = []
@@ -1343,7 +1350,7 @@ class VisualDescriptionStage:
                 "search_query": search_query,
             },
             "wikipedia_visual_description": wikipedia_description,
-            "refined_visual_description": refined_description,
+            "refined_visual_description": _shorten(refined_description, REFINED_VISUAL_DESCRIPTION_MAX_CHARS),
             "image_candidates": candidates,
         }
         with open(json_path, "w", encoding="utf-8") as handle:
@@ -1358,7 +1365,7 @@ class VisualDescriptionStage:
             "search_query": search_query,
             "query": search_query,
             "wikipedia_visual_description": wikipedia_description,
-            "refined_visual_description": refined_description,
+            "refined_visual_description": _shorten(refined_description, REFINED_VISUAL_DESCRIPTION_MAX_CHARS),
             "image_candidates": candidates,
             "candidate_count": len(candidates),
             "error": "",

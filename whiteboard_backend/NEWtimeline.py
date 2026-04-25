@@ -1,11 +1,15 @@
 from __future__ import annotations
 
 import difflib
+import argparse
 import hashlib
+import importlib
+import importlib.util
 import json
 import math
 import os
 import re
+import sys
 import threading
 import time
 from collections import OrderedDict
@@ -17,9 +21,19 @@ from typing import Any, Dict, List, Optional, Sequence, Tuple
 from dotenv import load_dotenv
 from openai import OpenAI
 
+BACKEND_DIR = Path(__file__).resolve().parent
+if str(BACKEND_DIR) not in sys.path:
+    sys.path.insert(0, str(BACKEND_DIR))
+
 from LLMstuff.input_builder_responce_parser import (
     build_chapter_speech_request,
     build_image_request_request,
+    build_qwen_c2_component_verifier_prompt,
+    build_qwen_diagram_component_stroke_match_prompt,
+    build_qwen_diagram_action_planner_prompt,
+    build_qwen_full_speech_action_sync_prompt,
+    build_qwen_non_semantic_image_description_prompt,
+    build_qwen_stroke_meaning_filter_prompt,
     build_logical_timeline_request,
     build_qwen_step_prompt,
     build_qwen_space_planner_prompt,
@@ -30,10 +44,20 @@ from LLMstuff.input_builder_responce_parser import (
     parse_chapter_speech_output,
     parse_image_request_output,
     parse_logical_timeline_output,
+    parse_qwen_c2_component_verifier_output,
+    parse_qwen_diagram_component_stroke_match_output,
+    parse_qwen_diagram_action_planner_output,
+    parse_qwen_full_speech_action_sync_output,
+    parse_qwen_non_semantic_image_description_output,
+    parse_qwen_space_planner_output,
+    parse_qwen_stroke_meaning_filter_output,
     parse_qwen_step_output,
     parse_text_request_output,
 )
-from LLMstuff.qwen_vllm_server import QwenServerClient
+try:
+    from LLMstuff.qwen_server_client import QwenServerClient
+except Exception:
+    from LLMstuff.qwen_vllm_server import QwenServerClient
 
 
 load_dotenv(dotenv_path=Path(__file__).resolve().parent / ".env")
@@ -41,7 +65,25 @@ load_dotenv(dotenv_path=Path(__file__).resolve().parent / ".env")
 
 DEFAULT_MODEL_CANDIDATES = ["gpt-5-mini"]
 DEFAULT_QWEN_BASE_URL = str(os.getenv("QWEN_VLLM_SERVER_URL", "http://127.0.0.1:8009") or "http://127.0.0.1:8009").strip()
-DEFAULT_QWEN_MODEL = str(os.getenv("QWEN_TEXT_MODEL_ID", "cyankiwi/Qwen3.5-4B-AWQ-4bit") or "cyankiwi/Qwen3.5-4B-AWQ-4bit").strip()
+DEFAULT_QWEN_MODEL = str(os.getenv("QWEN_VISION_MODEL_ID", os.getenv("QWEN_TEXT_MODEL_ID", "cyankiwi/Qwen3.5-4B-AWQ-4bit")) or "cyankiwi/Qwen3.5-4B-AWQ-4bit").strip()
+DEFAULT_QWEN_CONTEXT_LEN = int(os.getenv("QWEN_SERVER_MAX_MODEL_LEN", "20000") or 20000)
+DEFAULT_QWEN_GPU_UTIL = float(os.getenv("QWEN_SERVER_GPU_UTIL", "0.80") or 0.80)
+DEFAULT_COMPONENT_REFINED_VISUAL_DESC_MAX_CHARS = int(os.getenv("NEWTIMELINE_COMPONENT_REFINED_VISUAL_DESC_MAX_CHARS", "700") or 700)
+
+
+def _env_bool(name: str, default: bool = False) -> bool:
+    raw = os.getenv(name)
+    if raw is None:
+        return bool(default)
+    text = str(raw).strip().lower()
+    if text in {"1", "true", "yes", "on"}:
+        return True
+    if text in {"0", "false", "no", "off"}:
+        return False
+    return bool(default)
+
+
+DEFAULT_PRELOAD_SIGLIP_TEXT = _env_bool("NEWTIMELINE_PRELOAD_SIGLIP_TEXT", False)
 
 
 @dataclass
@@ -85,6 +127,21 @@ def call_responses_text(
             resp = client.responses.create(**kwargs)
             return resp.output_text, str(model)
         except Exception as exc:
+            if text_format is not None and "invalid_json_schema" in repr(exc):
+                try:
+                    kwargs = {
+                        "model": str(model),
+                        "input": input_items,
+                        "reasoning": {"effort": reasoning_effort},
+                        "text": {"format": {"type": "json_object"}},
+                    }
+                    if max_output_tokens is not None:
+                        kwargs["max_output_tokens"] = int(max_output_tokens)
+                    resp = client.responses.create(**kwargs)
+                    return resp.output_text, str(model)
+                except Exception as retry_exc:
+                    last_err = retry_exc
+                    continue
             last_err = exc
     raise RuntimeError(f"All model candidates failed. Last error: {last_err!r}")
 
@@ -145,7 +202,9 @@ class NewTimelineFirstModule:
             "ready": False,
             "error": None,
             "response": None,
+            "mode": "vision",
         }
+        self._qwen_sleeping = False
         self._diagram_research_state: Optional[Dict[str, Any]] = None
         self._diagram_research_thread: Optional[threading.Thread] = None
         self._dimensions_config_cache: Optional[Dict[str, Any]] = None
@@ -156,7 +215,7 @@ class NewTimelineFirstModule:
         if not self.debug_print:
             return
         if data is None:
-            print(f"[NEWtimeline][DBG] {message}")
+            print(f"[NEWtimeline][DBG] {message}", flush=True)
             return
         try:
             text = json.dumps(data, ensure_ascii=False)
@@ -164,12 +223,482 @@ class NewTimelineFirstModule:
                 text = text[:1800] + " ...<truncated>"
         except Exception:
             text = "<unserializable>"
-        print(f"[NEWtimeline][DBG] {message} | {text}")
+        print(f"[NEWtimeline][DBG] {message} | {text}", flush=True)
+
+    def _import_image_researcher(self):
+        for module_name in ("ImageResearcher", "Imageresearcher"):
+            try:
+                module = importlib.import_module(module_name)
+                sys.modules.setdefault("ImageResearcher", module)
+                return module
+            except ModuleNotFoundError:
+                continue
+        for path in (BACKEND_DIR / "Imageresearcher.py", BACKEND_DIR / "ImageResearcher.py"):
+            if not path.is_file():
+                continue
+            spec = importlib.util.spec_from_file_location("ImageResearcher", path)
+            if spec is None or spec.loader is None:
+                continue
+            module = importlib.util.module_from_spec(spec)
+            sys.modules["ImageResearcher"] = module
+            spec.loader.exec_module(module)
+            return module
+        raise ModuleNotFoundError("No module named 'ImageResearcher' or 'Imageresearcher'")
+
+    def _gpu_memory_snapshot(self) -> Dict[str, Any]:
+        try:
+            import torch
+
+            if not torch.cuda.is_available():
+                return {"cuda": False}
+            try:
+                torch.cuda.set_device(self.gpu_index)
+            except Exception:
+                pass
+            free_bytes, total_bytes = torch.cuda.mem_get_info()
+            allocated = torch.cuda.memory_allocated()
+            reserved = torch.cuda.memory_reserved()
+            return {
+                "cuda": True,
+                "gpu_index": int(self.gpu_index),
+                "free_gib": round(float(free_bytes) / (1024.0 ** 3), 3),
+                "total_gib": round(float(total_bytes) / (1024.0 ** 3), 3),
+                "used_gib": round(float(total_bytes - free_bytes) / (1024.0 ** 3), 3),
+                "torch_allocated_gib": round(float(allocated) / (1024.0 ** 3), 3),
+                "torch_reserved_gib": round(float(reserved) / (1024.0 ** 3), 3),
+            }
+        except Exception as exc:
+            return {"cuda": None, "error": f"{type(exc).__name__}: {exc}"}
+
+    def _gpu_memory_delta(self, before: Dict[str, Any], after: Dict[str, Any]) -> Dict[str, Any]:
+        out: Dict[str, Any] = {}
+        for key in ("free_gib", "used_gib", "torch_allocated_gib", "torch_reserved_gib"):
+            try:
+                out[f"{key}_delta"] = round(float(after.get(key, 0.0)) - float(before.get(key, 0.0)), 3)
+            except Exception:
+                continue
+        return out
 
     def _write_json_file(self, path: Path, payload: Any) -> str:
         path.parent.mkdir(parents=True, exist_ok=True)
         path.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
         return str(path)
+
+    def _internal_runtime_dir(self) -> Path:
+        return Path(__file__).resolve().parent / "_newtimeline_internal"
+
+    def _internal_cache_dir(self, stage_name: str) -> Path:
+        return self._internal_runtime_dir() / "cache" / str(stage_name or "generic").strip()
+
+    def _stable_json_dumps(self, payload: Any) -> str:
+        return json.dumps(payload, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
+
+    def _stage_cache_key(self, *, stage_name: str, payload: Any) -> str:
+        raw = self._stable_json_dumps(
+            {
+                "stage": str(stage_name or "").strip(),
+                "payload": payload,
+            }
+        )
+        return hashlib.sha256(raw.encode("utf-8")).hexdigest()
+
+    def _load_stage_cache(self, *, stage_name: str, key: str) -> Optional[Dict[str, Any]]:
+        path = self._internal_cache_dir(stage_name) / f"{key}.json"
+        if not path.is_file():
+            return None
+        try:
+            payload = json.loads(path.read_text(encoding="utf-8"))
+        except Exception:
+            return None
+        if not isinstance(payload, dict):
+            return None
+        return payload
+
+    def _store_stage_cache(
+        self,
+        *,
+        stage_name: str,
+        key: str,
+        data: Any,
+        meta: Optional[Dict[str, Any]] = None,
+    ) -> str:
+        path = self._internal_cache_dir(stage_name) / f"{key}.json"
+        payload = {
+            "stage": str(stage_name or "").strip(),
+            "key": str(key),
+            "written_at_unix": time.time(),
+            "meta": dict(meta or {}),
+            "data": data,
+        }
+        return self._write_json_file(path, payload)
+
+    def _load_cached_stage_data(self, *, stage_name: str, payload: Any) -> Tuple[Optional[Any], str]:
+        key = self._stage_cache_key(stage_name=stage_name, payload=payload)
+        cached = self._load_stage_cache(stage_name=stage_name, key=key)
+        if not isinstance(cached, dict):
+            return None, key
+        return cached.get("data"), key
+
+    def _load_latest_stage_data(self, stage_name: str) -> Tuple[Optional[Any], Optional[str]]:
+        cache_dir = self._internal_cache_dir(stage_name)
+        if not cache_dir.is_dir():
+            return None, None
+        best_payload: Optional[Dict[str, Any]] = None
+        best_path: Optional[Path] = None
+        best_written = -1.0
+        for path in cache_dir.glob("*.json"):
+            try:
+                payload = json.loads(path.read_text(encoding="utf-8"))
+            except Exception:
+                continue
+            if not isinstance(payload, dict):
+                continue
+            try:
+                written = float(payload.get("written_at_unix", 0.0) or 0.0)
+            except Exception:
+                written = 0.0
+            if best_payload is None or written > best_written:
+                best_payload = payload
+                best_path = path
+                best_written = written
+        if not isinstance(best_payload, dict):
+            return None, None
+        return best_payload.get("data"), str(best_path) if best_path is not None else None
+
+    def _store_cached_stage_data(
+        self,
+        *,
+        stage_name: str,
+        payload: Any,
+        data: Any,
+        meta: Optional[Dict[str, Any]] = None,
+    ) -> Tuple[str, str]:
+        key = self._stage_cache_key(stage_name=stage_name, payload=payload)
+        path = self._store_stage_cache(stage_name=stage_name, key=key, data=data, meta=meta)
+        return path, key
+
+    def _load_first_module_result_cache(self, topic: str) -> Tuple[Optional[Dict[str, Any]], Optional[str]]:
+        if not self.gpt_cache_enabled:
+            return None, None
+        wanted = normalize_ws(topic).casefold()
+        if not wanted:
+            return None, None
+        cache_dir = self._internal_cache_dir("first_module_result")
+        if not cache_dir.is_dir():
+            return None, None
+        best_payload: Optional[Dict[str, Any]] = None
+        best_path: Optional[Path] = None
+        best_written = -1.0
+        for path in cache_dir.glob("*.json"):
+            try:
+                payload = json.loads(path.read_text(encoding="utf-8"))
+            except Exception:
+                continue
+            if not isinstance(payload, dict):
+                continue
+            data = payload.get("data")
+            if not isinstance(data, dict):
+                continue
+            if normalize_ws(data.get("topic")).casefold() != wanted:
+                continue
+            try:
+                written = float(payload.get("written_at_unix", 0.0) or 0.0)
+            except Exception:
+                written = 0.0
+            if best_payload is None or written > best_written:
+                best_payload = data
+                best_path = path
+                best_written = written
+        if best_payload is None:
+            return None, None
+        return best_payload, str(best_path) if best_path is not None else None
+
+    def _store_first_module_result_cache(self, topic: str, result: Dict[str, Any]) -> Optional[str]:
+        if not self.gpt_cache_enabled:
+            return None
+        payload = {
+            "topic": normalize_ws(topic),
+            "chapter_cap": int(self.chapter_cap),
+            "models": list(self.model_candidates),
+            "qwen_model": self.qwen_model,
+        }
+        path, _key = self._store_cached_stage_data(
+            stage_name="first_module_result",
+            payload=payload,
+            data=result,
+        )
+        return path
+
+    def _load_logical_timeline_from_chapter_flow_cache(self, topic: str) -> Optional[List[Dict[str, Any]]]:
+        if not self.gpt_cache_enabled:
+            return None
+        cache_dir = self._internal_cache_dir("chapter_flow")
+        if not cache_dir.is_dir():
+            return None
+        topic_words = {
+            part.lower()
+            for part in re.findall(r"[A-Za-z0-9]+", normalize_ws(topic))
+            if len(part) >= 4
+        }
+        chapters: Dict[str, Dict[str, Any]] = {}
+        for path in cache_dir.glob("*.json"):
+            try:
+                payload = json.loads(path.read_text(encoding="utf-8"))
+            except Exception:
+                continue
+            data = payload.get("data") if isinstance(payload, dict) else None
+            if not isinstance(data, dict):
+                continue
+            chapter_id = normalize_ws(data.get("chapter_id"))
+            logical_steps = data.get("logical_steps")
+            if not chapter_id or not isinstance(logical_steps, dict) or not logical_steps:
+                continue
+            haystack = " ".join(
+                [
+                    normalize_ws(data.get("title")),
+                    normalize_ws(json.dumps(data.get("image_requests") or [], ensure_ascii=False)),
+                    normalize_ws(json.dumps(logical_steps, ensure_ascii=False)),
+                ]
+            ).lower()
+            if topic_words and not all(word in haystack for word in topic_words):
+                continue
+            chapters[chapter_id] = {
+                "chapter_id": chapter_id,
+                "title": normalize_ws(data.get("title")),
+                "steps": OrderedDict((str(k), str(v)) for k, v in logical_steps.items()),
+            }
+        if not chapters:
+            return None
+        return [
+            chapters[key]
+            for key in sorted(
+                chapters.keys(),
+                key=lambda item: [int(part) if part.isdigit() else part for part in re.split(r"(\d+)", item)],
+            )
+        ][: max(1, int(self.chapter_cap))]
+
+    def _load_chapter_flow_cache_for_chapter(self, topic: str, chapter: Dict[str, Any]) -> Tuple[Optional[Dict[str, Any]], Optional[str]]:
+        if not self.gpt_cache_enabled:
+            return None, None
+        cache_dir = self._internal_cache_dir("chapter_flow")
+        if not cache_dir.is_dir():
+            return None, None
+        wanted_id = normalize_ws(chapter.get("chapter_id"))
+        wanted_title = normalize_ws(chapter.get("title")).casefold()
+        wanted_steps = {
+            str(key): normalize_ws(value)
+            for key, value in (chapter.get("steps") or {}).items()
+        }
+        best_data: Optional[Dict[str, Any]] = None
+        best_path: Optional[Path] = None
+        best_score = -1
+        best_written = -1.0
+        for path in cache_dir.glob("*.json"):
+            try:
+                payload = json.loads(path.read_text(encoding="utf-8"))
+            except Exception:
+                continue
+            data = payload.get("data") if isinstance(payload, dict) else None
+            if not isinstance(data, dict):
+                continue
+            if wanted_id and normalize_ws(data.get("chapter_id")) != wanted_id:
+                continue
+            cached_steps = {
+                str(key): normalize_ws(value)
+                for key, value in ((data.get("logical_steps") or {}).items() if isinstance(data.get("logical_steps"), dict) else [])
+            }
+            score = 0
+            if wanted_title and normalize_ws(data.get("title")).casefold() == wanted_title:
+                score += 2
+            if wanted_steps and cached_steps:
+                shared = sum(1 for key, value in wanted_steps.items() if cached_steps.get(key) == value)
+                score += shared * 4
+            if data.get("speech_steps") and data.get("image_requests") is not None and data.get("text_requests") is not None:
+                score += 3
+            if not wanted_steps and wanted_title and wanted_title in normalize_ws(data.get("title")).casefold():
+                score += 1
+            try:
+                written = float(payload.get("written_at_unix", 0.0) or 0.0)
+            except Exception:
+                written = 0.0
+            if score > best_score or (score == best_score and written > best_written):
+                best_data = data
+                best_path = path
+                best_score = score
+                best_written = written
+        if not isinstance(best_data, dict) or best_score < 3:
+            return None, None
+        return best_data, str(best_path) if best_path is not None else None
+
+    def _generate_qwen_text_batch_cached(
+        self,
+        *,
+        stage_name: str,
+        prompts: List[str],
+        system_prompt: str,
+        generation: Dict[str, Any],
+    ) -> Dict[str, Any]:
+        if not prompts:
+            return {
+                "responses": [],
+                "qwen_ready": None,
+                "cache_hits": 0,
+                "cache_misses": 0,
+            }
+
+        cache_stage = f"qwen_text_exact.{str(stage_name or '').strip()}"
+        responses: List[Optional[Dict[str, Any]]] = [None] * len(prompts)
+        miss_indexes: List[int] = []
+        miss_prompts: List[str] = []
+        miss_keys: List[str] = []
+        cache_hits = 0
+
+        for idx, prompt in enumerate(prompts):
+            cache_payload = {
+                "model": self.qwen_model,
+                "system_prompt": str(system_prompt or ""),
+                "prompt": str(prompt or ""),
+                "generation": dict(generation or {}),
+            }
+            key = self._stage_cache_key(stage_name=cache_stage, payload=cache_payload)
+            cached = self._load_stage_cache(stage_name=cache_stage, key=key)
+            cached_data = cached.get("data") if isinstance(cached, dict) else None
+            cached_response = cached_data.get("response") if isinstance(cached_data, dict) else None
+            if isinstance(cached_response, dict):
+                responses[idx] = cached_response
+                cache_hits += 1
+                continue
+            miss_indexes.append(idx)
+            miss_prompts.append(str(prompt or ""))
+            miss_keys.append(key)
+
+        qwen_ready = None
+        self._dbg(
+            "Qwen text batch cache status",
+            data={"stage": stage_name, "requests": len(prompts), "hits": cache_hits, "misses": len(miss_prompts)},
+        )
+        if miss_prompts:
+            self._dbg("Qwen text batch starting", data={"stage": stage_name, "misses": len(miss_prompts)})
+            qwen_ready = self._ensure_qwen_text_worker()
+            batch_result = self.qwen_client.generate_text_batch(
+                miss_prompts,
+                system_prompt=system_prompt,
+                generation=generation,
+                use_tqdm=False,
+            )
+            self._dbg("Qwen text batch returned", data={"stage": stage_name, "misses": len(miss_prompts)})
+            raw_rows = batch_result.get("responses")
+            if not isinstance(raw_rows, list) or len(raw_rows) != len(miss_prompts):
+                raise RuntimeError(f"Qwen {stage_name} response count does not match request count")
+            for idx, key, raw_row, prompt in zip(miss_indexes, miss_keys, raw_rows, miss_prompts):
+                one_row = dict(raw_row or {})
+                responses[idx] = one_row
+                self._store_stage_cache(
+                    stage_name=cache_stage,
+                    key=key,
+                    data={
+                        "response": one_row,
+                        "prompt": prompt,
+                        "system_prompt": str(system_prompt or ""),
+                        "generation": dict(generation or {}),
+                    },
+                )
+
+        final_rows = [row if isinstance(row, dict) else {"text": ""} for row in responses]
+        return {
+            "responses": final_rows,
+            "qwen_ready": qwen_ready,
+            "cache_hits": int(cache_hits),
+            "cache_misses": int(len(miss_prompts)),
+        }
+
+    def _generate_qwen_vision_batch_cached(
+        self,
+        *,
+        stage_name: str,
+        requests: List[Dict[str, Any]],
+        system_prompt: str,
+        generation: Dict[str, Any],
+    ) -> Dict[str, Any]:
+        if not requests:
+            return {
+                "responses": [],
+                "qwen_ready": None,
+                "cache_hits": 0,
+                "cache_misses": 0,
+            }
+
+        cache_stage = f"qwen_vision_exact.{str(stage_name or '').strip()}"
+        responses: List[Optional[Dict[str, Any]]] = [None] * len(requests)
+        miss_indexes: List[int] = []
+        miss_requests: List[Dict[str, Any]] = []
+        miss_keys: List[str] = []
+        cache_hits = 0
+
+        for idx, request in enumerate(requests):
+            images = [str(x) for x in (request.get("images") or []) if str(x).strip()]
+            cache_payload = {
+                "model": self.qwen_model,
+                "system_prompt": str(system_prompt or ""),
+                "prompt": str(request.get("prompt", "") or ""),
+                "images": images,
+                "image_mtimes": [
+                    os.path.getmtime(path) if os.path.isfile(path) else None
+                    for path in images
+                ],
+                "generation": dict(generation or {}),
+            }
+            key = self._stage_cache_key(stage_name=cache_stage, payload=cache_payload)
+            cached = self._load_stage_cache(stage_name=cache_stage, key=key)
+            cached_data = cached.get("data") if isinstance(cached, dict) else None
+            cached_response = cached_data.get("response") if isinstance(cached_data, dict) else None
+            if isinstance(cached_response, dict):
+                responses[idx] = cached_response
+                cache_hits += 1
+                continue
+            miss_indexes.append(idx)
+            miss_requests.append({"prompt": str(request.get("prompt", "") or ""), "images": images})
+            miss_keys.append(key)
+
+        qwen_ready = None
+        self._dbg(
+            "Qwen vision batch cache status",
+            data={"stage": stage_name, "requests": len(requests), "hits": cache_hits, "misses": len(miss_requests)},
+        )
+        if miss_requests:
+            self._dbg("Qwen vision batch starting", data={"stage": stage_name, "misses": len(miss_requests)})
+            qwen_ready = self._ensure_qwen_text_worker()
+            batch_result = self.qwen_client.generate_vision_batch(
+                miss_requests,
+                system_prompt=system_prompt,
+                generation=generation,
+                use_tqdm=False,
+            )
+            self._dbg("Qwen vision batch returned", data={"stage": stage_name, "misses": len(miss_requests)})
+            raw_rows = batch_result.get("responses")
+            if not isinstance(raw_rows, list) or len(raw_rows) != len(miss_requests):
+                raise RuntimeError(f"Qwen vision {stage_name} response count does not match request count")
+            for idx, key, raw_row, request in zip(miss_indexes, miss_keys, raw_rows, miss_requests):
+                one_row = dict(raw_row or {})
+                responses[idx] = one_row
+                self._store_stage_cache(
+                    stage_name=cache_stage,
+                    key=key,
+                    data={
+                        "response": one_row,
+                        "request": request,
+                        "system_prompt": str(system_prompt or ""),
+                        "generation": dict(generation or {}),
+                    },
+                )
+
+        final_rows = [row if isinstance(row, dict) else {"text": ""} for row in responses]
+        return {
+            "responses": final_rows,
+            "qwen_ready": qwen_ready,
+            "cache_hits": int(cache_hits),
+            "cache_misses": int(len(miss_requests)),
+        }
 
     def _llm_cache_key(
         self,
@@ -251,6 +780,8 @@ class NewTimelineFirstModule:
         state: Dict[str, Any] = {"ok": None, "error": None}
 
         def _load() -> None:
+            before = self._gpu_memory_snapshot()
+            state["gpu_before"] = before
             try:
                 from shared_models import init_minilm_hot
 
@@ -263,15 +794,30 @@ class NewTimelineFirstModule:
             except Exception as exc:
                 state["ok"] = False
                 state["error"] = f"{type(exc).__name__}: {exc}"
+            finally:
+                after = self._gpu_memory_snapshot()
+                state["gpu_after"] = after
+                state["gpu_delta"] = self._gpu_memory_delta(before, after)
 
         thread = threading.Thread(target=_load, name="newtimeline_preload_minilm", daemon=False)
         thread.start()
         return thread, state
 
     def _start_siglip_text_loader(self) -> Tuple[threading.Thread, Dict[str, Any]]:
-        state: Dict[str, Any] = {"ok": None, "error": None}
+        state: Dict[str, Any] = {"ok": True, "error": None, "skipped": True, "reason": "disabled"}
+        if not DEFAULT_PRELOAD_SIGLIP_TEXT:
+            def _skip() -> None:
+                return None
+
+            thread = threading.Thread(target=_skip, name="newtimeline_preload_siglip_text_skipped", daemon=False)
+            thread.start()
+            return thread, state
+
+        state = {"ok": None, "error": None, "skipped": False}
 
         def _load() -> None:
+            before = self._gpu_memory_snapshot()
+            state["gpu_before"] = before
             try:
                 from shared_models import init_siglip_text_hot
 
@@ -285,6 +831,10 @@ class NewTimelineFirstModule:
             except Exception as exc:
                 state["ok"] = False
                 state["error"] = f"{type(exc).__name__}: {exc}"
+            finally:
+                after = self._gpu_memory_snapshot()
+                state["gpu_after"] = after
+                state["gpu_delta"] = self._gpu_memory_delta(before, after)
 
         thread = threading.Thread(target=_load, name="newtimeline_preload_siglip_text", daemon=False)
         thread.start()
@@ -293,23 +843,41 @@ class NewTimelineFirstModule:
     def _start_qwen_text_loader(self) -> Tuple[Optional[threading.Thread], Dict[str, Any]]:
         with self._qwen_load_lock:
             if self._qwen_load_thread is not None:
-                return self._qwen_load_thread, self._qwen_load_state
+                if self._qwen_load_thread.is_alive() or self._qwen_load_state.get("ready"):
+                    return self._qwen_load_thread, self._qwen_load_state
+                self._qwen_load_thread = None
 
             self._qwen_load_state = {
                 "started": True,
                 "ready": False,
                 "error": None,
                 "response": None,
+                "mode": "vision",
             }
 
             def _load() -> None:
                 try:
-                    response = self.qwen_client.load_text(
-                        model=self.qwen_model,
-                        warmup=True,
-                        gpu_memory_utilization=float(os.getenv("QWEN_SERVER_GPU_UTIL", "0.98") or 0.98),
-                        max_model_len=int(os.getenv("QWEN_SERVER_MAX_MODEL_LEN", "32768") or 32768),
-                    )
+                    status = self.qwen_client.status()
+                    loaded = bool(status.get("loaded"))
+                    sleeping = bool(status.get("sleeping"))
+                    mode = str(status.get("mode") or status.get("sleep_mode") or "").strip()
+                    if loaded and not sleeping and mode in {"vision", "text"}:
+                        response = {"ok": True, "mode": mode, "already_loaded": True, "status": status}
+                    elif loaded and sleeping and mode == "vision":
+                        response = self.qwen_client.wake_vision(
+                            model=self.qwen_model,
+                            warmup=False,
+                            gpu_memory_utilization=DEFAULT_QWEN_GPU_UTIL,
+                            max_model_len=DEFAULT_QWEN_CONTEXT_LEN,
+                        )
+                    else:
+                        response = {
+                            "ok": False,
+                            "error": "qwen_worker_not_hot",
+                            "message": "NEWtimeline assumes the Qwen server worker is already loaded; no load/reload was attempted.",
+                            "status": status,
+                        }
+                    self._qwen_sleeping = False
                     self._qwen_load_state["response"] = response
                     self._qwen_load_state["ready"] = bool(response.get("ok", False))
                     if not self._qwen_load_state["ready"]:
@@ -318,7 +886,7 @@ class NewTimelineFirstModule:
                     self._qwen_load_state["ready"] = False
                     self._qwen_load_state["error"] = f"{type(exc).__name__}: {exc}"
 
-            self._qwen_load_thread = threading.Thread(target=_load, name="newtimeline_qwen_text_load", daemon=False)
+            self._qwen_load_thread = threading.Thread(target=_load, name="newtimeline_qwen_status_wake", daemon=False)
             self._qwen_load_thread.start()
             return self._qwen_load_thread, self._qwen_load_state
 
@@ -330,6 +898,7 @@ class NewTimelineFirstModule:
                 "ready": False,
                 "error": None,
                 "response": None,
+                "mode": "vision",
             }
 
     def _ensure_qwen_text_worker(self) -> Dict[str, Any]:
@@ -339,12 +908,27 @@ class NewTimelineFirstModule:
         if state.get("ready"):
             return dict(state)
         try:
-            response = self.qwen_client.load_text(
-                model=self.qwen_model,
-                warmup=True,
-                gpu_memory_utilization=float(os.getenv("QWEN_SERVER_GPU_UTIL", "0.98") or 0.98),
-                max_model_len=int(os.getenv("QWEN_SERVER_MAX_MODEL_LEN", "32768") or 32768),
-            )
+            status = self.qwen_client.status()
+            loaded = bool(status.get("loaded"))
+            sleeping = bool(status.get("sleeping"))
+            mode = str(status.get("mode") or status.get("sleep_mode") or "").strip()
+            if loaded and not sleeping and mode in {"vision", "text"}:
+                response = {"ok": True, "mode": mode, "already_loaded": True, "status": status}
+            elif loaded and sleeping and mode == "vision":
+                response = self.qwen_client.wake_vision(
+                    model=self.qwen_model,
+                    warmup=False,
+                    gpu_memory_utilization=DEFAULT_QWEN_GPU_UTIL,
+                    max_model_len=DEFAULT_QWEN_CONTEXT_LEN,
+                )
+            else:
+                response = {
+                    "ok": False,
+                    "error": "qwen_worker_not_hot",
+                    "message": "NEWtimeline assumes the Qwen server worker is already loaded; no load/reload was attempted.",
+                    "status": status,
+                }
+            self._qwen_sleeping = False
             state["response"] = response
             state["ready"] = bool(response.get("ok", False))
             state["error"] = None if state["ready"] else json.dumps(response, ensure_ascii=False)
@@ -384,6 +968,33 @@ class NewTimelineFirstModule:
         )
 
     def generate_logical_timeline(self, topic: str) -> Tuple[List[Dict[str, Any]], str]:
+        cache_payload = {
+            "topic": normalize_ws(topic),
+            "chapter_cap": int(self.chapter_cap),
+            "models": list(self.model_candidates),
+        }
+        cached, cache_key = self._load_cached_stage_data(stage_name="logical_timeline", payload=cache_payload)
+        if self.gpt_cache_enabled and isinstance(cached, dict) and isinstance(cached.get("chapters"), list):
+            self._dbg("Logical timeline stage cache hit", data={"key": cache_key[:12]})
+            return list(cached.get("chapters") or []), str(cached.get("model", "cache"))
+
+        chapter_flow_chapters = self._load_logical_timeline_from_chapter_flow_cache(topic)
+        if chapter_flow_chapters:
+            self._dbg(
+                "Logical timeline reconstructed from chapter_flow cache",
+                data={"chapters": len(chapter_flow_chapters)},
+            )
+            if self.gpt_cache_enabled:
+                self._store_cached_stage_data(
+                    stage_name="logical_timeline",
+                    payload=cache_payload,
+                    data={
+                        "chapters": chapter_flow_chapters,
+                        "model": "chapter_flow_cache",
+                    },
+                )
+            return chapter_flow_chapters, "chapter_flow_cache"
+
         input_items, text_format = build_logical_timeline_request(topic, chapter_cap=self.chapter_cap)
         raw_text, model = self._call_responses_text_cached(
             input_items,
@@ -400,6 +1011,15 @@ class NewTimelineFirstModule:
             raw_response=raw_text,
             parsed_payload=chapters,
         )
+        if self.gpt_cache_enabled:
+            self._store_cached_stage_data(
+                stage_name="logical_timeline",
+                payload=cache_payload,
+                data={
+                    "chapters": chapters,
+                    "model": model,
+                },
+            )
         return chapters, model
 
     def generate_chapter_speech(self, topic: str, chapter: Dict[str, Any]) -> Tuple["OrderedDict[str, str]", str]:
@@ -460,6 +1080,28 @@ class NewTimelineFirstModule:
         return text_requests, model
 
     def _run_chapter_flow(self, topic: str, chapter: Dict[str, Any]) -> Dict[str, Any]:
+        cache_payload = {
+            "topic": normalize_ws(topic),
+            "chapter": {
+                "chapter_id": str(chapter.get("chapter_id", "") or ""),
+                "title": str(chapter.get("title", "") or ""),
+                "steps": dict(chapter.get("steps") or {}),
+            },
+            "models": list(self.model_candidates),
+        }
+        cached, cache_key = self._load_cached_stage_data(stage_name="chapter_flow", payload=cache_payload)
+        if self.gpt_cache_enabled and isinstance(cached, dict) and cached.get("chapter_id"):
+            self._dbg("Chapter flow stage cache hit", data={"chapter_id": cached.get("chapter_id"), "key": cache_key[:12]})
+            return cached
+
+        cached_by_chapter, cached_by_chapter_path = self._load_chapter_flow_cache_for_chapter(topic, chapter)
+        if isinstance(cached_by_chapter, dict) and cached_by_chapter.get("chapter_id"):
+            self._dbg(
+                "Chapter flow existing cache hit",
+                data={"chapter_id": cached_by_chapter.get("chapter_id"), "path": cached_by_chapter_path},
+            )
+            return cached_by_chapter
+
         speech_steps, speech_model = self.generate_chapter_speech(topic, chapter)
 
         with ThreadPoolExecutor(max_workers=2, thread_name_prefix=f"chapter_{chapter['chapter_id']}_objects") as executor:
@@ -483,12 +1125,24 @@ class NewTimelineFirstModule:
                 "text_requests": text_model,
             },
         }
+        if self.gpt_cache_enabled:
+            self._store_cached_stage_data(
+                stage_name="chapter_flow",
+                payload=cache_payload,
+                data=chapter_out,
+            )
         return chapter_out
 
     def _get_legacy_group_helper(self):
         if self._legacy_group_helper is not None:
             return self._legacy_group_helper
-        from timeline import LessonTimeline
+        try:
+            from timeline import LessonTimeline
+        except ModuleNotFoundError:
+            try:
+                from UNUSED.timeline import LessonTimeline
+            except ModuleNotFoundError:
+                from whiteboard_backend.UNUSED.timeline import LessonTimeline
 
         self._legacy_group_helper = LessonTimeline(
             model_candidates=list(self.model_candidates),
@@ -599,7 +1253,7 @@ class NewTimelineFirstModule:
 
         def _research() -> None:
             try:
-                import ImageResearcher
+                ImageResearcher = self._import_image_researcher()
 
                 research_many = getattr(ImageResearcher, "research_many_mechanical", None)
                 if callable(research_many):
@@ -632,8 +1286,6 @@ class NewTimelineFirstModule:
         return state
 
     def run_qwen_step_batch(self, *, chapters_out: List[Dict[str, Any]]) -> Dict[str, Any]:
-        qwen_ready = self._ensure_qwen_text_worker()
-
         prompts: List[str] = []
         metas: List[Dict[str, Any]] = []
         system_prompt: Optional[str] = None
@@ -668,11 +1320,14 @@ class NewTimelineFirstModule:
                 "enabled": True,
                 "request_count": 0,
                 "responses": [],
-                "qwen_ready": qwen_ready,
+                "qwen_ready": None,
+                "cache_hits": 0,
+                "cache_misses": 0,
             }
 
-        response = self.qwen_client.generate_text_batch(
-            prompts,
+        response = self._generate_qwen_text_batch_cached(
+            stage_name="speech_compression",
+            prompts=prompts,
             system_prompt=system_prompt,
             generation={
                 "max_new_tokens": 1800,
@@ -681,7 +1336,6 @@ class NewTimelineFirstModule:
                 "top_k": -1,
                 "repetition_penalty": 1.02,
             },
-            use_tqdm=False,
         )
 
         responses = response.get("responses")
@@ -739,21 +1393,59 @@ class NewTimelineFirstModule:
             "enabled": True,
             "request_count": len(prompts),
             "responses": responses,
-            "qwen_ready": qwen_ready,
+            "qwen_ready": response.get("qwen_ready"),
+            "cache_hits": int(response.get("cache_hits", 0) or 0),
+            "cache_misses": int(response.get("cache_misses", 0) or 0),
             "synced_objects": synced_objects,
         }
 
+    def _ensure_first_module_qwen_sync(self, first_module_result: Dict[str, Any]) -> Dict[str, Any]:
+        chapters_out = list(first_module_result.get("chapters") or [])
+        existing_synced = list(first_module_result.get("synced_objects") or [])
+        existing_qwen_steps = 0
+        for chapter in chapters_out:
+            qwen_steps = chapter.get("qwen_steps") if isinstance(chapter, dict) and isinstance(chapter.get("qwen_steps"), dict) else {}
+            existing_qwen_steps += len(qwen_steps)
+        if existing_synced and existing_qwen_steps:
+            return {
+                "enabled": True,
+                "reused": True,
+                "synced_objects": existing_synced,
+                "existing_qwen_steps": existing_qwen_steps,
+            }
+        self._dbg(
+            "First module cache missing Qwen speech sync; running speech compression now",
+            data={"chapters": len(chapters_out), "existing_synced_objects": len(existing_synced), "existing_qwen_steps": existing_qwen_steps},
+        )
+        qwen_debug = self.run_qwen_step_batch(chapters_out=chapters_out)
+        first_module_result["chapters"] = chapters_out
+        first_module_result["synced_objects"] = list(qwen_debug.get("synced_objects") or [])
+        first_module_result["qwen"] = {
+            key: value
+            for key, value in qwen_debug.items()
+            if key != "responses"
+        }
+        self._dbg(
+            "First module Qwen speech sync ready",
+            data={
+                "request_count": int(qwen_debug.get("request_count", 0) or 0),
+                "synced_objects": len(first_module_result.get("synced_objects") or []),
+                "cache_hits": int(qwen_debug.get("cache_hits", 0) or 0),
+                "cache_misses": int(qwen_debug.get("cache_misses", 0) or 0),
+            },
+        )
+        return qwen_debug
+
     def run_first_module(self, topic: str) -> Dict[str, Any]:
         run_started_at = time.time()
-        preload_threads: List[Tuple[str, threading.Thread, Dict[str, Any]]] = []
-
-        minilm_thread, minilm_state = self._start_minilm_loader()
-        preload_threads.append(("minilm", minilm_thread, minilm_state))
-        siglip_thread, siglip_state = self._start_siglip_text_loader()
-        preload_threads.append(("siglip_text", siglip_thread, siglip_state))
-        qwen_thread, qwen_state = self._start_qwen_text_loader()
-        if qwen_thread is not None:
-            preload_threads.append(("qwen_text", qwen_thread, qwen_state))
+        cached_result, cached_path = self._load_first_module_result_cache(topic)
+        if isinstance(cached_result, dict):
+            out = dict(cached_result)
+            out["cache_hit"] = True
+            out["cache_path"] = cached_path
+            out["loaded_at_unix"] = time.time()
+            self._dbg("First module result cache hit", data={"topic": normalize_ws(topic), "path": cached_path})
+            return out
 
         chapters, timeline_model = self.generate_logical_timeline(topic)
 
@@ -778,6 +1470,18 @@ class NewTimelineFirstModule:
 
         chapters_out = [chapter for chapter in chapter_slots if chapter is not None]
 
+        preload_threads: List[Tuple[str, threading.Thread, Dict[str, Any]]] = []
+        minilm_thread, minilm_state = self._start_minilm_loader()
+        preload_threads.append(("minilm", minilm_thread, minilm_state))
+        if DEFAULT_PRELOAD_SIGLIP_TEXT:
+            siglip_thread, siglip_state = self._start_siglip_text_loader()
+            preload_threads.append(("siglip_text", siglip_thread, siglip_state))
+        else:
+            self._dbg("SigLIP text preload skipped", data={"env": "NEWTIMELINE_PRELOAD_SIGLIP_TEXT", "default": False})
+        qwen_thread, qwen_state = self._start_qwen_text_loader()
+        if qwen_thread is not None:
+            preload_threads.append(("qwen_text", qwen_thread, qwen_state))
+
         preload_status: Dict[str, Any] = {}
         for label, thread, state in preload_threads:
             thread.join()
@@ -785,12 +1489,12 @@ class NewTimelineFirstModule:
 
         repeat_filter_debug = self.apply_repeating_diagram_filter(topic=topic, chapters_out=chapters_out)
         research_state = self.start_diagram_research(topic=topic, chapters_out=chapters_out)
-        qwen_debug = self.run_qwen_step_batch(chapters_out=chapters_out)
 
-        return {
+        result = {
             "topic": normalize_ws(topic),
             "started_at_unix": run_started_at,
             "finished_at_unix": time.time(),
+            "cache_hit": False,
             "models_used": {
                 "logical_timeline": timeline_model,
                 "speech": [chapter["models_used"]["speech"] for chapter in chapters_out],
@@ -811,12 +1515,16 @@ class NewTimelineFirstModule:
             "diagram_repeat_filter": repeat_filter_debug,
             "diagram_research": research_state,
             "qwen": {
-                key: value
-                for key, value in qwen_debug.items()
-                if key != "responses"
+                "enabled": True,
+                "request_count": 0,
+                "note": "deferred_until_after_research_c2_siglip",
             },
-            "synced_objects": list(qwen_debug.get("synced_objects") or []),
+            "synced_objects": [],
         }
+        cache_path = self._store_first_module_result_cache(topic, result)
+        if cache_path:
+            result["cache_path"] = cache_path
+        return result
 
     def _collect_prompt_meta(self, *, topic: str, chapters_out: List[Dict[str, Any]]) -> Dict[str, Dict[str, Any]]:
         prompt_meta: Dict[str, Dict[str, Any]] = {}
@@ -1113,6 +1821,842 @@ class NewTimelineFirstModule:
                 "processed_png_path": str(path),
                 "exists": False,
             }
+
+    def _normalize_processed_id(self, value: Any) -> str:
+        text = str(value or "").strip()
+        if not text:
+            return ""
+        if text.lower().endswith(".png") or text.lower().endswith(".json"):
+            text = Path(text).stem
+        if text.lower().startswith("processed_"):
+            suffix = text.split("_", 1)[1]
+            return f"processed_{int(suffix)}" if suffix.isdigit() else text
+        if text.isdigit():
+            return f"processed_{int(text)}"
+        return text
+
+    def _cluster_map_path_for_processed_id(self, processed_id: str) -> Path:
+        return Path(__file__).resolve().parent / "ClusterMaps" / self._normalize_processed_id(processed_id) / "clusters.json"
+
+    def _load_image_cluster_stroke_groups(self, processed_id: str) -> Dict[str, Any]:
+        pid = self._normalize_processed_id(processed_id)
+        path = self._cluster_map_path_for_processed_id(pid)
+        if not path.is_file():
+            return {"processed_id": pid, "cluster_map_path": str(path), "exists": False, "clusters": []}
+        try:
+            payload = json.loads(path.read_text(encoding="utf-8"))
+        except Exception as exc:
+            return {
+                "processed_id": pid,
+                "cluster_map_path": str(path),
+                "exists": False,
+                "clusters": [],
+                "error": f"{type(exc).__name__}: {exc}",
+            }
+        clusters: List[Dict[str, Any]] = []
+        for idx, row in enumerate(list((payload or {}).get("clusters") or [])):
+            if not isinstance(row, dict):
+                continue
+            strokes = sorted({int(v) for v in (row.get("stroke_indexes") or []) if str(v).strip().lstrip("-").isdigit()})
+            if not strokes:
+                continue
+            clusters.append(
+                {
+                    "cluster_index": int(idx),
+                    "stroke_indexes": strokes,
+                    "crop_file_mask": str(row.get("crop_file_mask", "") or ""),
+                    "color_name": str(row.get("color_name", "") or ""),
+                    "bbox_xyxy": list(row.get("bbox_xyxy") or []),
+                }
+            )
+        return {"processed_id": pid, "cluster_map_path": str(path), "exists": True, "clusters": clusters}
+
+    def _score_sam_candidate_against_image_clusters(
+        self,
+        *,
+        candidate: Dict[str, Any],
+        image_clusters: List[Dict[str, Any]],
+    ) -> Optional[Dict[str, Any]]:
+        candidate_strokes = sorted({int(v) for v in (candidate.get("stroke_indexes") or [])})
+        if not candidate_strokes:
+            return None
+        cand_set = set(candidate_strokes)
+        evidence: List[Dict[str, Any]] = []
+        best_candidate_coverage = 0.0
+        best_cluster_coverage = 0.0
+        best_overlap_count = 0
+        for cluster in image_clusters:
+            cluster_strokes = sorted({int(v) for v in (cluster.get("stroke_indexes") or [])})
+            if not cluster_strokes:
+                continue
+            cluster_set = set(cluster_strokes)
+            overlap = sorted(cand_set & cluster_set)
+            if not overlap:
+                continue
+            candidate_coverage = float(len(overlap)) / float(max(1, len(cand_set)))
+            cluster_coverage = float(len(overlap)) / float(max(1, len(cluster_set)))
+            strong_match = candidate_coverage >= 0.85 or cluster_coverage >= 0.85
+            best_candidate_coverage = max(best_candidate_coverage, candidate_coverage)
+            best_cluster_coverage = max(best_cluster_coverage, cluster_coverage)
+            best_overlap_count = max(best_overlap_count, len(overlap))
+            evidence.append(
+                {
+                    "cluster_index": int(cluster.get("cluster_index", -1)),
+                    "overlap_count": int(len(overlap)),
+                    "candidate_coverage": round(candidate_coverage, 4),
+                    "cluster_coverage": round(cluster_coverage, 4),
+                    "strong_match": bool(strong_match),
+                    "crop_file_mask": str(cluster.get("crop_file_mask", "") or ""),
+                    "color_name": str(cluster.get("color_name", "") or ""),
+                }
+            )
+        if not evidence:
+            return None
+        evidence.sort(
+            key=lambda row: (
+                bool(row.get("strong_match")),
+                float(row.get("candidate_coverage", 0.0) or 0.0),
+                float(row.get("cluster_coverage", 0.0) or 0.0),
+                int(row.get("overlap_count", 0) or 0),
+            ),
+            reverse=True,
+        )
+        strong_count = sum(1 for row in evidence if row.get("strong_match"))
+        confidence = (
+            0.20
+            + 0.50 * best_candidate_coverage
+            + 0.20 * best_cluster_coverage
+            + 0.06 * min(1.0, best_overlap_count / float(max(1, len(cand_set))))
+            + 0.04 * min(1.0, strong_count / 2.0)
+        )
+        out = dict(candidate)
+        out["stroke_indexes"] = candidate_strokes
+        out["image_cluster_confidence"] = round(min(1.0, confidence), 4)
+        out["image_cluster_evidence"] = evidence[:6]
+        out["best_image_cluster_candidate_coverage"] = round(best_candidate_coverage, 4)
+        out["best_image_cluster_cluster_coverage"] = round(best_cluster_coverage, 4)
+        out["strong_image_cluster_match_count"] = int(strong_count)
+        return out
+
+    def _sleep_qwen_text_worker(self) -> Optional[str]:
+        try:
+            response = self.qwen_client.sleep()
+            self._qwen_sleeping = True
+            self._reset_qwen_text_loader_state()
+            if isinstance(response, dict) and response.get("ok") is False:
+                return json.dumps(response, ensure_ascii=False)
+            return None
+        except Exception as exc:
+            self._reset_qwen_text_loader_state()
+            return f"{type(exc).__name__}: {exc}"
+
+    def _stroke_description_path_for_processed_id(self, processed_id: str) -> Path:
+        return Path(__file__).resolve().parent / "StrokeDescriptions" / f"{self._normalize_processed_id(processed_id)}_described.json"
+
+    def _load_stroke_description_payload(self, processed_id: str) -> Tuple[Optional[Dict[str, Any]], str]:
+        path = self._stroke_description_path_for_processed_id(processed_id)
+        if not path.is_file():
+            return None, str(path)
+        try:
+            payload = json.loads(path.read_text(encoding="utf-8"))
+        except Exception:
+            return None, str(path)
+        return (payload if isinstance(payload, dict) else None), str(path)
+
+    def run_diagram_stroke_meaning_filter_batch(
+        self,
+        *,
+        prompt_meta: Dict[str, Dict[str, Any]],
+        selected_ids_by_prompt: Dict[str, List[str]],
+        pipeline_handle: Any = None,
+    ) -> Dict[str, Any]:
+        wait_ok = True
+        wait_error: Optional[str] = None
+        try:
+            wait_fn = getattr(pipeline_handle, "wait_line_descriptors", None)
+            if callable(wait_fn):
+                wait_ok = bool(wait_fn(timeout=None))
+
+            jobs_by_pid: Dict[str, Dict[str, Any]] = {}
+            for prompt, meta in (prompt_meta or {}).items():
+                if int((meta or {}).get("diagram", 0) or 0) != 1:
+                    continue
+                clean_prompt = normalize_ws(prompt)
+                components = [normalize_ws(item) for item in ((meta or {}).get("diagram_required_objects") or []) if normalize_ws(item)]
+                for raw_pid in selected_ids_by_prompt.get(prompt, []) or []:
+                    pid = self._normalize_processed_id(raw_pid)
+                    if not pid:
+                        continue
+                    job = jobs_by_pid.setdefault(
+                        pid,
+                        {
+                            "processed_id": pid,
+                            "diagram_names": [],
+                            "components": [],
+                        },
+                    )
+                    if clean_prompt and clean_prompt not in job["diagram_names"]:
+                        job["diagram_names"].append(clean_prompt)
+                    for component in components:
+                        if component and component not in job["components"]:
+                            job["components"].append(component)
+
+            if not wait_ok:
+                wait_error = "line_descriptors_wait_failed"
+            if not jobs_by_pid:
+                return {
+                    "enabled": True,
+                    "request_count": 0,
+                    "by_processed_id": {},
+                    "wait_ok": bool(wait_ok),
+                    "wait_error": wait_error,
+                    "note": "no_diagram_processed_ids",
+                }
+
+            prompts: List[str] = []
+            metas: List[Dict[str, Any]] = []
+            descriptors: Dict[str, Dict[str, Any]] = {}
+            descriptor_paths: Dict[str, str] = {}
+            system_prompt: Optional[str] = None
+            errors: Dict[str, str] = {}
+
+            for pid, job in sorted(jobs_by_pid.items()):
+                descriptor, descriptor_path = self._load_stroke_description_payload(pid)
+                descriptor_paths[pid] = descriptor_path
+                if not isinstance(descriptor, dict) or not list(descriptor.get("described_lines") or []):
+                    errors[pid] = "missing_or_empty_stroke_description"
+                    continue
+                diagram_name = " / ".join(job.get("diagram_names") or [pid])
+                sys_prompt, user_prompt = build_qwen_stroke_meaning_filter_prompt(
+                    diagram_name=diagram_name,
+                    components=list(job.get("components") or []),
+                    stroke_description_payload=descriptor,
+                )
+                system_prompt = system_prompt or sys_prompt
+                prompts.append(user_prompt)
+                metas.append(
+                    {
+                        "processed_id": pid,
+                        "diagram_name": diagram_name,
+                        "components": list(job.get("components") or []),
+                        "stroke_description_path": descriptor_path,
+                    }
+                )
+                descriptors[pid] = descriptor
+
+            if not prompts:
+                result = {
+                    "enabled": True,
+                    "request_count": 0,
+                    "by_processed_id": {},
+                    "descriptor_paths": descriptor_paths,
+                    "errors": errors,
+                    "wait_ok": bool(wait_ok),
+                    "wait_error": wait_error,
+                }
+                result["saved_path"] = self._write_json_file(self._internal_runtime_dir() / "diagram_stroke_meaning_payload.json", result)
+                return result
+
+            qwen_result = self._generate_qwen_text_batch_cached(
+                stage_name="diagram_stroke_meaning_filter",
+                prompts=prompts,
+                system_prompt=system_prompt or "",
+                generation={
+                    "max_new_tokens": 2200,
+                    "temperature": 0.1,
+                    "top_p": 0.9,
+                    "top_k": 40,
+                    "repetition_penalty": 1.03,
+                },
+            )
+            responses = qwen_result.get("responses") if isinstance(qwen_result.get("responses"), list) else []
+            by_processed_id: Dict[str, Any] = {}
+            raw_io_rows: List[Dict[str, Any]] = []
+            for index, (meta, raw_row, prompt_text) in enumerate(zip(metas, responses, prompts), start=1):
+                pid = str(meta.get("processed_id"))
+                raw_text = str((raw_row or {}).get("text", "") or "").strip()
+                parsed = parse_qwen_stroke_meaning_filter_output(
+                    raw_text,
+                    stroke_description_payload=descriptors.get(pid, {}),
+                )
+                by_processed_id[pid] = {
+                    "processed_id": pid,
+                    "diagram_name": meta.get("diagram_name"),
+                    "components": list(meta.get("components") or []),
+                    "stroke_description_path": meta.get("stroke_description_path"),
+                    "optimized": parsed,
+                }
+                raw_io_rows.append(
+                    {
+                        "request_index": index,
+                        "processed_id": pid,
+                        "prompt": prompt_text,
+                        "raw_response": raw_text,
+                        "parsed": parsed,
+                        "usage": raw_row,
+                    }
+                )
+
+            raw_path = self._write_json_file(
+                self._internal_runtime_dir() / "qwen_raw_io" / "diagram_stroke_meaning_filter.json",
+                {
+                    "system_prompt": system_prompt,
+                    "rows": raw_io_rows,
+                },
+            )
+            result = {
+                "enabled": True,
+                "request_count": len(prompts),
+                "by_processed_id": by_processed_id,
+                "descriptor_paths": descriptor_paths,
+                "errors": errors,
+                "wait_ok": bool(wait_ok),
+                "wait_error": wait_error,
+                "raw_io_path": raw_path,
+                "cache_hits": int(qwen_result.get("cache_hits", 0) or 0),
+                "cache_misses": int(qwen_result.get("cache_misses", 0) or 0),
+            }
+            result["saved_path"] = self._write_json_file(self._internal_runtime_dir() / "diagram_stroke_meaning_payload.json", result)
+            return result
+        except Exception as exc:
+            return {
+                "enabled": False,
+                "error": f"{type(exc).__name__}: {exc}",
+                "wait_ok": bool(wait_ok),
+                "wait_error": wait_error,
+                "by_processed_id": {},
+            }
+        finally:
+            release_fn = getattr(pipeline_handle, "release_after_line_descriptors", None)
+            if callable(release_fn):
+                release_fn()
+
+    def _prepare_diagram_object_candidates(
+        self,
+        *,
+        selected_ids_by_prompt: Dict[str, List[str]],
+        pipeline_handle: Any = None,
+    ) -> Dict[str, Any]:
+        processed_ids = sorted(
+            {
+                self._normalize_processed_id(pid)
+                for ids in (selected_ids_by_prompt or {}).values()
+                for pid in (ids or [])
+                if self._normalize_processed_id(pid)
+            }
+        )
+        out: Dict[str, Any] = {
+            "schema": "newtimeline_diagram_object_candidates_v1",
+            "processed_ids": processed_ids,
+            "by_processed_id": {},
+            "flat_candidates": [],
+            "errors": {},
+        }
+        if not processed_ids:
+            out["note"] = "no_selected_diagram_processed_ids"
+            return out
+
+        self._dbg("Diagram object candidates starting", data={"processed_ids": processed_ids})
+        if pipeline_handle is not None:
+            try:
+                pipeline_done_evt = getattr(pipeline_handle, "pipeline_done", None)
+                wait_pipeline = getattr(pipeline_done_evt, "wait", None)
+                if callable(wait_pipeline):
+                    self._dbg("Diagram object candidates waiting for image pipeline clusters")
+                    wait_pipeline(timeout=None)
+                    self._dbg("Diagram object candidates image pipeline clusters ready")
+                else:
+                    wait_fn = getattr(pipeline_handle, "wait_colours", None)
+                    if callable(wait_fn):
+                        self._dbg("Diagram object candidates waiting for image pipeline colours fallback")
+                        wait_fn(timeout=None)
+                        self._dbg("Diagram object candidates image pipeline colours fallback ready")
+            except Exception as exc:
+                out["errors"]["image_pipeline_wait"] = f"{type(exc).__name__}: {exc}"
+
+        try:
+            import DiagramMaskClusters
+        except Exception as exc:
+            out["errors"]["diagram_mask_clusters_import"] = f"{type(exc).__name__}: {exc}"
+            return out
+
+        for pid in processed_ids:
+            row: Dict[str, Any] = {
+                "processed_id": pid,
+                "sam_dino_candidates": [],
+                "image_clusters": [],
+                "prepared_candidates": [],
+                "dropped_no_image_cluster_match": [],
+            }
+            cluster_payload = self._load_image_cluster_stroke_groups(pid)
+            row["image_cluster_map_path"] = cluster_payload.get("cluster_map_path")
+            row["image_clusters"] = list(cluster_payload.get("clusters") or [])
+            if cluster_payload.get("error"):
+                out["errors"][f"{pid}:image_clusters"] = str(cluster_payload.get("error"))
+            if not cluster_payload.get("exists"):
+                out["errors"][f"{pid}:image_clusters_missing"] = str(cluster_payload.get("cluster_map_path", ""))
+
+            try:
+                self._dbg(
+                    "DiagramMaskClusters starting",
+                    data={"processed_id": pid, "image_clusters": len(row["image_clusters"])},
+                )
+                t0 = time.perf_counter()
+                cfg = None
+                build_cfg = getattr(DiagramMaskClusters, "build_config", None)
+                if callable(build_cfg):
+                    try:
+                        cfg = build_cfg(log_progress=True)
+                    except Exception:
+                        cfg = None
+                sam_result = DiagramMaskClusters.ensure_processed_clusters(pid, save_outputs=False, config=cfg)
+                self._dbg(
+                    "DiagramMaskClusters finished",
+                    data={"processed_id": pid, "elapsed_s": round(time.perf_counter() - t0, 3)},
+                )
+                sam_payload = sam_result.get("stroke_candidates") if isinstance(sam_result, dict) else {}
+                row["sam_dino_meta"] = {
+                    key: value
+                    for key, value in dict(sam_payload or {}).items()
+                    if key != "candidates"
+                }
+                row["sam_dino_candidates"] = list((sam_payload or {}).get("candidates") or [])
+            except Exception as exc:
+                out["errors"][f"{pid}:sam_dino"] = f"{type(exc).__name__}: {exc}"
+                row["sam_dino_error"] = f"{type(exc).__name__}: {exc}"
+
+            for candidate in row["sam_dino_candidates"]:
+                scored = self._score_sam_candidate_against_image_clusters(
+                    candidate=candidate,
+                    image_clusters=row["image_clusters"],
+                )
+                if scored is None:
+                    row["dropped_no_image_cluster_match"].append(
+                        {
+                            "candidate_id": str((candidate or {}).get("candidate_id", "") or ""),
+                            "stroke_indexes": list((candidate or {}).get("stroke_indexes") or []),
+                            "render_file": str((candidate or {}).get("render_file", "") or ""),
+                        }
+                    )
+                    continue
+                bbox = scored.get("bbox_xyxy") if isinstance(scored.get("bbox_xyxy"), list) else []
+                if len(bbox) == 4:
+                    try:
+                        scored["xy"] = [
+                            round((float(bbox[0]) + float(bbox[2])) / 2.0, 2),
+                            round((float(bbox[1]) + float(bbox[3])) / 2.0, 2),
+                        ]
+                    except Exception:
+                        scored["xy"] = [None, None]
+                row["prepared_candidates"].append(scored)
+
+            row["prepared_candidates"].sort(
+                key=lambda item: (
+                    float(item.get("image_cluster_confidence", 0.0) or 0.0),
+                    int(item.get("strong_image_cluster_match_count", 0) or 0),
+                    len(item.get("stroke_indexes") or []),
+                ),
+                reverse=True,
+            )
+            out["by_processed_id"][pid] = row
+            out["flat_candidates"].extend(row["prepared_candidates"])
+            self._dbg(
+                "Diagram object candidates prepared",
+                data={
+                    "processed_id": pid,
+                    "sam_dino": len(row["sam_dino_candidates"]),
+                    "prepared": len(row["prepared_candidates"]),
+                    "dropped": len(row["dropped_no_image_cluster_match"]),
+                },
+            )
+
+        saved_path = self._write_json_file(
+            self._internal_runtime_dir() / "diagram_object_candidates.json",
+            out,
+        )
+        out["saved_path"] = saved_path
+        self._dbg(
+            "Diagram object candidates saved",
+            data={"saved_path": saved_path, "flat_candidates": len(out["flat_candidates"]), "errors": len(out["errors"])},
+        )
+        return out
+
+    def _component_rows_from_c2_reports(
+        self,
+        *,
+        prompt_meta: Dict[str, Dict[str, Any]],
+        c2_reports_by_prompt: Dict[str, Dict[str, Any]],
+    ) -> Dict[str, List[Dict[str, Any]]]:
+        by_prompt: Dict[str, List[Dict[str, Any]]] = {}
+        for prompt, meta in (prompt_meta or {}).items():
+            if int((meta or {}).get("diagram", 0) or 0) != 1:
+                continue
+            rows: List[Dict[str, Any]] = []
+            seen: set[str] = set()
+            report = c2_reports_by_prompt.get(prompt) if isinstance(c2_reports_by_prompt, dict) else {}
+            visual_stage = report.get("visual_stage") if isinstance(report, dict) and isinstance(report.get("visual_stage"), dict) else {}
+            components = visual_stage.get("components") if isinstance(visual_stage.get("components"), list) else []
+            for row in components:
+                if not isinstance(row, dict):
+                    continue
+                component = row.get("component") if isinstance(row.get("component"), dict) else {}
+                name = normalize_ws(row.get("label") or component.get("label"))
+                if not name or name.casefold() in seen:
+                    continue
+                seen.add(name.casefold())
+                json_path = str(row.get("json_path", "") or "").strip()
+                canonical_path = str(row.get("canonical_candidate_local_path", "") or "").strip()
+                canonical_id = str(row.get("canonical_candidate_id", "") or "").strip()
+                canonical_score = float(row.get("canonical_candidate_score", 0.0) or 0.0)
+                if (not canonical_path or not canonical_id) and json_path and os.path.isfile(json_path):
+                    try:
+                        profile = json.loads(Path(json_path).read_text(encoding="utf-8")) or {}
+                        canonical_path = canonical_path or str(profile.get("canonical_candidate_local_path", "") or "").strip()
+                        canonical_id = canonical_id or str(profile.get("canonical_candidate_id", "") or "").strip()
+                        canonical_score = canonical_score or float(profile.get("canonical_candidate_score", 0.0) or 0.0)
+                    except Exception:
+                        pass
+                rows.append(
+                    {
+                        "name": name,
+                        "qid": str(row.get("qid", component.get("qid", "")) or "").strip(),
+                        "component_key": str(row.get("component_key", "") or "").strip(),
+                        "refined_visual_description": normalize_ws(row.get("refined_visual_description")),
+                        "wikipedia_visual_description": normalize_ws(row.get("wikipedia_visual_description")),
+                        "canonical_candidate_id": canonical_id,
+                        "canonical_candidate_local_path": canonical_path,
+                        "canonical_candidate_score": canonical_score,
+                        "json_path": json_path,
+                    }
+                )
+            for item in list((meta or {}).get("diagram_required_objects") or []):
+                name = normalize_ws(item)
+                if not name or name.casefold() in seen:
+                    continue
+                seen.add(name.casefold())
+                rows.append(
+                    {
+                        "name": name,
+                        "qid": "",
+                        "component_key": "",
+                        "refined_visual_description": "",
+                        "wikipedia_visual_description": "",
+                        "canonical_candidate_id": "",
+                        "canonical_candidate_local_path": "",
+                        "canonical_candidate_score": 0.0,
+                        "json_path": "",
+                    }
+                )
+            by_prompt[prompt] = rows
+        return by_prompt
+
+    def run_diagram_visual_description_batch(
+        self,
+        *,
+        diagram_object_candidates: Dict[str, Any],
+        prompt_meta: Dict[str, Dict[str, Any]],
+        c2_reports_by_prompt: Dict[str, Dict[str, Any]],
+    ) -> Dict[str, Any]:
+        component_rows_by_prompt = self._component_rows_from_c2_reports(
+            prompt_meta=prompt_meta,
+            c2_reports_by_prompt=c2_reports_by_prompt,
+        )
+        system_prompt, user_prompt = build_qwen_non_semantic_image_description_prompt()
+        requests: List[Dict[str, Any]] = []
+        metas: List[Dict[str, Any]] = []
+        errors: Dict[str, str] = {}
+
+        by_processed = diagram_object_candidates.get("by_processed_id") if isinstance(diagram_object_candidates.get("by_processed_id"), dict) else {}
+        for pid, bundle in sorted(by_processed.items()):
+            candidates = bundle.get("prepared_candidates") if isinstance(bundle, dict) else []
+            for candidate_index, candidate in enumerate(candidates if isinstance(candidates, list) else []):
+                if not isinstance(candidate, dict):
+                    continue
+                render_path = str(candidate.get("render_path", "") or "").strip()
+                if not render_path or not os.path.isfile(render_path):
+                    errors[f"{pid}:object:{candidate.get('candidate_id', candidate_index)}"] = "missing_render_path"
+                    continue
+                requests.append({"prompt": user_prompt, "images": [render_path]})
+                metas.append(
+                    {
+                        "kind": "object",
+                        "processed_id": str(pid),
+                        "candidate_index": candidate_index,
+                        "candidate_id": str(candidate.get("candidate_id", "") or ""),
+                        "image_path": render_path,
+                    }
+                )
+
+        for prompt, components in sorted(component_rows_by_prompt.items()):
+            for component_index, component in enumerate(components):
+                image_path = str(component.get("canonical_candidate_local_path", "") or "").strip()
+                if not image_path:
+                    continue
+                if not os.path.isfile(image_path):
+                    errors[f"{prompt}:component:{component.get('name', component_index)}"] = "missing_canonical_image"
+                    continue
+                requests.append({"prompt": user_prompt, "images": [image_path]})
+                metas.append(
+                    {
+                        "kind": "component",
+                        "prompt": prompt,
+                        "component_index": component_index,
+                        "component_name": str(component.get("name", "") or ""),
+                        "image_path": image_path,
+                    }
+                )
+
+        self._dbg(
+            "Diagram visual description requests ready",
+            data={
+                "requests": len(requests),
+                "objects": sum(1 for meta in metas if meta.get("kind") == "object"),
+                "components": sum(1 for meta in metas if meta.get("kind") == "component"),
+                "errors": len(errors),
+            },
+        )
+        qwen_result = self._generate_qwen_vision_batch_cached(
+            stage_name="diagram_non_semantic_visual_descriptions",
+            requests=requests,
+            system_prompt=system_prompt,
+            generation={
+                "max_new_tokens": 220,
+                "temperature": 0.0,
+                "top_p": 1.0,
+                "top_k": -1,
+                "repetition_penalty": 1.02,
+            },
+        ) if requests else {"responses": [], "qwen_ready": None, "cache_hits": 0, "cache_misses": 0}
+
+        raw_rows: List[Dict[str, Any]] = []
+        responses = qwen_result.get("responses") if isinstance(qwen_result.get("responses"), list) else []
+        for meta, raw_row in zip(metas, responses):
+            raw_text = str((raw_row or {}).get("text", "") or "").strip()
+            parsed = parse_qwen_non_semantic_image_description_output(raw_text)
+            description = str(parsed.get("description", "") or "").strip()
+            if meta.get("kind") == "object":
+                bundle = by_processed.get(str(meta.get("processed_id"))) if isinstance(by_processed, dict) else {}
+                candidates = bundle.get("prepared_candidates") if isinstance(bundle, dict) else []
+                try:
+                    candidate = candidates[int(meta.get("candidate_index", -1))]
+                    if isinstance(candidate, dict):
+                        candidate["qwen_visual_description"] = description
+                        candidate["qwen_visual_description_image_path"] = str(meta.get("image_path", "") or "")
+                except Exception:
+                    pass
+            elif meta.get("kind") == "component":
+                components = component_rows_by_prompt.get(str(meta.get("prompt")), [])
+                try:
+                    component = components[int(meta.get("component_index", -1))]
+                    if isinstance(component, dict):
+                        component["qwen_visual_description"] = description
+                except Exception:
+                    pass
+                json_path = ""
+                try:
+                    json_path = str(components[int(meta.get("component_index", -1))].get("json_path", "") or "")
+                except Exception:
+                    json_path = ""
+                if json_path and os.path.isfile(json_path):
+                    try:
+                        payload = json.loads(Path(json_path).read_text(encoding="utf-8")) or {}
+                        payload["qwen_canonical_image_visual_description"] = description
+                        self._write_json_file(Path(json_path), payload)
+                    except Exception as exc:
+                        errors[f"{meta.get('prompt')}:{meta.get('component_name')}:profile_update"] = f"{type(exc).__name__}: {exc}"
+            raw_rows.append(
+                {
+                    "meta": meta,
+                    "raw_response": raw_text,
+                    "parsed": parsed,
+                    "usage": raw_row,
+                }
+            )
+
+        out = {
+            "enabled": True,
+            "request_count": len(requests),
+            "object_candidates_path": diagram_object_candidates.get("saved_path"),
+            "component_payloads_by_prompt": component_rows_by_prompt,
+            "errors": errors,
+            "qwen_ready": qwen_result.get("qwen_ready"),
+            "cache_hits": int(qwen_result.get("cache_hits", 0) or 0),
+            "cache_misses": int(qwen_result.get("cache_misses", 0) or 0),
+            "raw_rows": raw_rows,
+        }
+        if diagram_object_candidates.get("saved_path"):
+            try:
+                self._write_json_file(Path(str(diagram_object_candidates.get("saved_path"))), diagram_object_candidates)
+            except Exception:
+                pass
+        out["saved_path"] = self._write_json_file(
+            self._internal_runtime_dir() / "diagram_visual_description_payload.json",
+            out,
+        )
+        self._dbg(
+            "Diagram visual descriptions saved",
+            data={
+                "saved_path": out["saved_path"],
+                "cache_hits": out["cache_hits"],
+                "cache_misses": out["cache_misses"],
+                "errors": len(errors),
+            },
+        )
+        return out
+
+    def _diagram_component_match_output_dir(self, *, processed_id: str, diagram_name: str) -> Path:
+        pid = self._normalize_processed_id(processed_id) or "processed_unknown"
+        slug = self._safe_diagram_component_slug(diagram_name)
+        return Path(__file__).resolve().parent / "DiagramComponents" / f"{pid}_{slug}"
+
+    def run_diagram_component_stroke_match_batch(
+        self,
+        *,
+        prompt_meta: Dict[str, Dict[str, Any]],
+        selected_ids_by_prompt: Dict[str, List[str]],
+        diagram_object_candidates: Dict[str, Any],
+        diagram_visual_descriptions: Dict[str, Any],
+        stroke_meaning_result: Dict[str, Any],
+    ) -> Dict[str, Any]:
+        prompts: List[str] = []
+        metas: List[Dict[str, Any]] = []
+        system_prompt: Optional[str] = None
+        errors: Dict[str, str] = {}
+        by_processed = diagram_object_candidates.get("by_processed_id") if isinstance(diagram_object_candidates.get("by_processed_id"), dict) else {}
+        component_payloads_by_prompt = diagram_visual_descriptions.get("component_payloads_by_prompt") if isinstance(diagram_visual_descriptions.get("component_payloads_by_prompt"), dict) else {}
+        stroke_meaning_by_pid = stroke_meaning_result.get("by_processed_id") if isinstance(stroke_meaning_result.get("by_processed_id"), dict) else {}
+
+        for prompt, meta in (prompt_meta or {}).items():
+            if int((meta or {}).get("diagram", 0) or 0) != 1:
+                continue
+            components = component_payloads_by_prompt.get(prompt)
+            if not isinstance(components, list) or not components:
+                errors[f"{prompt}:components"] = "missing_component_payload"
+                continue
+            for raw_pid in list(selected_ids_by_prompt.get(prompt) or [])[:1]:
+                pid = self._normalize_processed_id(raw_pid)
+                if not pid:
+                    continue
+                descriptor, descriptor_path = self._load_stroke_description_payload(pid)
+                if not isinstance(descriptor, dict):
+                    errors[f"{prompt}:{pid}:line_descriptors"] = f"missing_stroke_description:{descriptor_path}"
+                    continue
+                candidate_bundle = by_processed.get(pid) if isinstance(by_processed, dict) else {}
+                candidate_objects = list((candidate_bundle or {}).get("prepared_candidates") or []) if isinstance(candidate_bundle, dict) else []
+                if not candidate_objects:
+                    errors[f"{prompt}:{pid}:candidate_objects"] = "missing_candidate_objects"
+                stroke_meaning_payload = stroke_meaning_by_pid.get(pid) if isinstance(stroke_meaning_by_pid, dict) else {}
+                sys_prompt, user_prompt = build_qwen_diagram_component_stroke_match_prompt(
+                    diagram_name=prompt,
+                    candidate_objects=candidate_objects,
+                    stroke_description_payload=descriptor,
+                    stroke_meaning_payload=stroke_meaning_payload if isinstance(stroke_meaning_payload, dict) else {},
+                    components=components,
+                    refined_visual_description_max_chars=DEFAULT_COMPONENT_REFINED_VISUAL_DESC_MAX_CHARS,
+                )
+                system_prompt = system_prompt or sys_prompt
+                prompts.append(user_prompt)
+                metas.append(
+                    {
+                        "prompt": prompt,
+                        "processed_id": pid,
+                        "component_names": [normalize_ws(row.get("name")) for row in components if isinstance(row, dict) and normalize_ws(row.get("name"))],
+                        "stroke_description_path": descriptor_path,
+                    }
+                )
+
+        if not prompts:
+            out = {
+                "enabled": True,
+                "request_count": 0,
+                "by_diagram": {},
+                "errors": errors,
+                "note": "no_final_match_jobs",
+            }
+            out["saved_path"] = self._write_json_file(self._internal_runtime_dir() / "diagram_component_stroke_matches.json", out)
+            self._dbg("Diagram component stroke match skipped", data={"errors": len(errors), "saved_path": out["saved_path"]})
+            return out
+
+        self._dbg(
+            "Diagram component stroke match requests ready",
+            data={"requests": len(prompts), "errors": len(errors)},
+        )
+        qwen_result = self._generate_qwen_text_batch_cached(
+            stage_name="diagram_component_stroke_match",
+            prompts=prompts,
+            system_prompt=system_prompt or "",
+            generation={
+                "max_new_tokens": 5200,
+                "temperature": 0.1,
+                "top_p": 0.9,
+                "top_k": 40,
+                "repetition_penalty": 1.03,
+            },
+        )
+        responses = qwen_result.get("responses") if isinstance(qwen_result.get("responses"), list) else []
+        by_diagram: Dict[str, Any] = {}
+        raw_io_rows: List[Dict[str, Any]] = []
+        for index, (meta, raw_row, prompt_text) in enumerate(zip(metas, responses, prompts), start=1):
+            raw_text = str((raw_row or {}).get("text", "") or "").strip()
+            parsed = parse_qwen_diagram_component_stroke_match_output(
+                raw_text,
+                component_names=list(meta.get("component_names") or []),
+            )
+            out_dir = self._diagram_component_match_output_dir(
+                processed_id=str(meta.get("processed_id", "") or ""),
+                diagram_name=str(meta.get("prompt", "") or ""),
+            )
+            components_path = self._write_json_file(out_dir / "components.json", parsed.get("components", {}))
+            key = f"{meta.get('processed_id')}:{meta.get('prompt')}"
+            by_diagram[key] = {
+                "prompt": meta.get("prompt"),
+                "processed_id": meta.get("processed_id"),
+                "component_count": len(parsed.get("components") or {}),
+                "components_path": components_path,
+                "stroke_description_path": meta.get("stroke_description_path"),
+                "components": parsed.get("components", {}),
+            }
+            raw_io_rows.append(
+                {
+                    "request_index": index,
+                    "prompt": meta.get("prompt"),
+                    "processed_id": meta.get("processed_id"),
+                    "request_text": prompt_text,
+                    "raw_response": raw_text,
+                    "parsed": parsed,
+                    "usage": raw_row,
+                }
+            )
+
+        raw_io_path = self._write_json_file(
+            self._internal_runtime_dir() / "qwen_raw_io" / "diagram_component_stroke_match.json",
+            {
+                "system_prompt": system_prompt,
+                "rows": raw_io_rows,
+            },
+        )
+        out = {
+            "enabled": True,
+            "request_count": len(prompts),
+            "by_diagram": by_diagram,
+            "errors": errors,
+            "raw_io_path": raw_io_path,
+            "qwen_ready": qwen_result.get("qwen_ready"),
+            "cache_hits": int(qwen_result.get("cache_hits", 0) or 0),
+            "cache_misses": int(qwen_result.get("cache_misses", 0) or 0),
+        }
+        out["saved_path"] = self._write_json_file(self._internal_runtime_dir() / "diagram_component_stroke_matches.json", out)
+        self._dbg(
+            "Diagram component stroke matches saved",
+            data={
+                "saved_path": out["saved_path"],
+                "request_count": len(prompts),
+                "cache_hits": out["cache_hits"],
+                "cache_misses": out["cache_misses"],
+                "errors": len(errors),
+            },
+        )
+        return out
 
     def _load_objects_list_from_refined_file(self, refined_file: str) -> List[Any]:
         try:
@@ -1500,6 +3044,14 @@ class NewTimelineFirstModule:
         rerank_paths_by_prompt: Dict[str, List[str]],
         siglip_bundle: Any,
     ) -> Dict[str, Any]:
+        cached, cached_path = self._load_latest_stage_data("diagram_siglip_ranking")
+        cached_by_prompt = cached.get("by_prompt") if isinstance(cached, dict) else None
+        if isinstance(cached_by_prompt, dict):
+            requested = {normalize_ws(prompt) for prompt in diagram_prompts if normalize_ws(prompt)}
+            available = {str(prompt) for prompt in cached_by_prompt.keys()}
+            if requested and requested.issubset(available):
+                self._dbg("Diagram SigLIP ranking existing cache hit", data={"path": cached_path, "prompts": len(requested)})
+                return cached
         import ImagePipeline
         import PineconeFetch
 
@@ -1665,9 +3217,109 @@ class NewTimelineFirstModule:
         state = dict(self._diagram_research_state or {})
         thread = self._diagram_research_thread
         if thread is not None:
+            self._dbg("Waiting for diagram research thread", data={"prompts": state.get("prompts", [])})
             thread.join()
             state["finished"] = True
+            self._dbg("Diagram research thread finished", data={"error": state.get("error")})
+            self._diagram_research_thread = None
+            self._diagram_research_state = dict(state)
         return state
+
+    def _unload_diagram_mask_cluster_models(self) -> Optional[str]:
+        try:
+            import DiagramMaskClusters
+
+            unload_fn = getattr(DiagramMaskClusters, "unload_hot_models", None)
+            if callable(unload_fn):
+                unload_fn()
+            return None
+        except Exception as exc:
+            return f"{type(exc).__name__}: {exc}"
+
+    def _run_c2_component_verifier_batch(
+        self,
+        *,
+        c2_bundle_rows: List[Dict[str, Any]],
+    ) -> Dict[str, Any]:
+        usable_rows = []
+        prompts: List[str] = []
+        system_prompt: Optional[str] = None
+        for row in c2_bundle_rows or []:
+            prompt = normalize_ws(row.get("prompt"))
+            required_objects = [normalize_ws(item) for item in (row.get("requested_components") or []) if normalize_ws(item)]
+            if not prompt or not required_objects:
+                continue
+            prompt_system, prompt_text = build_qwen_c2_component_verifier_prompt(
+                prompt=prompt,
+                required_objects=required_objects,
+            )
+            usable_rows.append(
+                {
+                    "prompt": prompt,
+                    "required_objects": required_objects,
+                }
+            )
+            system_prompt = system_prompt or prompt_system
+            prompts.append(prompt_text)
+
+        if not prompts:
+            return {
+                "enabled": True,
+                "by_prompt": {},
+                "qwen_ready": None,
+                "cache_hits": 0,
+                "cache_misses": 0,
+            }
+
+        generation = {
+            "max_new_tokens": int(os.getenv("QWEN_C2_COMPONENT_VERIFIER_MAX_NEW_TOKENS", "220") or 220),
+            "temperature": 0.0,
+            "top_p": 1.0,
+            "top_k": -1,
+            "repetition_penalty": 1.01,
+        }
+        result = self._generate_qwen_text_batch_cached(
+            stage_name="c2_component_verifier",
+            prompts=prompts,
+            system_prompt=str(system_prompt or ""),
+            generation=generation,
+        )
+        responses = result.get("responses")
+        if not isinstance(responses, list) or len(responses) != len(prompts):
+            raise RuntimeError("Qwen c2_component_verifier response count does not match request count")
+
+        by_prompt: Dict[str, Dict[str, Any]] = {}
+        rows_out: List[Dict[str, Any]] = []
+        for row, raw_row in zip(usable_rows, responses):
+            raw_text = str((raw_row or {}).get("text", "") or "").strip()
+            parsed = parse_qwen_c2_component_verifier_output(raw_text)
+            verdict = {
+                "prompt": row["prompt"],
+                "required_objects": list(row["required_objects"]),
+                "skip_stage1": int(parsed.get("skip_stage1", 0) or 0),
+                "missing": list(parsed.get("missing") or []),
+                "raw_response": raw_text,
+            }
+            by_prompt[row["prompt"]] = verdict
+            rows_out.append(verdict)
+
+        saved_path = self._write_json_file(
+            self._internal_runtime_dir() / "c2_component_verifier.json",
+            {
+                "schema": "c2_component_verifier_v1",
+                "cache_hits": int(result.get("cache_hits", 0) or 0),
+                "cache_misses": int(result.get("cache_misses", 0) or 0),
+                "rows": rows_out,
+            },
+        )
+        return {
+            "enabled": True,
+            "by_prompt": by_prompt,
+            "saved_path": saved_path,
+            "qwen_ready": result.get("qwen_ready"),
+            "cache_hits": int(result.get("cache_hits", 0) or 0),
+            "cache_misses": int(result.get("cache_misses", 0) or 0),
+        }
 
     def _run_c2_bundle(
         self,
@@ -1676,6 +3328,9 @@ class NewTimelineFirstModule:
     ) -> Dict[str, Any]:
         if not c2_bundle_rows:
             return {"ok": True, "prompts": {}, "errors": {}, "count": 0}
+        cached = self._load_c2_bundle_cache_for_rows(c2_bundle_rows)
+        if isinstance(cached, dict):
+            return cached
         self._ensure_qwen_text_worker()
         from C2.Orchestrator import LocalWorkerClient, run_orchestrator_bundle
         from C2.QwenWorker import ServerQwenWorker
@@ -1699,14 +3354,21 @@ class NewTimelineFirstModule:
             max_workers=max(1, min(len(c2_bundle_rows), int(os.environ.get("C2_DIAGRAM_BUNDLE_WORKERS", "6") or 6))),
         )
 
+    def _load_c2_bundle_cache_for_rows(self, c2_bundle_rows: List[Dict[str, Any]]) -> Optional[Dict[str, Any]]:
+        if not c2_bundle_rows:
+            return {"ok": True, "prompts": {}, "errors": {}, "count": 0}
+        cached, cached_path = self._load_latest_stage_data("c2_bundle")
+        requested_prompts = {normalize_ws(row.get("prompt")) for row in c2_bundle_rows if normalize_ws(row.get("prompt"))}
+        cached_prompts = set((cached.get("prompts") or {}).keys()) if isinstance(cached, dict) and isinstance(cached.get("prompts"), dict) else set()
+        if requested_prompts and requested_prompts.issubset(cached_prompts):
+            self._dbg("C2 bundle existing cache hit", data={"path": cached_path, "prompts": len(requested_prompts)})
+            return cached
+        return None
+
     def _unload_qwen_server(self) -> Optional[str]:
-        try:
-            self.qwen_client.unload()
-            self._reset_qwen_text_loader_state()
-            return None
-        except Exception as exc:
-            self._reset_qwen_text_loader_state()
-            return f"{type(exc).__name__}: {exc}"
+        # The Qwen worker is intentionally kept resident. Heavy stages may ask
+        # for this legacy helper, but the correct behavior is sleep, not unload.
+        return self._sleep_qwen_text_worker()
 
     def _unload_siglip_text(self) -> Optional[str]:
         try:
@@ -1754,7 +3416,15 @@ class NewTimelineFirstModule:
             return f"{type(exc).__name__}: {exc}"
 
     def _finalize_research_rerank(self) -> Dict[str, List[str]]:
-        import ImageResearcher
+        cached, cached_path = self._load_latest_stage_data("diagram_research_rerank_finalize")
+        if isinstance(cached, dict) and cached:
+            self._dbg("Diagram research rerank existing cache hit", data={"path": cached_path, "prompts": len(cached)})
+            return {
+                str(key): [str(x) for x in (value or []) if str(x).strip()]
+                for key, value in cached.items()
+                if isinstance(key, str)
+            }
+        ImageResearcher = self._import_image_researcher()
 
         finalize_fn = getattr(ImageResearcher, "finalize_research_from_saved_ranker_state", None)
         if not callable(finalize_fn):
@@ -2339,6 +4009,84 @@ class NewTimelineFirstModule:
             "saved_path": saved_path,
         }
 
+    def _first_fit_space_for_object(
+        self,
+        *,
+        board_width: int,
+        board_height: int,
+        node_w: int,
+        node_h: int,
+        occupied: set[Tuple[int, int]],
+    ) -> List[List[int]]:
+        safe_w = max(1, int(node_w))
+        safe_h = max(1, int(node_h))
+        max_x = max(0, int(board_width) - safe_w)
+        max_y = max(0, int(board_height) - safe_h)
+        for top in range(max_y + 1):
+            for left in range(max_x + 1):
+                blocked = False
+                for yy in range(top, top + safe_h):
+                    for xx in range(left, left + safe_w):
+                        if (xx, yy) in occupied:
+                            blocked = True
+                            break
+                    if blocked:
+                        break
+                if blocked:
+                    continue
+                for yy in range(top, top + safe_h):
+                    for xx in range(left, left + safe_w):
+                        occupied.add((xx, yy))
+                return [
+                    [left, top],
+                    [left, top + safe_h - 1],
+                    [left + safe_w - 1, top],
+                    [left + safe_w - 1, top + safe_h - 1],
+                ]
+        left = 0
+        top = 0
+        return [
+            [left, top],
+            [left, min(max_y, top + safe_h - 1)],
+            [min(max_x, left + safe_w - 1), top],
+            [min(max_x, left + safe_w - 1), min(max_y, top + safe_h - 1)],
+        ]
+
+    def _fallback_space_planner_actions_for_chunk(self, *, chunk: Dict[str, Any]) -> List[Dict[str, Any]]:
+        board_nodes = dict(chunk.get("board_nodes") or {})
+        board_width = max(1, int(board_nodes.get("width", 20) or 20))
+        board_height = max(1, int(board_nodes.get("height", 20) or 20))
+        occupied: set[Tuple[int, int]] = set()
+        out: List[Dict[str, Any]] = []
+        for row in list(chunk.get("prompt_objects") or []):
+            if not isinstance(row, dict):
+                continue
+            name = str(row.get("name", "") or "").strip()
+            action_type = str(row.get("type", "") or "").strip().lower()
+            if not name or action_type not in {"image", "text"}:
+                continue
+            corners = self._first_fit_space_for_object(
+                board_width=board_width,
+                board_height=board_height,
+                node_w=max(1, int(row.get("node_w", 1) or 1)),
+                node_h=max(1, int(row.get("node_h", 1) or 1)),
+                occupied=occupied,
+            )
+            start = max(0, int(row.get("start", 0) or 0))
+            end = max(start, int(row.get("end", start) or start))
+            out.append(
+                {
+                    "draw": 1,
+                    "type": action_type,
+                    "name": name,
+                    "start": start,
+                    "end": end,
+                    "range": max(0, int(row.get("range", end - start) or end - start)),
+                    "corners": corners,
+                }
+            )
+        return out
+
     def run_space_planner_batch(
         self,
         *,
@@ -2360,7 +4108,6 @@ class NewTimelineFirstModule:
                 "responses_path": None,
             }
 
-        qwen_ready = self._ensure_qwen_text_worker()
         prompts: List[str] = []
         metas: List[Dict[str, Any]] = []
         system_prompt: Optional[str] = None
@@ -2388,17 +4135,18 @@ class NewTimelineFirstModule:
                 }
             )
 
-        response = self.qwen_client.generate_text_batch(
-            prompts,
-            system_prompt=system_prompt,
-            generation={
-                "max_new_tokens": int(os.getenv("QWEN_SPACE_PLANNER_MAX_NEW_TOKENS", "3200") or 3200),
-                "temperature": 0.0,
-                "top_p": 1.0,
-                "top_k": -1,
-                "repetition_penalty": 1.02,
-            },
-            use_tqdm=False,
+        generation = {
+            "max_new_tokens": int(os.getenv("QWEN_SPACE_PLANNER_MAX_NEW_TOKENS", "3200") or 3200),
+            "temperature": 0.0,
+            "top_p": 1.0,
+            "top_k": -1,
+            "repetition_penalty": 1.02,
+        }
+        response = self._generate_qwen_text_batch_cached(
+            stage_name="space_planner",
+            prompts=prompts,
+            system_prompt=str(system_prompt or ""),
+            generation=generation,
         )
         responses = response.get("responses")
         if not isinstance(responses, list) or len(responses) != len(prompts):
@@ -2409,6 +4157,12 @@ class NewTimelineFirstModule:
         out_chunks: List[Dict[str, Any]] = []
         for index, (meta, prompt, chunk, raw_row) in enumerate(zip(metas, prompts, chunks, responses), start=1):
             raw_text = str((raw_row or {}).get("text", "") or "").strip()
+            parse_error = None
+            try:
+                parsed_actions = list((parse_qwen_space_planner_output(raw_text) or {}).get("actions") or [])
+            except Exception as exc:
+                parse_error = f"{type(exc).__name__}: {exc}"
+                parsed_actions = self._fallback_space_planner_actions_for_chunk(chunk=chunk)
             file_path = self._write_json_file(
                 stage_dir / f"{index:05d}_chunk_{str(meta.get('chunk_id', '')).replace('.', '_')}.json",
                 {
@@ -2418,6 +4172,8 @@ class NewTimelineFirstModule:
                     "prompt": prompt,
                     "prompt_payload": meta.get("prompt_payload"),
                     "raw_response": raw_text,
+                    "parsed_actions": parsed_actions,
+                    "parse_error": parse_error,
                     "usage": raw_row,
                     "chunk_context": {
                         "step_silence_rows": chunk.get("step_silence_rows"),
@@ -2430,8 +4186,14 @@ class NewTimelineFirstModule:
                     "chunk_id": str(meta.get("chunk_id", "") or ""),
                     "chapter_id": str(meta.get("chapter_id", "") or ""),
                     "raw_response": raw_text,
+                    "actions": parsed_actions,
+                    "parse_error": parse_error,
                     "stage_io_path": file_path,
                     "prompt_payload": meta.get("prompt_payload"),
+                    "board_nodes": dict(chunk.get("board_nodes") or {}),
+                    "node_edge_px": int(chunk.get("node_edge_px", 100) or 100),
+                    "step_silence_rows": list(chunk.get("step_silence_rows") or []),
+                    "objects": list(chunk.get("objects") or []),
                 }
             )
 
@@ -2441,16 +4203,760 @@ class NewTimelineFirstModule:
                 "schema": "space_planner_qwen_raw_v1",
                 "request_count": len(prompts),
                 "chunks_ready_path": chunk_bundle.get("saved_path"),
+                "cache_hits": int(response.get("cache_hits", 0) or 0),
+                "cache_misses": int(response.get("cache_misses", 0) or 0),
                 "chunks": out_chunks,
             },
         )
         return {
             "enabled": True,
             "request_count": len(prompts),
-            "qwen_ready": qwen_ready,
+            "qwen_ready": response.get("qwen_ready"),
+            "cache_hits": int(response.get("cache_hits", 0) or 0),
+            "cache_misses": int(response.get("cache_misses", 0) or 0),
             "chunks_ready_path": chunk_bundle.get("saved_path"),
             "responses_path": responses_path,
             "chunks": out_chunks,
+        }
+
+    def _strip_pause_tokens(self, speech_text: str) -> str:
+        return re.sub(r"%(?:\s*)(?:\d+(?:\.\d+)?|\.\d+)", " ", str(speech_text or ""))
+
+    def _count_spoken_words(self, speech_text: str) -> int:
+        clean = self._strip_pause_tokens(speech_text)
+        return len(re.findall(r"\b[\w']+\b", clean, flags=re.UNICODE))
+
+    def _pause_index_to_local_word_map(self, speech_text: str) -> Dict[int, int]:
+        text = str(speech_text or "")
+        markers = extract_pause_markers(text)
+        if not markers:
+            return {}
+        out: Dict[int, int] = {}
+        for marker in markers:
+            pause_index = int(marker.get("pause_index", 0) or 0)
+            prefix = self._strip_pause_tokens(text[: int(marker.get("char_start", 0) or 0)])
+            word_count = len(re.findall(r"\b[\w']+\b", prefix, flags=re.UNICODE))
+            out[pause_index] = max(1, int(word_count))
+        return out
+
+    def _build_step_sync_contexts(
+        self,
+        *,
+        chapters_out: List[Dict[str, Any]],
+        use_full_speech: bool = False,
+    ) -> Dict[str, Dict[str, Any]]:
+        out: Dict[str, Dict[str, Any]] = {}
+        lesson_word_offset = 0
+        lesson_pause_offset = 0
+        for chapter in chapters_out or []:
+            chapter_id = str(chapter.get("chapter_id", "") or "").strip()
+            chapter_word_offset = 0
+            logical_steps = chapter.get("logical_steps") if isinstance(chapter.get("logical_steps"), dict) else {}
+            speech_steps = chapter.get("speech_steps") if isinstance(chapter.get("speech_steps"), dict) else {}
+            qwen_steps = chapter.get("qwen_steps") if isinstance(chapter.get("qwen_steps"), dict) else {}
+            step_order = [str(step_id) for step_id in logical_steps.keys()] or [str(step_id) for step_id in speech_steps.keys()]
+            for step_id in step_order:
+                qwen_row = qwen_steps.get(step_id) if isinstance(qwen_steps.get(step_id), dict) else {}
+                if use_full_speech:
+                    speech = str(speech_steps.get(step_id) or (qwen_row or {}).get("speech") or "").strip()
+                else:
+                    speech = str((qwen_row or {}).get("speech") or speech_steps.get(step_id) or "").strip()
+                word_count = max(1, self._count_spoken_words(speech))
+                pause_map = self._pause_index_to_local_word_map(speech)
+                pause_markers = list((qwen_row or {}).get("pause_markers") or extract_pause_markers(speech))
+                out[step_id] = {
+                    "step_id": step_id,
+                    "chapter_id": chapter_id,
+                    "speech": speech,
+                    "word_count": word_count,
+                    "chapter_word_offset": int(chapter_word_offset),
+                    "lesson_word_offset": int(lesson_word_offset),
+                    "global_pause_offset": int(lesson_pause_offset),
+                    "pause_count": int(len(pause_markers)),
+                    "pause_to_local_word_index": pause_map,
+                }
+                chapter_word_offset += word_count
+                lesson_word_offset += word_count
+                lesson_pause_offset += int(len(pause_markers))
+        return out
+
+    def _fallback_full_speech_word_index(
+        self,
+        *,
+        compressed_word_index: int,
+        compressed_speech: str,
+        full_speech: str,
+    ) -> int:
+        compressed_count = max(1, self._count_spoken_words(compressed_speech))
+        full_count = max(1, self._count_spoken_words(full_speech))
+        compressed_local = max(1, min(compressed_count, int(compressed_word_index or 1)))
+        if compressed_count <= 1 or full_count <= 1:
+            return max(1, min(full_count, compressed_local))
+        scale = float(max(0, full_count - 1)) / float(max(1, compressed_count - 1))
+        return max(1, min(full_count, 1 + int(round((compressed_local - 1) * scale))))
+
+    def _run_full_speech_action_sync_batch(
+        self,
+        *,
+        chapters_out: List[Dict[str, Any]],
+        actions_by_step: Dict[str, List[Dict[str, Any]]],
+    ) -> Dict[str, Any]:
+        prompts: List[str] = []
+        metas: List[Dict[str, Any]] = []
+        system_prompt: Optional[str] = None
+        chapter_map = {
+            str(chapter.get("chapter_id", "") or "").strip(): chapter
+            for chapter in chapters_out or []
+            if isinstance(chapter, dict)
+        }
+
+        for chapter in chapters_out or []:
+            chapter_id = str(chapter.get("chapter_id", "") or "").strip()
+            speech_steps = chapter.get("speech_steps") if isinstance(chapter.get("speech_steps"), dict) else {}
+            qwen_steps = chapter.get("qwen_steps") if isinstance(chapter.get("qwen_steps"), dict) else {}
+            logical_steps = chapter.get("logical_steps") if isinstance(chapter.get("logical_steps"), dict) else {}
+            step_order = [str(step_id) for step_id in logical_steps.keys()] or [str(step_id) for step_id in speech_steps.keys()]
+            for step_id in step_order:
+                step_actions = [dict(row) for row in (actions_by_step.get(step_id) or []) if isinstance(row, dict)]
+                if not step_actions:
+                    continue
+                compressed_speech = str(((qwen_steps.get(step_id) or {}) if isinstance(qwen_steps.get(step_id), dict) else {}).get("speech") or speech_steps.get(step_id) or "").strip()
+                full_speech = str(speech_steps.get(step_id) or compressed_speech).strip()
+                action_payload = [
+                    {
+                        "action_id": str(row.get("action_id", "") or "").strip(),
+                        "kind": str(row.get("kind", "") or "").strip(),
+                        "action": str(row.get("action", "") or "").strip(),
+                        "type": str(row.get("type", "") or "").strip(),
+                        "name": str(row.get("name", row.get("target", "")) or "").strip(),
+                        "data": str(row.get("data", "") or "").strip(),
+                        "compressed_word_index": max(1, int(row.get("compressed_local_step_sync_word_index", 1) or 1)),
+                    }
+                    for row in step_actions
+                    if str(row.get("action_id", "") or "").strip()
+                ]
+                if not action_payload:
+                    continue
+                prompt_system, prompt_text = build_qwen_full_speech_action_sync_prompt(
+                    step_id=step_id,
+                    compressed_speech=compressed_speech,
+                    full_speech=full_speech,
+                    actions=action_payload,
+                )
+                system_prompt = system_prompt or prompt_system
+                prompts.append(prompt_text)
+                metas.append(
+                    {
+                        "chapter_id": chapter_id,
+                        "step_id": step_id,
+                        "compressed_speech": compressed_speech,
+                        "full_speech": full_speech,
+                        "actions": action_payload,
+                    }
+                )
+
+        if not prompts:
+            out = {
+                "enabled": True,
+                "request_count": 0,
+                "by_step": {},
+                "rows": [],
+                "raw_io_path": None,
+                "cache_hits": 0,
+                "cache_misses": 0,
+                "qwen_ready": None,
+            }
+            out["saved_path"] = self._write_json_file(self._internal_runtime_dir() / "full_chunk_speech_action_sync.json", out)
+            return out
+
+        result = self._generate_qwen_text_batch_cached(
+            stage_name="full_chunk_speech_action_sync",
+            prompts=prompts,
+            system_prompt=str(system_prompt or ""),
+            generation={
+                "max_new_tokens": int(os.getenv("QWEN_FULL_SPEECH_ACTION_SYNC_MAX_NEW_TOKENS", "2200") or 2200),
+                "temperature": 0.0,
+                "top_p": 1.0,
+                "top_k": -1,
+                "repetition_penalty": 1.02,
+            },
+        )
+        responses = result.get("responses") if isinstance(result.get("responses"), list) else []
+        if len(responses) != len(prompts):
+            raise RuntimeError("Qwen full_chunk_speech_action_sync response count does not match request count")
+
+        by_step: Dict[str, Dict[str, Any]] = {}
+        rows_out: List[Dict[str, Any]] = []
+        raw_io_rows: List[Dict[str, Any]] = []
+        for index, (meta, prompt_text, raw_row) in enumerate(zip(metas, prompts, responses), start=1):
+            raw_text = str((raw_row or {}).get("text", "") or "").strip()
+            parsed: Dict[str, Any]
+            parse_error: Optional[str] = None
+            try:
+                parsed = parse_qwen_full_speech_action_sync_output(
+                    raw_text,
+                    action_ids=[str(row.get("action_id", "") or "").strip() for row in meta["actions"]],
+                )
+            except Exception as exc:
+                parse_error = f"{type(exc).__name__}: {exc}"
+                parsed = {"actions": []}
+
+            full_count = max(1, self._count_spoken_words(str(meta.get("full_speech", "") or "")))
+            sync_lookup = {
+                str(row.get("action_id", "") or "").strip(): max(1, min(full_count, int(row.get("full_word_index", 1) or 1)))
+                for row in list(parsed.get("actions") or [])
+                if isinstance(row, dict) and str(row.get("action_id", "") or "").strip()
+            }
+            resolved_actions: List[Dict[str, Any]] = []
+            for action in meta["actions"]:
+                action_id = str(action.get("action_id", "") or "").strip()
+                compressed_word_index = max(1, int(action.get("compressed_word_index", 1) or 1))
+                full_word_index = sync_lookup.get(action_id)
+                if full_word_index is None:
+                    full_word_index = self._fallback_full_speech_word_index(
+                        compressed_word_index=compressed_word_index,
+                        compressed_speech=str(meta.get("compressed_speech", "") or ""),
+                        full_speech=str(meta.get("full_speech", "") or ""),
+                    )
+                resolved_actions.append(
+                    {
+                        "action_id": action_id,
+                        "compressed_word_index": compressed_word_index,
+                        "full_word_index": max(1, min(full_count, int(full_word_index or 1))),
+                    }
+                )
+
+            step_key = str(meta.get("step_id", "") or "").strip()
+            by_step[step_key] = {
+                "chapter_id": str(meta.get("chapter_id", "") or "").strip(),
+                "step_id": step_key,
+                "compressed_speech": str(meta.get("compressed_speech", "") or ""),
+                "full_speech": str(meta.get("full_speech", "") or ""),
+                "actions": resolved_actions,
+                "parse_error": parse_error,
+            }
+            rows_out.append(by_step[step_key])
+            raw_io_rows.append(
+                {
+                    "request_index": index,
+                    "chapter_id": meta.get("chapter_id"),
+                    "step_id": meta.get("step_id"),
+                    "prompt": prompt_text,
+                    "raw_response": raw_text,
+                    "parsed": parsed,
+                    "resolved_actions": resolved_actions,
+                    "parse_error": parse_error,
+                    "usage": raw_row,
+                }
+            )
+
+        raw_io_path = self._write_json_file(
+            self._internal_runtime_dir() / "qwen_raw_io" / "full_chunk_speech_action_sync.json",
+            {
+                "system_prompt": system_prompt,
+                "rows": raw_io_rows,
+            },
+        )
+        out = {
+            "enabled": True,
+            "request_count": len(prompts),
+            "by_step": by_step,
+            "rows": rows_out,
+            "raw_io_path": raw_io_path,
+            "cache_hits": int(result.get("cache_hits", 0) or 0),
+            "cache_misses": int(result.get("cache_misses", 0) or 0),
+            "qwen_ready": result.get("qwen_ready"),
+        }
+        out["saved_path"] = self._write_json_file(self._internal_runtime_dir() / "full_chunk_speech_action_sync.json", out)
+        return out
+
+    def _local_pause_to_word_index(self, *, context: Dict[str, Any], pause_index: int) -> int:
+        pause_map = dict(context.get("pause_to_local_word_index") or {})
+        word_count = max(1, int(context.get("word_count", 1) or 1))
+        if pause_map:
+            if int(pause_index) in pause_map:
+                return max(1, min(word_count, int(pause_map[int(pause_index)] or 1)))
+            nearest = max((idx for idx in pause_map.keys() if int(idx) <= int(pause_index)), default=None)
+            if nearest is not None:
+                return max(1, min(word_count, int(pause_map[nearest] or 1)))
+        return max(1, min(word_count, int(pause_index) + 1))
+
+    def _spread_local_action_indexes(self, *, indexes: List[int], word_count: int) -> List[int]:
+        if not indexes:
+            return []
+        raw_values = [int(value or 1) for value in indexes]
+        min_raw = min(raw_values)
+        max_raw = max(raw_values)
+        if min_raw < 1 or max_raw > int(word_count):
+            if max_raw == min_raw:
+                capped = [max(1, min(int(word_count), 1)) for _ in raw_values]
+            else:
+                scale = float(max(1, int(word_count) - 1)) / float(max_raw - min_raw)
+                capped = [
+                    max(1, min(int(word_count), 1 + int(round((value - min_raw) * scale))))
+                    for value in raw_values
+                ]
+        else:
+            capped = [max(1, min(int(word_count), value)) for value in raw_values]
+        groups: "OrderedDict[int, List[int]]" = OrderedDict()
+        for original_idx, base in enumerate(capped):
+            groups.setdefault(base, []).append(original_idx)
+        bases = list(groups.keys())
+        assigned = [1] * len(capped)
+        for pos, base in enumerate(bases):
+            members = groups[base]
+            next_base = bases[pos + 1] if pos + 1 < len(bases) else int(word_count) + 1
+            slot_cap = max(1, next_base - base)
+            for offset, original_idx in enumerate(members):
+                assigned[original_idx] = min(int(word_count), base + min(offset, slot_cap - 1))
+        return assigned
+
+    def _locate_step_for_global_pause(
+        self,
+        *,
+        step_silence_rows: List[Dict[str, Any]],
+        pause_index: int,
+    ) -> Dict[str, Any]:
+        rows = [row for row in (step_silence_rows or []) if isinstance(row, dict)]
+        if not rows:
+            return {"step_id": "", "global_silence_offset": 0, "silence_count": 0}
+        rows.sort(key=lambda row: int(row.get("global_silence_offset", 0) or 0))
+        for idx, row in enumerate(rows):
+            start = int(row.get("global_silence_offset", 0) or 0)
+            next_start = int(rows[idx + 1].get("global_silence_offset", 0) or 0) if idx + 1 < len(rows) else None
+            if next_start is None or int(pause_index) < next_start:
+                return row
+        return rows[-1]
+
+    def _node_corners_to_allocated_space(self, *, corners: List[List[int]], node_edge_px: int) -> Dict[str, Any]:
+        xs = [int(corner[0]) for corner in corners if isinstance(corner, list) and len(corner) == 2]
+        ys = [int(corner[1]) for corner in corners if isinstance(corner, list) and len(corner) == 2]
+        if len(xs) != 4 or len(ys) != 4:
+            return {"node_corners": corners, "corners_px": []}
+        left = min(xs) * int(node_edge_px)
+        right = (max(xs) + 1) * int(node_edge_px)
+        top = min(ys) * int(node_edge_px)
+        bottom = (max(ys) + 1) * int(node_edge_px)
+        return {
+            "node_corners": corners,
+            "corners_px": [
+                [float(left), float(top)],
+                [float(left), float(bottom)],
+                [float(right), float(top)],
+                [float(right), float(bottom)],
+            ],
+        }
+
+    def run_diagram_action_planner_batch(
+        self,
+        *,
+        chapters_out: List[Dict[str, Any]],
+        prepared_objects: List[Dict[str, Any]],
+    ) -> Dict[str, Any]:
+        step_contexts = self._build_step_sync_contexts(chapters_out=chapters_out)
+        step_images: Dict[str, Dict[str, Dict[str, Any]]] = {}
+        for obj in prepared_objects or []:
+            if not isinstance(obj, dict) or str(obj.get("object_type", "") or "").strip() != "image":
+                continue
+            step_id = str(obj.get("step_id", "") or "").strip()
+            context = step_contexts.get(step_id)
+            if context is None:
+                continue
+            name = str(obj.get("name", "") or "").strip()
+            if not name:
+                continue
+            start_pause = max(0, int(obj.get("start_silence_index", 0) or 0))
+            end_raw = obj.get("end_silence_index")
+            if end_raw is None:
+                end_word = int(context.get("word_count", 1) or 1)
+            else:
+                end_word = self._local_pause_to_word_index(context=context, pause_index=max(0, int(end_raw or 0)))
+            image_row = step_images.setdefault(step_id, {}).setdefault(
+                name.casefold(),
+                {
+                    "name": name,
+                    "components": [],
+                    "word_sync": {
+                        "start": self._local_pause_to_word_index(context=context, pause_index=start_pause),
+                        "end": max(1, int(end_word)),
+                    },
+                },
+            )
+            image_row["word_sync"]["start"] = min(
+                int(image_row["word_sync"]["start"]),
+                self._local_pause_to_word_index(context=context, pause_index=start_pause),
+            )
+            image_row["word_sync"]["end"] = max(
+                int(image_row["word_sync"]["end"]),
+                max(1, int(end_word)),
+            )
+            for component in list(obj.get("canonical_objects") or obj.get("required_objects") or []):
+                cleaned = normalize_ws(component)
+                if cleaned and cleaned not in image_row["components"]:
+                    image_row["components"].append(cleaned)
+
+        prompts: List[str] = []
+        metas: List[Dict[str, Any]] = []
+        system_prompt: Optional[str] = None
+        for chapter in chapters_out or []:
+            speech_steps = chapter.get("speech_steps") if isinstance(chapter.get("speech_steps"), dict) else {}
+            qwen_steps = chapter.get("qwen_steps") if isinstance(chapter.get("qwen_steps"), dict) else {}
+            logical_steps = chapter.get("logical_steps") if isinstance(chapter.get("logical_steps"), dict) else {}
+            step_order = [str(step_id) for step_id in logical_steps.keys()] or [str(step_id) for step_id in speech_steps.keys()]
+            for step_id in step_order:
+                image_rows = list((step_images.get(step_id) or {}).values())
+                if not image_rows:
+                    continue
+                speech = str(((qwen_steps.get(step_id) or {}) if isinstance(qwen_steps.get(step_id), dict) else {}).get("speech") or speech_steps.get(step_id) or "").strip()
+                prompt_system, prompt_text = build_qwen_diagram_action_planner_prompt(
+                    step_id=step_id,
+                    speech=speech,
+                    images=image_rows,
+                )
+                system_prompt = system_prompt or prompt_system
+                prompts.append(prompt_text)
+                metas.append(
+                    {
+                        "step_id": step_id,
+                        "chapter_id": str(chapter.get("chapter_id", "") or "").strip(),
+                        "images": image_rows,
+                    }
+                )
+
+        if not prompts:
+            return {
+                "enabled": True,
+                "request_count": 0,
+                "rows": [],
+                "responses_path": None,
+                "qwen_ready": None,
+                "cache_hits": 0,
+                "cache_misses": 0,
+            }
+
+        generation = {
+            "max_new_tokens": int(os.getenv("QWEN_DIAGRAM_ACTION_PLANNER_MAX_NEW_TOKENS", "1400") or 1400),
+            "temperature": 0.0,
+            "top_p": 1.0,
+            "top_k": -1,
+            "repetition_penalty": 1.03,
+        }
+        result = self._generate_qwen_text_batch_cached(
+            stage_name="diagram_action_planner",
+            prompts=prompts,
+            system_prompt=str(system_prompt or ""),
+            generation=generation,
+        )
+        responses = result.get("responses")
+        if not isinstance(responses, list) or len(responses) != len(prompts):
+            raise RuntimeError("Qwen diagram_action_planner response count does not match request count")
+
+        rows_out: List[Dict[str, Any]] = []
+        for meta, raw_row in zip(metas, responses):
+            raw_text = str((raw_row or {}).get("text", "") or "").strip()
+            parsed = parse_qwen_diagram_action_planner_output(raw_text)
+            image_ranges: Dict[str, Tuple[int, int]] = {}
+            for image in list(meta.get("images") or []):
+                if not isinstance(image, dict):
+                    continue
+                name = str(image.get("name", "") or "").strip()
+                word_sync = image.get("word_sync") if isinstance(image.get("word_sync"), dict) else {}
+                if name:
+                    image_ranges[name.casefold()] = (
+                        max(1, int(word_sync.get("start", 1) or 1)),
+                        max(1, int(word_sync.get("end", word_sync.get("start", 1)) or word_sync.get("start", 1) or 1)),
+                    )
+            cleaned_actions: List[Dict[str, Any]] = []
+            for action in list(parsed.get("actions") or []):
+                if not isinstance(action, dict):
+                    continue
+                target = str(action.get("target", "") or "").strip()
+                image_name = target.split(" : ", 1)[0].strip() if " : " in target else target
+                range_start, range_end = image_ranges.get(image_name.casefold(), (1, max(1, int(step_contexts.get(meta["step_id"], {}).get("word_count", 1) or 1))))
+                sync_index = max(range_start, min(range_end, int(action.get("sync_index", range_start) or range_start)))
+                cleaned_actions.append(
+                    {
+                        "type": str(action.get("type", "") or "").strip(),
+                        "target": target,
+                        "data": str(action.get("data", "") or ""),
+                        "sync_index": sync_index,
+                        "init": 1 if int(action.get("init", 0) or 0) == 1 else 0,
+                    }
+                )
+            rows_out.append(
+                {
+                    "step_id": meta["step_id"],
+                    "chapter_id": meta["chapter_id"],
+                    "images": list(meta.get("images") or []),
+                    "raw_response": raw_text,
+                    "actions": cleaned_actions,
+                }
+            )
+
+        responses_path = self._write_json_file(
+            self._internal_runtime_dir() / "qwen_raw_responses" / "diagram_action_planner.json",
+            {
+                "stage": "diagram_action_planner",
+                "responses": [str((row or {}).get("raw_response", "") or "") for row in rows_out],
+            },
+        )
+        return {
+            "enabled": True,
+            "request_count": len(prompts),
+            "rows": rows_out,
+            "responses_path": responses_path,
+            "qwen_ready": result.get("qwen_ready"),
+            "cache_hits": int(result.get("cache_hits", 0) or 0),
+            "cache_misses": int(result.get("cache_misses", 0) or 0),
+        }
+
+    def _build_combined_lesson_action_payload(
+        self,
+        *,
+        chapters_out: List[Dict[str, Any]],
+        space_planner_result: Dict[str, Any],
+        diagram_action_result: Dict[str, Any],
+    ) -> Dict[str, Any]:
+        compressed_step_contexts = self._build_step_sync_contexts(chapters_out=chapters_out, use_full_speech=False)
+        full_step_contexts = self._build_step_sync_contexts(chapters_out=chapters_out, use_full_speech=True)
+        step_order = [
+            str(step_id)
+            for chapter in chapters_out or []
+            for step_id in (
+                list((chapter.get("logical_steps") or {}).keys())
+                or list((chapter.get("speech_steps") or {}).keys())
+            )
+        ]
+
+        actions_by_step: Dict[str, List[Dict[str, Any]]] = {}
+        next_action_number = 1
+
+        def _register_step_action(step_id: str, row: Dict[str, Any]) -> None:
+            nonlocal next_action_number
+            clean_step_id = str(step_id or "").strip()
+            if not clean_step_id:
+                return
+            payload = dict(row)
+            payload["step_id"] = clean_step_id
+            payload["action_id"] = f"A{next_action_number}"
+            next_action_number += 1
+            actions_by_step.setdefault(clean_step_id, []).append(payload)
+
+        for step_id in step_order:
+            context = compressed_step_contexts.get(step_id)
+            if context is None:
+                continue
+            speech = str(context.get("speech", "") or "")
+            pause_markers = extract_pause_markers(speech)
+            for marker in pause_markers:
+                pause_index = int(marker.get("pause_index", 0) or 0)
+                local_word = self._local_pause_to_word_index(context=context, pause_index=pause_index)
+                _register_step_action(
+                    step_id,
+                    {
+                        "kind": "silence",
+                        "action": "silence",
+                        "type": "silence",
+                        "chunk_id": str(context.get("chapter_id", "") or ""),
+                        "chapter_id": str(context.get("chapter_id", "") or ""),
+                        "pause_index": pause_index,
+                        "global_pause_index": int(context.get("global_pause_offset", 0) or 0) + pause_index,
+                        "length": float(marker.get("seconds", 0.0) or 0.0),
+                        "compressed_local_step_sync_word_index": local_word,
+                    },
+                )
+
+        for chunk in list(space_planner_result.get("chunks") or []):
+            if not isinstance(chunk, dict):
+                continue
+            step_rows = list(chunk.get("step_silence_rows") or [])
+            node_edge_px = int(chunk.get("node_edge_px", 100) or 100)
+            for action in list(chunk.get("actions") or []):
+                if not isinstance(action, dict):
+                    continue
+                pause_index = (
+                    int(action.get("start", 0) or 0)
+                    if int(action.get("draw", 0) or 0) == 1
+                    else int(action.get("end", action.get("start", 0)) or action.get("start", 0) or 0)
+                )
+                step_row = self._locate_step_for_global_pause(step_silence_rows=step_rows, pause_index=pause_index)
+                step_id = str(step_row.get("step_id", "") or "").strip()
+                context = compressed_step_contexts.get(step_id, {})
+                local_pause = max(0, pause_index - int(step_row.get("global_silence_offset", 0) or 0))
+                local_word = self._local_pause_to_word_index(context=context, pause_index=local_pause) if context else 1
+                allocated_space = self._node_corners_to_allocated_space(
+                    corners=list(action.get("corners") or []),
+                    node_edge_px=node_edge_px,
+                )
+                corners_px = list(allocated_space.get("corners_px") or [])
+                location = {"x": 0.0, "y": 0.0}
+                if len(corners_px) == 4:
+                    xs = [float(corner[0]) for corner in corners_px]
+                    ys = [float(corner[1]) for corner in corners_px]
+                    location = {"x": float((min(xs) + max(xs)) / 2.0), "y": float((min(ys) + max(ys)) / 2.0)}
+                _register_step_action(
+                    step_id,
+                    {
+                        "kind": "space",
+                        "action": "draw" if int(action.get("draw", 0) or 0) == 1 else "delete",
+                        "chunk_id": str(chunk.get("chunk_id", "") or ""),
+                        "chapter_id": str(chunk.get("chapter_id", "") or ""),
+                        "name": str(action.get("name", "") or "").strip(),
+                        "type": str(action.get("type", "") or "").strip(),
+                        "global_pause_index": pause_index,
+                        "local_step_silence_index": local_pause,
+                        "compressed_local_step_sync_word_index": local_word,
+                        "location": location,
+                        "allocated_space": allocated_space,
+                    },
+                )
+
+        for row in list(diagram_action_result.get("rows") or []):
+            if not isinstance(row, dict):
+                continue
+            step_id = str(row.get("step_id", "") or "").strip()
+            context = compressed_step_contexts.get(step_id)
+            if context is None:
+                continue
+            raw_indexes = [
+                max(1, int(action.get("sync_index", 1) or 1))
+                for action in list(row.get("actions") or [])
+                if isinstance(action, dict)
+            ]
+            spread_indexes = self._spread_local_action_indexes(
+                indexes=raw_indexes,
+                word_count=max(1, int(context.get("word_count", 1) or 1)),
+            )
+            spread_iter = iter(spread_indexes)
+            for action in list(row.get("actions") or []):
+                if not isinstance(action, dict):
+                    continue
+                local_word = next(spread_iter, max(1, int(action.get("sync_index", 1) or 1)))
+                _register_step_action(
+                    step_id,
+                    {
+                        "kind": "diagram",
+                        "action": str(action.get("type", "") or "").strip(),
+                        "chunk_id": str(context.get("chapter_id", "") or ""),
+                        "chapter_id": str(context.get("chapter_id", "") or ""),
+                        "target": str(action.get("target", "") or "").strip(),
+                        "type": str(action.get("type", "") or "").strip(),
+                        "data": str(action.get("data", "") or ""),
+                        "init": 1 if int(action.get("init", 0) or 0) == 1 else 0,
+                        "compressed_local_step_sync_word_index": local_word,
+                    },
+                )
+
+        sync_result = self._run_full_speech_action_sync_batch(
+            chapters_out=chapters_out,
+            actions_by_step=actions_by_step,
+        )
+        sync_by_step = sync_result.get("by_step") if isinstance(sync_result.get("by_step"), dict) else {}
+
+        silence_actions: List[Dict[str, Any]] = []
+        space_actions: List[Dict[str, Any]] = []
+        diagram_actions: List[Dict[str, Any]] = []
+
+        for step_id in step_order:
+            full_context = full_step_contexts.get(step_id, {})
+            compressed_context = compressed_step_contexts.get(step_id, {})
+            resolved_rows = list((sync_by_step.get(step_id) or {}).get("actions") or [])
+            resolved_lookup = {
+                str(row.get("action_id", "") or "").strip(): max(1, int(row.get("full_word_index", 1) or 1))
+                for row in resolved_rows
+                if isinstance(row, dict) and str(row.get("action_id", "") or "").strip()
+            }
+            for action_row in list(actions_by_step.get(step_id) or []):
+                if not isinstance(action_row, dict):
+                    continue
+                action_id = str(action_row.get("action_id", "") or "").strip()
+                compressed_local_word = max(1, int(action_row.get("compressed_local_step_sync_word_index", 1) or 1))
+                full_local_word = resolved_lookup.get(action_id)
+                if full_local_word is None:
+                    full_local_word = self._fallback_full_speech_word_index(
+                        compressed_word_index=compressed_local_word,
+                        compressed_speech=str(compressed_context.get("speech", "") or ""),
+                        full_speech=str(full_context.get("speech", "") or compressed_context.get("speech", "") or ""),
+                    )
+                base_row = dict(action_row)
+                base_row["local_step_sync_word_index"] = full_local_word
+                base_row["compressed_local_step_sync_word_index"] = compressed_local_word
+                base_row["chapter_sync_word_index"] = int(full_context.get("chapter_word_offset", 0) or 0) + full_local_word - 1
+                base_row["sync_word_index"] = int(full_context.get("lesson_word_offset", 0) or 0) + full_local_word - 1
+                base_row["compressed_sync_word_index"] = int(compressed_context.get("lesson_word_offset", 0) or 0) + compressed_local_word - 1
+                base_row["compressed_chapter_sync_word_index"] = int(compressed_context.get("chapter_word_offset", 0) or 0) + compressed_local_word - 1
+                if base_row.get("kind") == "silence":
+                    silence_actions.append(base_row)
+                elif base_row.get("kind") == "space":
+                    space_actions.append(base_row)
+                elif base_row.get("kind") == "diagram":
+                    diagram_actions.append(base_row)
+
+        lesson_actions = list(silence_actions) + list(space_actions) + list(diagram_actions)
+        lesson_actions.sort(
+            key=lambda row: (
+                int(row.get("sync_word_index", 0) or 0),
+                int(0 if str(row.get("action", "") or "") == "silence" else 1),
+                str(row.get("chapter_id", "") or ""),
+                str(row.get("step_id", "") or ""),
+                str(row.get("action", "") or ""),
+            )
+        )
+        for action_index, row in enumerate(lesson_actions):
+            row["action_index"] = int(action_index)
+            row["action_order_id"] = int(action_index + 1)
+
+        sync_chunks: List[Dict[str, Any]] = []
+        for step_id in step_order:
+            rows = [row for row in lesson_actions if str(row.get("step_id", "") or "") == step_id]
+            if not rows:
+                continue
+            rows.sort(
+                key=lambda row: (
+                    int(row.get("local_step_sync_word_index", 0) or 0),
+                    int(row.get("action_index", 0) or 0),
+                )
+            )
+            full_context = full_step_contexts.get(step_id, {})
+            sync_chunks.append(
+                {
+                    "chunk_id": str(full_context.get("chapter_id", "") or ""),
+                    "chapter_id": str(full_context.get("chapter_id", "") or ""),
+                    "step_id": step_id,
+                    "action_indexes": {
+                        str(row.get("action_id", "") or ""): int(row.get("chapter_sync_word_index", 0) or 0)
+                        for row in rows
+                        if str(row.get("action_id", "") or "").strip()
+                    },
+                    "refined_count": max(0, len({int(row.get("chapter_sync_word_index", 0) or 0) for row in rows}) - 1),
+                }
+            )
+        sync_chunks.sort(key=lambda row: (str(row.get("chapter_id", "")), str(row.get("step_id", ""))))
+
+        saved_path = self._write_json_file(
+            Path(self.debug_out_dir) / "final_actions_by_global_word_index.json",
+            {
+                "schema": "final_actions_by_global_word_index_v1",
+                "lesson_actions": lesson_actions,
+                "space_actions": space_actions,
+                "diagram_actions": diagram_actions,
+                "silence_actions": silence_actions,
+                "full_chunk_speech_action_sync_path": sync_result.get("saved_path"),
+            },
+        )
+        return {
+            "saved_path": saved_path,
+            "lesson_actions": lesson_actions,
+            "space_actions": space_actions,
+            "diagram_actions": diagram_actions,
+            "silence_actions": silence_actions,
+            "full_chunk_speech_action_sync": {
+                "saved_path": sync_result.get("saved_path"),
+                "raw_io_path": sync_result.get("raw_io_path"),
+                "chunks": sync_chunks,
+                "cache_hits": int(sync_result.get("cache_hits", 0) or 0),
+                "cache_misses": int(sync_result.get("cache_misses", 0) or 0),
+            },
         }
 
     def run_post_research_pipeline(self, *, topic: str, first_module_result: Dict[str, Any]) -> Dict[str, Any]:
@@ -2470,49 +4976,190 @@ class NewTimelineFirstModule:
             "diagram_prompts": diagram_prompts,
             "non_diagram_prompts": [prompt for prompt in prompt_meta.keys() if prompt not in diagram_prompts],
             "pipeline_errors": {},
+            "qwen_speech_sync": {"status": "pending_until_after_research_c2_siglip"},
         }
 
-        c2_result_holder: Dict[str, Any] = {"ok": True, "prompts": {}, "errors": {}, "count": 0}
-        c2_error: Optional[str] = None
+        if diagram_prompts and self._diagram_research_thread is None:
+            self._dbg("Starting diagram research from post-research stage", data={"prompts": diagram_prompts})
+            self.start_diagram_research(topic=topic, chapters_out=chapters_out)
 
-        def _run_c2() -> None:
-            nonlocal c2_result_holder, c2_error
+        cached_c2_bundle = self._load_c2_bundle_cache_for_rows(c2_rows)
+        c2_branch_holder: Dict[str, Any] = {
+            "verifier": {"enabled": False, "by_prompt": {}, "qwen_ready": None, "cache_hits": 0, "cache_misses": 0, "note": "not_started"},
+            "bundle": {"ok": True, "prompts": {}, "errors": {}, "count": 0},
+            "errors": {},
+        }
+
+        def _run_c2_branch() -> None:
+            branch_rows = [dict(row) for row in c2_rows]
+            verifier_result: Dict[str, Any] = {"enabled": False, "by_prompt": {}, "qwen_ready": None, "cache_hits": 0, "cache_misses": 0}
+            if isinstance(cached_c2_bundle, dict):
+                verifier_result = {
+                    "enabled": False,
+                    "by_prompt": {},
+                    "qwen_ready": None,
+                    "cache_hits": 0,
+                    "cache_misses": 0,
+                    "note": "skipped_existing_c2_bundle_cache",
+                }
+                c2_branch_holder["verifier"] = verifier_result
+                c2_branch_holder["bundle"] = cached_c2_bundle
+                return
+
+            if _env_bool("NEWTIMELINE_RUN_C2_VERIFIER", True):
+                try:
+                    verifier_result = self._run_c2_component_verifier_batch(c2_bundle_rows=branch_rows)
+                except Exception as exc:
+                    verifier_result = {"enabled": False, "error": f"{type(exc).__name__}: {exc}", "by_prompt": {}}
+                    c2_branch_holder["errors"]["verifier"] = verifier_result["error"]
+            else:
+                verifier_result = {
+                    "enabled": False,
+                    "by_prompt": {},
+                    "qwen_ready": None,
+                    "cache_hits": 0,
+                    "cache_misses": 0,
+                    "note": "disabled_by_env",
+                }
+            c2_branch_holder["verifier"] = verifier_result
+
+            verifier_by_prompt = dict(verifier_result.get("by_prompt") or {})
+            for row in branch_rows:
+                prompt = normalize_ws(row.get("prompt"))
+                verdict = verifier_by_prompt.get(prompt) or {}
+                row["skip_stage1"] = 1 if int(verdict.get("skip_stage1", 0) or 0) == 1 else 0
+                row["verifier_missing"] = list(verdict.get("missing") or [])
+
             try:
-                c2_result_holder = self._run_c2_bundle(c2_bundle_rows=c2_rows)
+                c2_branch_holder["bundle"] = self._run_c2_bundle(c2_bundle_rows=branch_rows)
             except Exception as exc:
-                c2_error = f"{type(exc).__name__}: {exc}"
-                c2_result_holder = {"ok": False, "prompts": {}, "errors": {"bundle": c2_error}, "count": 0}
+                err = f"{type(exc).__name__}: {exc}"
+                c2_branch_holder["errors"]["bundle"] = err
+                c2_branch_holder["bundle"] = {"ok": False, "prompts": {}, "errors": {"bundle": err}, "count": 0}
 
-        c2_thread = threading.Thread(target=_run_c2, name="newtimeline_c2_bundle", daemon=False)
+        c2_thread = threading.Thread(target=_run_c2_branch, name="newtimeline_c2_branch", daemon=False)
         c2_thread.start()
         research_state = self._await_diagram_research()
         c2_thread.join()
 
+        c2_verifier_result = dict(c2_branch_holder.get("verifier") or {})
+        verifier_by_prompt = dict(c2_verifier_result.get("by_prompt") or {})
+        c2_result_holder = dict(c2_branch_holder.get("bundle") or {})
+
         debug["diagram_research"] = research_state
+        debug["c2_component_verifier"] = {
+            "enabled": bool(c2_verifier_result.get("enabled", True)),
+            "saved_path": c2_verifier_result.get("saved_path"),
+            "cache_hits": int(c2_verifier_result.get("cache_hits", 0) or 0),
+            "cache_misses": int(c2_verifier_result.get("cache_misses", 0) or 0),
+            "rows": [
+                {
+                    "prompt": prompt,
+                    "skip_stage1": int((verifier_by_prompt.get(prompt) or {}).get("skip_stage1", 0) or 0),
+                    "missing": list((verifier_by_prompt.get(prompt) or {}).get("missing") or []),
+                }
+                for prompt in diagram_prompts
+                if prompt in verifier_by_prompt
+            ],
+        }
         debug["c2_bundle"] = {
             "ok": bool(c2_result_holder.get("ok", True)),
             "count": int(c2_result_holder.get("count", 0) or 0),
             "errors": c2_result_holder.get("errors", {}),
         }
-        if c2_error:
-            debug["pipeline_errors"]["c2_bundle"] = c2_error
+        if c2_branch_holder.get("errors"):
+            for key, value in dict(c2_branch_holder.get("errors") or {}).items():
+                debug["pipeline_errors"][f"c2_{key}"] = value
         if research_state.get("error"):
             debug["pipeline_errors"]["diagram_research"] = research_state.get("error")
 
-        qwen_unload_error = self._unload_qwen_server()
-        if qwen_unload_error:
-            debug["pipeline_errors"]["qwen_unload_before_siglip"] = qwen_unload_error
-        siglip_text_unload_error = self._unload_siglip_text()
-        if siglip_text_unload_error:
-            debug["pipeline_errors"]["siglip_text_unload_before_siglip"] = siglip_text_unload_error
+        siglip_cache_payload = {
+            "schema": "post_research_siglip_v1",
+            "diagram_prompts": list(diagram_prompts),
+            "c2_reports_by_prompt": c2_result_holder.get("prompts") or {},
+            "research_prompts": list(research_state.get("prompts") or []),
+        }
+        siglip_cached_data, siglip_cache_key = self._load_cached_stage_data(
+            stage_name="post_research_siglip",
+            payload=siglip_cache_payload,
+        )
+        if not isinstance(siglip_cached_data, dict):
+            old_rerank, old_rerank_path = self._load_latest_stage_data("diagram_research_rerank_finalize")
+            old_ranking, old_ranking_path = self._load_latest_stage_data("diagram_siglip_ranking")
+            old_canonical, old_canonical_path = self._load_latest_stage_data("c2_component_canonical_images")
+            old_ranked_by_prompt = old_ranking.get("by_prompt") if isinstance(old_ranking, dict) else None
+            if isinstance(old_rerank, dict) and isinstance(old_ranked_by_prompt, dict):
+                requested = {normalize_ws(prompt) for prompt in diagram_prompts if normalize_ws(prompt)}
+                available = {str(prompt) for prompt in old_ranked_by_prompt.keys()}
+                if requested and requested.issubset(available):
+                    siglip_cached_data = {
+                        "rerank_paths_by_prompt": old_rerank,
+                        "c2_canonical": old_canonical if isinstance(old_canonical, dict) else {"by_prompt": {}, "errors": {}},
+                        "ranked_diagram_candidates": old_ranked_by_prompt,
+                    }
+                    siglip_cache_key = "existing-stage-cache"
+                    self._dbg(
+                        "Post-research SigLIP reconstructed from existing caches",
+                        data={
+                            "rerank": old_rerank_path,
+                            "ranking": old_ranking_path,
+                            "canonical": old_canonical_path,
+                        },
+                    )
+        comfy_cache_payload = {
+            "schema": "post_research_comfy_v1",
+            "prompt_meta": {
+                prompt: meta
+                for prompt, meta in (prompt_meta or {}).items()
+                if int((meta or {}).get("diagram", 0) or 0) == 0
+            },
+        }
+        comfy_cached_data, comfy_cache_key = self._load_cached_stage_data(
+            stage_name="post_research_comfy",
+            payload=comfy_cache_payload,
+        )
+        siglip_cache_hit = isinstance(siglip_cached_data, dict)
+        comfy_cache_hit = isinstance(comfy_cached_data, dict)
+        debug["stage_cache"] = {
+            "siglip": {"hit": siglip_cache_hit, "key": siglip_cache_key[:12]},
+            "comfy": {"hit": comfy_cache_hit, "key": comfy_cache_key[:12]},
+        }
 
-        siglip_bundle, siglip_load_error = self._load_full_siglip()
-        if siglip_load_error:
-            debug["pipeline_errors"]["siglip_load"] = siglip_load_error
+        qwen_slept_for_heavy_stage = False
+        if not (siglip_cache_hit and comfy_cache_hit):
+            qwen_sleep_error = self._sleep_qwen_text_worker()
+            qwen_slept_for_heavy_stage = True
+            if qwen_sleep_error:
+                debug["pipeline_errors"]["qwen_sleep_before_heavy_stages"] = qwen_sleep_error
+            if DEFAULT_PRELOAD_SIGLIP_TEXT:
+                siglip_text_unload_error = self._unload_siglip_text()
+                if siglip_text_unload_error:
+                    debug["pipeline_errors"]["siglip_text_unload_before_heavy_stages"] = siglip_text_unload_error
+
+        siglip_bundle = None
+        siglip_load_error = None
 
         rerank_paths_by_prompt: Dict[str, List[str]] = {}
         c2_canonical: Dict[str, Any] = {"by_prompt": {}, "errors": {}}
         ranked_diagram_candidates: Dict[str, List[Dict[str, Any]]] = {}
+        if siglip_cache_hit:
+            rerank_paths_by_prompt = {
+                str(key): [str(x) for x in (value or []) if str(x).strip()]
+                for key, value in (siglip_cached_data.get("rerank_paths_by_prompt") or {}).items()
+                if isinstance(key, str)
+            }
+            cached_canonical = siglip_cached_data.get("c2_canonical")
+            if isinstance(cached_canonical, dict):
+                c2_canonical = cached_canonical
+            ranked_diagram_candidates = {
+                str(key): list(value or [])
+                for key, value in (siglip_cached_data.get("ranked_diagram_candidates") or {}).items()
+                if isinstance(key, str)
+            }
+        else:
+            siglip_bundle, siglip_load_error = self._load_full_siglip()
+            if siglip_load_error:
+                debug["pipeline_errors"]["siglip_load"] = siglip_load_error
         if siglip_bundle is not None:
             try:
                 rerank_paths_by_prompt = self._finalize_research_rerank()
@@ -2539,14 +5186,30 @@ class NewTimelineFirstModule:
         else:
             debug["diagram_siglip_rule_ranking"] = {}
 
+        if not siglip_cache_hit and (
+            rerank_paths_by_prompt
+            or ranked_diagram_candidates
+            or (isinstance(c2_canonical, dict) and (c2_canonical.get("by_prompt") or c2_canonical.get("errors")))
+        ):
+            self._store_cached_stage_data(
+                stage_name="post_research_siglip",
+                payload=siglip_cache_payload,
+                data={
+                    "rerank_paths_by_prompt": rerank_paths_by_prompt,
+                    "c2_canonical": c2_canonical,
+                    "ranked_diagram_candidates": ranked_diagram_candidates,
+                },
+            )
+
         debug["diagram_rerank_paths_by_prompt"] = rerank_paths_by_prompt
         debug["c2_component_canonical_images"] = c2_canonical.get("by_prompt", {})
         if c2_canonical.get("errors"):
             debug["pipeline_errors"]["c2_component_canonical_images"] = c2_canonical.get("errors")
 
-        siglip_unload_error = self._unload_full_siglip()
-        if siglip_unload_error:
-            debug["pipeline_errors"]["siglip_unload_before_comfy"] = siglip_unload_error
+        if siglip_bundle is not None:
+            siglip_unload_error = self._unload_full_siglip()
+            if siglip_unload_error:
+                debug["pipeline_errors"]["siglip_unload_before_comfy"] = siglip_unload_error
 
         comfy_result_holder: Dict[str, Any] = {
             "generated": {},
@@ -2568,24 +5231,40 @@ class NewTimelineFirstModule:
                     "metadata_enrichment": None,
                     "error": f"{type(exc).__name__}: {exc}",
                 }
-
-        comfy_thread = threading.Thread(target=_run_comfy, name="newtimeline_comfy_non_diagrams", daemon=False)
-        comfy_thread.start()
+        comfy_thread: Optional[threading.Thread] = None
+        if comfy_cache_hit:
+            comfy_result_holder = dict(comfy_cached_data or {})
+        else:
+            comfy_thread = threading.Thread(target=_run_comfy, name="newtimeline_comfy_non_diagrams", daemon=False)
+            comfy_thread.start()
         diagram_selection = self._select_diagram_processed_ids_from_ranked_candidates(
             prompt_meta=prompt_meta,
             ranked_candidates_by_prompt=ranked_diagram_candidates,
             c2_reports_by_prompt=(c2_result_holder.get("prompts") or {}),
         )
-        comfy_thread.join()
+        if comfy_thread is not None:
+            comfy_thread.join()
 
-        comfy_unload_error = self._unload_comfy_models()
-        if comfy_unload_error:
-            debug["pipeline_errors"]["comfy_unload_after_generation"] = comfy_unload_error
-        qwen_reload_thread, qwen_reload_state = self._start_qwen_text_loader()
-        debug["qwen_reload_after_comfy"] = {
-            "started": bool(qwen_reload_thread is not None or qwen_reload_state.get("started")),
-            "state": dict(qwen_reload_state or {}),
-        }
+        if not comfy_cache_hit:
+            self._store_cached_stage_data(
+                stage_name="post_research_comfy",
+                payload=comfy_cache_payload,
+                data=comfy_result_holder,
+            )
+            comfy_unload_error = self._unload_comfy_models()
+            if comfy_unload_error:
+                debug["pipeline_errors"]["comfy_unload_after_generation"] = comfy_unload_error
+        if qwen_slept_for_heavy_stage:
+            qwen_wake_thread, qwen_wake_state = self._start_qwen_text_loader()
+            debug["qwen_wake_after_comfy"] = {
+                "started": bool(qwen_wake_thread is not None or qwen_wake_state.get("started")),
+                "state": dict(qwen_wake_state or {}),
+            }
+        else:
+            debug["qwen_wake_after_comfy"] = {
+                "started": False,
+                "state": {"ready": True, "note": "qwen_kept_loaded_due_to_heavy_stage_cache_hits"},
+            }
 
         if comfy_result_holder.get("error"):
             debug["pipeline_errors"]["comfy_generation"] = comfy_result_holder.get("error")
@@ -2661,11 +5340,32 @@ class NewTimelineFirstModule:
                 for prompt, meta in prompt_meta.items()
             },
             accepted_processed_ids_by_base_context=accepted_processed_ids_by_base_context,
+            pause_after_line_descriptors=True,
         )
 
         debug["selected_ids_by_prompt"] = selected_ids_by_prompt
         debug["accepted_processed_ids_by_base_context"] = accepted_processed_ids_by_base_context
         debug["pipeline_started"] = True
+
+        self._dbg("Qwen speech sync/compression starting after research/C2/SigLIP")
+        qwen_sync_debug = self._ensure_first_module_qwen_sync(first_module_result)
+        chapters_out = list(first_module_result.get("chapters") or chapters_out)
+        debug["qwen_speech_sync"] = {
+            key: value
+            for key, value in (qwen_sync_debug or {}).items()
+            if key != "responses"
+        }
+        self._dbg(
+            "Qwen speech sync/compression done",
+            data={
+                "requests": int((qwen_sync_debug or {}).get("request_count", 0) or 0),
+                "synced_objects": len(first_module_result.get("synced_objects") or []),
+                "cache_hits": int((qwen_sync_debug or {}).get("cache_hits", 0) or 0),
+                "cache_misses": int((qwen_sync_debug or {}).get("cache_misses", 0) or 0),
+            },
+        )
+
+        self._dbg("Preparing space planner objects")
         prepared_objects_bundle = self._prepare_space_planner_objects(
             first_module_result=first_module_result,
             post_research_result={
@@ -2674,18 +5374,186 @@ class NewTimelineFirstModule:
                 "debug": debug,
             },
         )
+        self._dbg(
+            "Space planner objects ready",
+            data={"objects": len(prepared_objects_bundle.get("objects") or []), "saved_path": prepared_objects_bundle.get("saved_path")},
+        )
         first_module_result["synced_objects"] = list(prepared_objects_bundle.get("objects") or [])
         debug["space_planner_objects_ready_path"] = prepared_objects_bundle.get("saved_path")
         debug["space_planner_object_verification"] = prepared_objects_bundle.get("verification")
+        self._dbg("Space planner batch starting")
         space_planner_result = self.run_space_planner_batch(
             chapters_out=chapters_out,
             prepared_objects=list(prepared_objects_bundle.get("objects") or []),
+        )
+        self._dbg(
+            "Space planner batch done",
+            data={
+                "requests": int(space_planner_result.get("request_count", 0) or 0),
+                "cache_hits": int(space_planner_result.get("cache_hits", 0) or 0),
+                "cache_misses": int(space_planner_result.get("cache_misses", 0) or 0),
+            },
         )
         debug["space_planner"] = {
             "request_count": int(space_planner_result.get("request_count", 0) or 0),
             "chunks_ready_path": space_planner_result.get("chunks_ready_path"),
             "responses_path": space_planner_result.get("responses_path"),
+            "cache_hits": int(space_planner_result.get("cache_hits", 0) or 0),
+            "cache_misses": int(space_planner_result.get("cache_misses", 0) or 0),
         }
+        self._dbg("Diagram action planner batch starting")
+        diagram_action_result = self.run_diagram_action_planner_batch(
+            chapters_out=chapters_out,
+            prepared_objects=list(prepared_objects_bundle.get("objects") or []),
+        )
+        self._dbg(
+            "Diagram action planner batch done",
+            data={
+                "requests": int(diagram_action_result.get("request_count", 0) or 0),
+                "cache_hits": int(diagram_action_result.get("cache_hits", 0) or 0),
+                "cache_misses": int(diagram_action_result.get("cache_misses", 0) or 0),
+            },
+        )
+        debug["diagram_action_planner"] = {
+            "request_count": int(diagram_action_result.get("request_count", 0) or 0),
+            "responses_path": diagram_action_result.get("responses_path"),
+            "cache_hits": int(diagram_action_result.get("cache_hits", 0) or 0),
+            "cache_misses": int(diagram_action_result.get("cache_misses", 0) or 0),
+        }
+        self._dbg("Full speech action sync + combined lesson actions starting")
+        combined_actions = self._build_combined_lesson_action_payload(
+            chapters_out=chapters_out,
+            space_planner_result=space_planner_result,
+            diagram_action_result=diagram_action_result,
+        )
+        self._dbg(
+            "Full speech action sync + combined lesson actions done",
+            data={
+                "lesson_actions": len(combined_actions.get("lesson_actions") or []),
+                "sync_cache_hits": int(((combined_actions.get("full_chunk_speech_action_sync") or {}).get("cache_hits", 0) or 0)),
+                "sync_cache_misses": int(((combined_actions.get("full_chunk_speech_action_sync") or {}).get("cache_misses", 0) or 0)),
+            },
+        )
+        debug["combined_lesson_actions"] = {
+            "saved_path": combined_actions.get("saved_path"),
+            "lesson_action_count": len(combined_actions.get("lesson_actions") or []),
+            "space_action_count": len(combined_actions.get("space_actions") or []),
+            "diagram_action_count": len(combined_actions.get("diagram_actions") or []),
+            "silence_action_count": len(combined_actions.get("silence_actions") or []),
+            "full_chunk_speech_action_sync_path": ((combined_actions.get("full_chunk_speech_action_sync") or {}).get("saved_path")),
+            "full_chunk_speech_action_sync_raw_io_path": ((combined_actions.get("full_chunk_speech_action_sync") or {}).get("raw_io_path")),
+            "full_chunk_speech_action_sync_cache_hits": int(((combined_actions.get("full_chunk_speech_action_sync") or {}).get("cache_hits", 0) or 0)),
+            "full_chunk_speech_action_sync_cache_misses": int(((combined_actions.get("full_chunk_speech_action_sync") or {}).get("cache_misses", 0) or 0)),
+        }
+        self._dbg("Diagram stroke meaning batch starting")
+        stroke_meaning_result = self.run_diagram_stroke_meaning_filter_batch(
+            prompt_meta=prompt_meta,
+            selected_ids_by_prompt=selected_ids_by_prompt,
+            pipeline_handle=pipeline_handle,
+        )
+        self._dbg(
+            "Diagram stroke meaning batch done",
+            data={
+                "requests": int(stroke_meaning_result.get("request_count", 0) or 0),
+                "cache_hits": int(stroke_meaning_result.get("cache_hits", 0) or 0),
+                "cache_misses": int(stroke_meaning_result.get("cache_misses", 0) or 0),
+                "error": stroke_meaning_result.get("error"),
+            },
+        )
+        debug["diagram_stroke_meaning"] = {
+            "enabled": bool(stroke_meaning_result.get("enabled", True)),
+            "request_count": int(stroke_meaning_result.get("request_count", 0) or 0),
+            "saved_path": stroke_meaning_result.get("saved_path"),
+            "raw_io_path": stroke_meaning_result.get("raw_io_path"),
+            "cache_hits": int(stroke_meaning_result.get("cache_hits", 0) or 0),
+            "cache_misses": int(stroke_meaning_result.get("cache_misses", 0) or 0),
+            "errors": dict(stroke_meaning_result.get("errors") or {}),
+            "error": stroke_meaning_result.get("error"),
+        }
+        if stroke_meaning_result.get("error") or stroke_meaning_result.get("errors"):
+            debug["pipeline_errors"]["diagram_stroke_meaning"] = stroke_meaning_result.get("error") or stroke_meaning_result.get("errors")
+        self._dbg("Qwen sleep before SAM/DINO candidates starting")
+        qwen_sleep_error = self._sleep_qwen_text_worker()
+        self._dbg("Qwen sleep before SAM/DINO candidates done", data={"error": qwen_sleep_error})
+        if qwen_sleep_error:
+            debug["pipeline_errors"]["qwen_sleep_before_sam_dino_candidates"] = qwen_sleep_error
+
+        diagram_selected_ids_by_prompt = {
+            prompt: list(ids or [])
+            for prompt, ids in selected_ids_by_prompt.items()
+            if int((prompt_meta.get(prompt) or {}).get("diagram", 0) or 0) == 1
+        }
+        diagram_object_candidates = self._prepare_diagram_object_candidates(
+            selected_ids_by_prompt=diagram_selected_ids_by_prompt,
+            pipeline_handle=pipeline_handle,
+        )
+        debug["diagram_object_candidates"] = {
+            "saved_path": diagram_object_candidates.get("saved_path"),
+            "processed_ids": list(diagram_object_candidates.get("processed_ids") or []),
+            "candidate_count": len(diagram_object_candidates.get("flat_candidates") or []),
+            "errors": dict(diagram_object_candidates.get("errors") or {}),
+        }
+        if diagram_object_candidates.get("errors"):
+            debug["pipeline_errors"]["diagram_object_candidates"] = diagram_object_candidates.get("errors")
+
+        self._dbg("Diagram SAM/DINO unload before Qwen vision descriptions starting")
+        sam_dino_unload_error = self._unload_diagram_mask_cluster_models()
+        self._dbg("Diagram SAM/DINO unload before Qwen vision descriptions done", data={"error": sam_dino_unload_error})
+        if sam_dino_unload_error:
+            debug["pipeline_errors"]["diagram_sam_dino_unload_before_qwen_vision"] = sam_dino_unload_error
+
+        self._dbg("Diagram visual description batch starting")
+        diagram_visual_descriptions = self.run_diagram_visual_description_batch(
+            diagram_object_candidates=diagram_object_candidates,
+            prompt_meta=prompt_meta,
+            c2_reports_by_prompt=(c2_result_holder.get("prompts") or {}),
+        )
+        self._dbg(
+            "Diagram visual description batch done",
+            data={
+                "requests": int(diagram_visual_descriptions.get("request_count", 0) or 0),
+                "cache_hits": int(diagram_visual_descriptions.get("cache_hits", 0) or 0),
+                "cache_misses": int(diagram_visual_descriptions.get("cache_misses", 0) or 0),
+                "errors": len(diagram_visual_descriptions.get("errors") or {}),
+            },
+        )
+        debug["diagram_visual_descriptions"] = {
+            "request_count": int(diagram_visual_descriptions.get("request_count", 0) or 0),
+            "saved_path": diagram_visual_descriptions.get("saved_path"),
+            "cache_hits": int(diagram_visual_descriptions.get("cache_hits", 0) or 0),
+            "cache_misses": int(diagram_visual_descriptions.get("cache_misses", 0) or 0),
+            "errors": dict(diagram_visual_descriptions.get("errors") or {}),
+        }
+        if diagram_visual_descriptions.get("errors"):
+            debug["pipeline_errors"]["diagram_visual_descriptions"] = diagram_visual_descriptions.get("errors")
+
+        self._dbg("Diagram component stroke match batch starting")
+        diagram_component_stroke_matches = self.run_diagram_component_stroke_match_batch(
+            prompt_meta=prompt_meta,
+            selected_ids_by_prompt=selected_ids_by_prompt,
+            diagram_object_candidates=diagram_object_candidates,
+            diagram_visual_descriptions=diagram_visual_descriptions,
+            stroke_meaning_result=stroke_meaning_result,
+        )
+        self._dbg(
+            "Diagram component stroke match batch done",
+            data={
+                "requests": int(diagram_component_stroke_matches.get("request_count", 0) or 0),
+                "cache_hits": int(diagram_component_stroke_matches.get("cache_hits", 0) or 0),
+                "cache_misses": int(diagram_component_stroke_matches.get("cache_misses", 0) or 0),
+                "errors": len(diagram_component_stroke_matches.get("errors") or {}),
+            },
+        )
+        debug["diagram_component_stroke_matches"] = {
+            "request_count": int(diagram_component_stroke_matches.get("request_count", 0) or 0),
+            "saved_path": diagram_component_stroke_matches.get("saved_path"),
+            "raw_io_path": diagram_component_stroke_matches.get("raw_io_path"),
+            "cache_hits": int(diagram_component_stroke_matches.get("cache_hits", 0) or 0),
+            "cache_misses": int(diagram_component_stroke_matches.get("cache_misses", 0) or 0),
+            "errors": dict(diagram_component_stroke_matches.get("errors") or {}),
+        }
+        if diagram_component_stroke_matches.get("errors"):
+            debug["pipeline_errors"]["diagram_component_stroke_matches"] = diagram_component_stroke_matches.get("errors")
         return {
             "topic": normalize_ws(topic),
             "prompt_meta": prompt_meta,
@@ -2695,6 +5563,12 @@ class NewTimelineFirstModule:
             "space_planner_objects": prepared_objects_bundle.get("objects") or [],
             "space_planner_object_verification": prepared_objects_bundle.get("verification") or {},
             "space_planner": space_planner_result,
+            "diagram_action_planner": diagram_action_result,
+            "diagram_stroke_meaning": stroke_meaning_result,
+            "diagram_object_candidates": diagram_object_candidates,
+            "diagram_visual_descriptions": diagram_visual_descriptions,
+            "diagram_component_stroke_matches": diagram_component_stroke_matches,
+            "combined_lesson_actions": combined_actions,
         }
 
     def run_full_timeline(self, topic: str) -> Dict[str, Any]:
@@ -2705,3 +5579,59 @@ class NewTimelineFirstModule:
             "first_module": first_module_result,
             "post_research_pipeline": post_research_result,
         }
+
+
+def _json_safe_for_main(value: Any) -> Any:
+    if value is None or isinstance(value, (str, int, float, bool)):
+        return value
+    if isinstance(value, Path):
+        return str(value)
+    if isinstance(value, dict):
+        return {str(key): _json_safe_for_main(item) for key, item in value.items()}
+    if isinstance(value, (list, tuple, set)):
+        return [_json_safe_for_main(item) for item in value]
+    return repr(value)
+
+
+def _build_main_arg_parser() -> argparse.ArgumentParser:
+    parser = argparse.ArgumentParser(description="Run NEWtimeline.py end-to-end for one topic.")
+    parser.add_argument("topic", help="Lesson topic / prompt to run through the pipeline.")
+    parser.add_argument("--cache", action="store_true", help="Use NEWtimeline cached stages where available.")
+    parser.add_argument("--out", default="PipelineOutputs/newtimeline_run_result.json")
+    parser.add_argument("--debug-out-dir", default="PipelineOutputs")
+    return parser
+
+
+def main() -> None:
+    args = _build_main_arg_parser().parse_args()
+    topic = normalize_ws(args.topic)
+    if not topic:
+        raise SystemExit("topic cannot be empty")
+    runner = NewTimelineFirstModule(
+        debug_out_dir=str(args.debug_out_dir),
+        gpt_cache=bool(args.cache),
+        debug_print=True,
+    )
+    result = runner.run_full_timeline(topic)
+    out_path = Path(args.out)
+    out_path.parent.mkdir(parents=True, exist_ok=True)
+    out_path.write_text(
+        json.dumps(
+            {
+                "schema": "newtimeline_direct_main_run_v1",
+                "topic": topic,
+                "cache_enabled": bool(args.cache),
+                "written_at_unix": time.time(),
+                "result": _json_safe_for_main(result),
+            },
+            ensure_ascii=False,
+            indent=2,
+        ),
+        encoding="utf-8",
+    )
+    print(f"[NEWtimeline] complete. Result written to {out_path}")
+
+
+if __name__ == "__main__":
+    main()
+

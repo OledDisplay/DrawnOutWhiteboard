@@ -3,6 +3,7 @@ from __future__ import annotations
 import sys
 import unittest
 from pathlib import Path
+from typing import List
 
 import numpy as np
 
@@ -179,6 +180,39 @@ class ProposalSuppressionTests(unittest.TestCase):
         self.assertEqual([row["proposal_id"] for row in kept], ["focused"])
 
 
+class PromptConsolidationTests(unittest.TestCase):
+    def test_same_point_same_scale_masks_collapse_to_best_candidate(self) -> None:
+        mask_a = np.zeros((90, 90), dtype=bool)
+        mask_a[20:42, 20:42] = True
+        mask_b = np.zeros((90, 90), dtype=bool)
+        mask_b[21:43, 21:43] = True
+        mask_parent = np.zeros((90, 90), dtype=bool)
+        mask_parent[16:50, 16:50] = True
+
+        cfg = dmc.build_config(
+            prompt_keep_max_per_point=3,
+            prompt_same_scale_area_ratio_max=1.6,
+            prompt_same_scale_iou_thresh=0.5,
+            prompt_parent_containment_thresh=0.8,
+            prompt_parent_max_area_ratio=5.0,
+        )
+        kept, prompt_debug = dmc._consolidate_prompt_level_proposals(
+            [
+                {"proposal_id": "a", "prompt_key": "10_10", "prompt_point": [10.0, 10.0], "mask": mask_a, "bbox_xyxy": [20, 20, 42, 42], "mask_area_px": int(mask_a.sum()), "sam_pred_iou": 0.90, "sam_stability_score": 0.90},
+                {"proposal_id": "b", "prompt_key": "10_10", "prompt_point": [10.0, 10.0], "mask": mask_b, "bbox_xyxy": [21, 21, 43, 43], "mask_area_px": int(mask_b.sum()), "sam_pred_iou": 0.93, "sam_stability_score": 0.92},
+                {"proposal_id": "p", "prompt_key": "10_10", "prompt_point": [10.0, 10.0], "mask": mask_parent, "bbox_xyxy": [16, 16, 50, 50], "mask_area_px": int(mask_parent.sum()), "sam_pred_iou": 0.91, "sam_stability_score": 0.91},
+            ],
+            cfg,
+        )
+        kept_ids = {row["proposal_id"] for row in kept}
+        self.assertNotIn("a", kept_ids)
+        self.assertIn("b", kept_ids)
+        self.assertIn("p", kept_ids)
+        parent_row = next(row for row in kept if row["proposal_id"] == "p")
+        self.assertIn("b", parent_row.get("prompt_child_mask_ids", []))
+        self.assertEqual(len(prompt_debug), 1)
+
+
 class MergeTests(unittest.TestCase):
     def test_merge_component_proposals_unions_similar_neighbors(self) -> None:
         img = np.full((100, 100, 3), 255, dtype=np.uint8)
@@ -315,6 +349,51 @@ class MergeTests(unittest.TestCase):
         )
         self.assertFalse(ok)
         self.assertLess(metrics["dino_cosine"], cfg.merge_soft_min_dino_cosine)
+
+
+class LocalIslandGroupingTests(unittest.TestCase):
+    def test_local_island_grouping_rejects_simple_similarity_chain(self) -> None:
+        cfg = dmc.build_config(
+            local_group_max_neighbors=6,
+            local_group_mutual_top_k=4,
+            local_group_base_gap_px=8.0,
+            local_group_gap_diag_scale=0.25,
+            local_group_max_center_factor=2.8,
+            local_group_area_ratio_max=2.0,
+            local_group_min_dino_cosine=0.95,
+            local_group_min_color_similarity=0.9,
+            local_group_min_shape_similarity=0.9,
+            local_group_min_combined_score=0.93,
+            local_group_min_shared_neighbors=1,
+        )
+
+        def make_row(pid: str, x0: int, x1: int, emb: List[float]) -> dict:
+            mask = np.zeros((120, 120), dtype=bool)
+            mask[20:40, x0:x1] = True
+            row = {
+                "proposal_id": pid,
+                "mask": mask,
+                "bbox_xyxy": [x0, 20, x1, 40],
+                "mask_area_px": int(mask.sum()),
+                "sam_pred_iou": 0.95,
+                "sam_stability_score": 0.94,
+                "dino_embedding": emb,
+                "color_histogram": [1.0, 0.0, 0.0, 0.0],
+                "contrast_color_histogram": [1.0, 0.0, 0.0, 0.0],
+                "shape_features": {"aspect_ratio": 1.0, "solidity": 0.95, "fill_ratio": 0.9, "eccentricity": 0.1},
+            }
+            return row
+
+        proposals = dmc._annotate_basic_proposal_geometry(
+            [
+                make_row("a", 10, 30, [1.0, 0.0, 0.0]),
+                make_row("b", 32, 52, [0.99, 0.01, 0.0]),
+                make_row("c", 54, 74, [0.98, 0.02, 0.0]),
+            ]
+        )
+        groups, _edge_debug = dmc._build_local_island_groups(proposals, cfg)
+        member_counts = sorted(group["member_count"] for group in groups)
+        self.assertEqual(member_counts, [1, 2])
 
     def test_should_merge_pair_allows_similarity_only_merge(self) -> None:
         mask_a = np.zeros((120, 120), dtype=bool)

@@ -8,17 +8,14 @@ LOGICAL_TIMELINE_SCHEMA: Dict[str, Any] = {
     "properties": {
         "chapters": {
             "type": "array",
-            "minItems": 1,
-            "maxItems": 3,
             "items": {
                 "type": "object",
                 "properties": {
-                    "chapter_id": {"type": "string", "minLength": 2},
-                    "title": {"type": "string", "minLength": 1},
+                    "chapter_id": {"type": "string"},
+                    "title": {"type": "string"},
                     "steps": {
                         "type": "object",
-                        "minProperties": 1,
-                        "additionalProperties": {"type": "string", "minLength": 1},
+                        "additionalProperties": {"type": "string"},
                     },
                 },
                 "required": ["chapter_id", "title", "steps"],
@@ -36,8 +33,7 @@ CHAPTER_SPEECH_SCHEMA: Dict[str, Any] = {
     "properties": {
         "steps": {
             "type": "object",
-            "minProperties": 1,
-            "additionalProperties": {"type": "string", "minLength": 1},
+            "additionalProperties": {"type": "string"},
         }
     },
     "required": ["steps"],
@@ -53,16 +49,15 @@ IMAGE_REQUEST_SCHEMA: Dict[str, Any] = {
             "items": {
                 "type": "object",
                 "properties": {
-                    "name": {"type": "string", "minLength": 1},
+                    "name": {"type": "string"},
                     "diagram": {"type": "integer", "enum": [0, 1]},
                     "required_objects": {
                         "type": "array",
-                        "items": {"type": "string", "minLength": 1},
+                        "items": {"type": "string"},
                     },
                     "relevant_steps": {
                         "type": "array",
-                        "minItems": 1,
-                        "items": {"type": "string", "minLength": 1},
+                        "items": {"type": "string"},
                     },
                 },
                 "required": ["name", "diagram", "required_objects", "relevant_steps"],
@@ -83,12 +78,11 @@ TEXT_REQUEST_SCHEMA: Dict[str, Any] = {
             "items": {
                 "type": "object",
                 "properties": {
-                    "name": {"type": "string", "minLength": 1},
-                    "text_style_description": {"type": "string", "minLength": 1},
+                    "name": {"type": "string"},
+                    "text_style_description": {"type": "string"},
                     "relevant_steps": {
                         "type": "array",
-                        "minItems": 1,
-                        "items": {"type": "string", "minLength": 1},
+                        "items": {"type": "string"},
                     },
                 },
                 "required": ["name", "text_style_description", "relevant_steps"],
@@ -131,6 +125,37 @@ QWEN_SPACE_PLANNER_JSON_HINT = """{
       "corners": [[0, 0], [0, 3], [5, 0], [5, 3]]
     }
   ]
+}"""
+
+
+QWEN_FULL_SPEECH_ACTION_SYNC_JSON_HINT = """{
+  "actions": [
+    {"action_id": "A1", "full_word_index": 12},
+    {"action_id": "A2", "full_word_index": 19}
+  ]
+}"""
+
+
+QWEN_STROKE_MEANING_JSON_HINT = """{
+  "accepted": [{"s": 12, "d": "short visual reason", "loc": "short location"}],
+  "groups": [{"id": "G1", "strokes": [12, 13, 14], "d": "cluster/group reason", "source": "old:4|new"}],
+  "rejected": [{"range": [0, 11], "why": "tiny/simple connector debris"}]
+}"""
+
+
+QWEN_NON_SEMANTIC_IMAGE_DESCRIPTION_JSON_HINT = """{
+  "description": "tight non-semantic visual description of the colored visible shapes"
+}"""
+
+
+QWEN_DIAGRAM_COMPONENT_STROKE_MATCH_JSON_HINT = """{
+  "components": {
+    "component name": {
+      "stroke_ids": [1, 2, 3],
+      "visual_description_of_match": "what the chosen strokes visually look like",
+      "reason": "why that visual content is the best match for the component descriptions"
+    }
+  }
 }"""
 
 
@@ -402,4 +427,200 @@ def qwen_space_planner_system_prompt() -> str:
         "- Respect each object's size.\n\n"
         "Return the action list now.\n"
         f"{QWEN_SPACE_PLANNER_JSON_HINT}\n"
+    )
+
+
+def qwen_diagram_action_planner_system_prompt() -> str:
+    return (
+        "You are planning whiteboard interaction actions for ONE STEP of teacher speech.\n\n"
+        "The input JSON gives you step_id, speech, and images.\n"
+        "Each image row already includes the exact active word range for that step.\n"
+        "All sync indexes are STEP-LOCAL word indexes where the first spoken word is 1.\n\n"
+        "Output rules:\n"
+        "- Output JSON only.\n"
+        "- No markdown fences.\n"
+        "- Return exactly one top-level field: actions.\n"
+        "- Every action object must have exactly these fields:\n"
+        "  type\n"
+        "  target\n"
+        "  data\n"
+        "  sync_index\n"
+        "  init\n"
+        "- data must always be a string. Use \"\" when not needed.\n"
+        "- init must be 1 or 0 only.\n"
+        "- sync_index must be an integer inside the active word range of the targeted image.\n\n"
+        "Allowed action types only:\n"
+        "- highlight_image\n"
+        "- write_text_image\n"
+        "- highlight_component\n"
+        "- zoom_component\n"
+        "- label_component\n"
+        "- connect_component_to_component\n"
+        "- write_text_component\n\n"
+        "Targeting rules:\n"
+        "- For a full image target, target must be exactly the image name.\n"
+        "- For a component target, target must be exactly \"image_name : component_name\".\n"
+        "- For connect_component_to_component, target is the first component and data is the second component target.\n"
+        "- Do not invent component names outside the provided component lists.\n\n"
+        "Planning rules:\n"
+        "- Focus on concrete speech-supported actions only.\n"
+        "- Prefer a small number of relevant actions over generic spam.\n"
+        "- Use component actions when the speech clearly talks about a component.\n"
+        "- Use image-level actions when the speech refers to the full diagram or full image.\n"
+        "- If you start a stateful action with init=1 and the step clearly moves on, end it with the same action payload and init=0.\n"
+        "- Do not output commentary, analysis, notes, or any keys outside the schema.\n"
+    )
+
+
+def qwen_c2_component_verifier_system_prompt() -> str:
+    return (
+        "You are checking whether a requested diagram component list is already good enough.\n\n"
+        "Goal:\n"
+        "- Decide whether the provided required_objects list already looks like a solid full list of the parts or sub-objects"
+        " the teacher needs for this diagram prompt.\n"
+        "- If it is already good enough, stage 1 component discovery should be skipped.\n"
+        "- If the list is clearly thin, vague, or missing major visual parts, stage 1 should still run.\n\n"
+        "Output rules:\n"
+        "- Output JSON only.\n"
+        "- No markdown fences.\n"
+        "- Return exactly these top-level fields only:\n"
+        "  skip_stage1\n"
+        "  missing\n"
+        "- skip_stage1 must be 1 or 0.\n"
+        "- missing must be a short list of concrete component names when skip_stage1=0.\n"
+        "- If skip_stage1=1, missing should be [].\n"
+        "- Do not include explanations.\n"
+        "- Be conservative: only set skip_stage1=1 when the list already looks like a coherent, concrete component set.\n"
+    )
+
+
+def qwen_full_speech_action_sync_system_prompt() -> str:
+    return (
+        "You are syncing action timings from COMPRESSED step speech back into the FULL original step speech.\n\n"
+        "The input JSON gives you:\n"
+        "- step_id\n"
+        "- compressed_speech\n"
+        "- full_speech\n"
+        "- actions\n\n"
+        "Action rules:\n"
+        "- Every action already has a compressed_word_index.\n"
+        "- compressed_word_index is STEP-LOCAL and 1-based.\n"
+        "- Your job is to choose the best matching FULL speech word index for each action.\n"
+        "- full_word_index must also be STEP-LOCAL and 1-based.\n"
+        "- Keep the action order stable.\n"
+        "- Keep mappings monotonic when the action order is monotonic.\n"
+        "- Use the compressed speech wording, meaning, and nearby phrasing to find the equivalent place in the full speech.\n"
+        "- If an action belongs near the start or end of the step, keep that behavior in the full speech too.\n\n"
+        "Output rules:\n"
+        "- Output JSON only.\n"
+        "- No markdown fences.\n"
+        "- Return exactly one top-level field: actions.\n"
+        "- Each action row must contain exactly:\n"
+        "  action_id\n"
+        "  full_word_index\n"
+        "- action_id must match an input action_id exactly.\n"
+        "- full_word_index must be an integer.\n"
+        "- Do not add explanations.\n"
+        f"{QWEN_FULL_SPEECH_ACTION_SYNC_JSON_HINT}\n"
+    )
+
+
+def qwen_stroke_meaning_filter_system_prompt() -> str:
+    return (
+        "You are compressing a stroke-level map of one diagram into the parts likely to matter.\n\n"
+        "The input gives:\n"
+        "- diagram name\n"
+        "- expected component names\n"
+        "- strokes as a very compact map: stroke_id -> visual/location description\n"
+        "- original endpoint-touch groups as a compact map\n\n"
+        "Your job:\n"
+        "- Interpret the drawing, then keep only strokes or stroke groups that may represent real diagram content.\n"
+        "- Prefer meaningful groups over isolated strokes when nearby strokes together look like an object.\n"
+        "- Use original groups when they help, but you may create NEW groups from nearby strokes.\n"
+        "- Location matters. If several curved/special strokes sit in the same region, promote them together even if input grouping missed them.\n"
+        "- A single stroke can be accepted if it looks meaningful on its own.\n"
+        "- It is allowed to accept very little when the map is mostly mechanical debris.\n\n"
+        "Reasoning focus:\n"
+        "- Spend your effort deciding which strokes/groups are plausible diagram parts.\n"
+        "- Do not over-polish descriptions or rejected reasons.\n"
+        "- Keep all text short. Each accepted description should explain the visual clue that made it worth keeping.\n"
+        "- Rejected ranges are chronological stroke-id ranges, with one tiny reason per range.\n\n"
+        "Output rules:\n"
+        "- Output JSON only. No markdown fences.\n"
+        "- Use exactly these top-level keys: accepted, groups, rejected.\n"
+        "- accepted: list of objects with s, d, loc.\n"
+        "- groups: list of objects with id, strokes, d, source. source is old:<group_index> or new.\n"
+        "- rejected: list of objects with range and why.\n"
+        "- Reference strokes only by integer id.\n"
+        "- Do not invent stroke ids.\n"
+        "- If a group is accepted, include all stroke ids that belong to that group.\n"
+        "- Keep d and loc under about 14 words each.\n\n"
+        "Example JSON shape:\n"
+        f"{QWEN_STROKE_MEANING_JSON_HINT}\n"
+    )
+
+
+def qwen_non_semantic_image_description_system_prompt() -> str:
+    return (
+        "You are a mechanical visual describer for cropped diagram/object images.\n\n"
+        "Your task is to translate the image into raw text about what is visibly present.\n"
+        "Do NOT identify semantic meaning. Do not name the object as a real-world object, biological part, machine part, symbol, label, or known thing.\n"
+        "Describe visible shapes, colored regions, blobs, membranes, clusters, compact detail, outlines, gaps, texture, material-like surface, scale, position, and layout.\n"
+        "If one visible object dominates, describe its characteristics more carefully: outline, interior marks, color distribution, relative size, thickness, curvature, segmentation, repeated parts, and how its visible pieces are distributed.\n"
+        "Also mention secondary colored shapes if they are present and visually separate.\n\n"
+        "Important image rule:\n"
+        "- Describe ONLY colored, non-grayscale parts of the image.\n"
+        "- Some images include grayscale or gray-background context; ignore that grayscale material unless it is directly part of a colored visible mark.\n"
+        "- Do not describe the gray background, shadows, crop frame, or neutral backdrop as content.\n\n"
+        "Style discipline:\n"
+        "- Keep the description tight but useful.\n"
+        "- Usually one compact paragraph is enough.\n"
+        "- Do not spiral into exhaustive pixel-level narration.\n"
+        "- Do not infer purpose, identity, function, or component name.\n\n"
+        "Output rules:\n"
+        "- Output JSON only.\n"
+        "- No markdown fences.\n"
+        "- Return exactly one top-level field: description.\n"
+        "- The description must be a plain string.\n\n"
+        "Example JSON shape:\n"
+        f"{QWEN_NON_SEMANTIC_IMAGE_DESCRIPTION_JSON_HINT}\n"
+    )
+
+
+def qwen_diagram_component_stroke_match_system_prompt() -> str:
+    return (
+        "You are matching a diagram's canonical component list to the strokes that visually represent those components.\n\n"
+        "We start with the diagram name: the thing whose contents must be identified. The diagram is represented through a compressed structure of polylines, which we call strokes. These strokes create a drawn, simplified, traced representation of the diagram. Everything we do to think about the diagram's visual contents is through those polylines: not pixels and not bounding boxes, but single polylines and groups of polylines.\n\n"
+        "Your task is to know what components the diagram is comprised of, know how each component looks visually, and pinpoint what strokes represent or stand behind each component in the diagram. We are finding each component in the diagram by linking it to its strokes.\n\n"
+        "The stroke representation of the diagram, its mapped raw contents that must be sorted out and linked to components, comes in two formats.\n\n"
+        "First, we have ready-created clusters of strokes that have been identified as strong potential objects. For each of these clusters there is a raw visual description, a printout of how that isolated cluster looks. Use this visual description to know about the object. These candidate objects also have the ids of the strokes that comprise them attached and an x, y location in the image as an orienter. This is the candidate object payload.\n\n"
+        "Second, we have a mental visual map of the diagram. This contains descriptions on a stroke, polyline level. These are descriptions of the actual lines: their structure, whether they are straight or curved, and where they are located. This mental map also has groupings of strokes, but a group here still only describes line contents. With this resource you are analyzing the diagram on a deep polyline level. Singular strokes can also be key parts of components, or full components, and more commonly groups of strokes can be components.\n\n"
+        "The original candidate objects and the mental-map groups are independent. They are generated through different paths and both have their separate values. Treat them on an equal field as competitors, no matter if one type of description looks more appealing. Because both kinds of groupings are synced to the same stroke ids, overlap between candidates and mental-map groups is extra evidence that the candidate or group is relevant and real.\n\n"
+        "This is the diagram representation. Now match it to components. To make a more accurate and overall better match, do NOT match based on your own known knowledge of what the components should look like. Instead, a canonical component list is provided, and each component includes two independently sourced descriptions of how it looks. Use those two component descriptions and match them to the content in the diagram state.\n\n"
+        "Cross-compare each component's descriptions against all of the different visual entities in the diagram: candidate objects, stroke-level groups, single strokes, and mixes of all of them. Find where the description matches best. Every component should come out with a match. You must have only the best match for one component and leave other entities to downstream components.\n\n"
+        "The output is a map of each component to stroke indexes matched to its name, plus a visual description of the match and a reason field. This permits combining single provided strokes into a custom group or mix of indexes for a component, which is particularly useful for very low-level components. Stroke ids can be copied directly from a good candidate, copied from a mental-map group, or compiled manually from individual strokes.\n\n"
+        "Reasoning guidance:\n"
+        "- Try to apply a good mental map for the diagram and its strokes.\n"
+        "- Use all available resources: candidate object descriptions, candidate locations, stroke descriptions, mental-map groups, component visual descriptions, and common sense about the structure of the diagram.\n"
+        "- Applying known knowledge about how the diagram is structured to the mental map is useful and valid, but do not replace component-specific visual evidence with remembered knowledge of the component.\n"
+        "- Force through multi-layer reasoning behind each decision: visual match, location, grouping overlap, nearby structure, and uniqueness against other components.\n"
+        "- Output the components with the stroke ids of their match, where the stroke ids can be directly copied from a good match or compiled manually.\n\n"
+        "Matching constraints:\n"
+        "- The full input component list must be output.\n"
+        "- A match must be attempted for every component.\n"
+        "- Matches cannot be the exact same for different components.\n"
+        "- Do not give two components groups that are about 90 percent the same strokes.\n"
+        "- Choose the closest thing available even when uncertain.\n"
+        "- Only in a horrifying catastrophe should stroke_ids be null. If that happens, still include visual_description_of_match and reason explaining the failure.\n\n"
+        "Output rules:\n"
+        "- Output JSON only.\n"
+        "- No markdown fences.\n"
+        "- Return exactly one top-level field: components.\n"
+        "- The components object must contain every component name from the input exactly once as a key.\n"
+        "- Each component value must contain exactly: stroke_ids, visual_description_of_match, reason.\n"
+        "- stroke_ids must be a list of integer stroke ids, or null only for catastrophic no-match cases.\n"
+        "- visual_description_of_match should mirror what you found visually in the chosen strokes.\n"
+        "- reason should explain how that visual match fits the component's two visual descriptions and why it wins over nearby alternatives.\n\n"
+        "Example JSON shape:\n"
+        f"{QWEN_DIAGRAM_COMPONENT_STROKE_MATCH_JSON_HINT}\n"
     )

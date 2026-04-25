@@ -957,11 +957,9 @@ class PipelineHandle:
     colours_done: threading.Event
     qwen_done: threading.Event
     pipeline_done: threading.Event
-    line_descriptors_done: threading.Event
 
     selection_done: threading.Event
     pinecone_done: threading.Event
-    continue_after_line_descriptors: threading.Event
 
     out_dir: Path
     errors: Dict[str, str] = field(default_factory=dict)
@@ -978,7 +976,6 @@ class PipelineHandle:
 
     diagram_mode_by_base_context: Dict[str, int] = field(default_factory=dict)
     diagram_required_objects_by_base_context: Dict[str, List[str]] = field(default_factory=dict)
-    pause_after_line_descriptors: bool = False
 
 
     def wait_colours(self, timeout: Optional[float] = None) -> bool:
@@ -986,12 +983,6 @@ class PipelineHandle:
 
     def wait_qwen(self, timeout: Optional[float] = None) -> bool:
         return self.qwen_done.wait(timeout)
-
-    def wait_line_descriptors(self, timeout: Optional[float] = None) -> bool:
-        return self.line_descriptors_done.wait(timeout)
-
-    def release_after_line_descriptors(self) -> None:
-        self.continue_after_line_descriptors.set()
 
     def wait_selection(self, timeout: Optional[float] = None) -> bool:
         return self.selection_done.wait(timeout)
@@ -1033,7 +1024,6 @@ def _pipeline_worker(
     diagram_mode_by_base_context: Optional[Dict[str, int]] = None,
     diagram_required_objects_by_base_context: Optional[Dict[str, List[str]]] = None,
     accepted_processed_ids_by_base_context: Optional[Dict[str, List[str]]] = None,
-    pause_after_line_descriptors: bool = False,
 ) -> None:
 
     out_dir = handle.out_dir
@@ -1352,10 +1342,6 @@ def _pipeline_worker(
                 handle.errors["line_descriptors"] = json.dumps(desc_summary.get("errors", [])[:5], ensure_ascii=False)
         else:
             handle.errors["line_descriptors"] = "no_strokevectors_for_diagram_indices"
-        handle.line_descriptors_done.set()
-        if bool(pause_after_line_descriptors or getattr(handle, "pause_after_line_descriptors", False)):
-            print("[pause] LineDescriptors done; waiting before ImageClusters...")
-            handle.continue_after_line_descriptors.wait()
 
         # Every accepted diagram also produces clusters so the final matcher can
         # choose between ready-made groups and stroke-level regrouping.
@@ -1378,6 +1364,9 @@ def _pipeline_worker(
             )
         except Exception:
             pass
+        diagram_cluster_backend = str(os.getenv("DIAGRAM_CLUSTER_BACKEND", "stroke") or "stroke").strip().lower()
+        needs_vectors = diagram_cluster_backend != "sam2_dinov2"
+
         if not diagram_text_items or not diagram_preproc_by_idx or (needs_vectors and not diagram_vectors_by_idx):
             try:
                 pre_keys = set(int(k) for k in preproc_by_idx.keys())
@@ -1394,11 +1383,10 @@ def _pipeline_worker(
             print("[done] no diagram items available for clusters -> finished after colours.")
             return
 
-<<<<<<< HEAD
-        if diagram_cluster_backend == "sam3_dinov2":
+        if diagram_cluster_backend == "sam2_dinov2":
             import DiagramMaskClusters
 
-            print("[11/11] DiagramMaskClusters (SAM3 + DINOv2, all diagrams, in-memory)...")
+            print("[11/11] DiagramMaskClusters (SAM2 + DINOv2, all diagrams, in-memory)...")
             with stage("DiagramMaskClusters.cluster_diagrams_in_memory"):
                 DiagramMaskClusters.cluster_diagrams_in_memory(
                     preproc_by_idx=diagram_preproc_by_idx,
@@ -1412,15 +1400,6 @@ def _pipeline_worker(
                     vectors_by_idx=diagram_vectors_by_idx,
                     save_outputs=True,
                 )
-=======
-        print("[11/11] ImageClusters (all diagrams, in-memory)...")
-        with stage("ImageClusters.cluster_in_memory"):
-            ImageClusters.cluster_in_memory(
-                preproc_by_idx=diagram_preproc_by_idx,
-                vectors_by_idx=diagram_vectors_by_idx,
-                save_outputs=True,
-            )
->>>>>>> 594dde0d1b977be7024dabd24da069fd0bd6dc45
 
     except BaseException as e:
         handle.errors["pipeline_fatal"] = f"{type(e).__name__}: {e}"
@@ -1429,8 +1408,6 @@ def _pipeline_worker(
     finally:
         handle.selection_done.set()
         handle.qwen_done.set()
-        handle.line_descriptors_done.set()
-        handle.continue_after_line_descriptors.set()
         handle.colours_done.set()
         handle.pinecone_done.set()
         handle.pipeline_done.set()
@@ -1453,7 +1430,6 @@ def start_pipeline_background(
     diagram_mode_by_base_context: Optional[Dict[str, int]] = None,
     diagram_required_objects_by_base_context: Optional[Dict[str, List[str]]] = None,
     accepted_processed_ids_by_base_context: Optional[Dict[str, List[str]]] = None,
-    pause_after_line_descriptors: bool = False,
 ) -> PipelineHandle:
 
     if REMOTE_API:
@@ -1468,7 +1444,6 @@ def start_pipeline_background(
             diagram_mode_by_base_context=diagram_mode_by_base_context,
             diagram_required_objects_by_base_context=diagram_required_objects_by_base_context,
             accepted_processed_ids_by_base_context=accepted_processed_ids_by_base_context,
-            pause_after_line_descriptors=False,
         )
 
     out_dir = BASE_DIR / "PipelineOutputs"
@@ -1476,12 +1451,8 @@ def start_pipeline_background(
     colours_done = threading.Event()
     qwen_done = threading.Event()
     pipeline_done = threading.Event()
-    line_descriptors_done = threading.Event()
     selection_done = threading.Event()
     pinecone_done = threading.Event()
-    continue_after_line_descriptors = threading.Event()
-    if not pause_after_line_descriptors:
-        continue_after_line_descriptors.set()
 
     dummy_thread = threading.Thread(target=lambda: None)
 
@@ -1490,15 +1461,12 @@ def start_pipeline_background(
         colours_done=colours_done,
         qwen_done=qwen_done,
         pipeline_done=pipeline_done,
-        line_descriptors_done=line_descriptors_done,
         selection_done=selection_done,
         pinecone_done=pinecone_done,
-        continue_after_line_descriptors=continue_after_line_descriptors,
         out_dir=out_dir,
         errors={},
         diagram_mode_by_base_context=dict(diagram_mode_by_base_context or {}),
         diagram_required_objects_by_base_context=dict(diagram_required_objects_by_base_context or {}),
-        pause_after_line_descriptors=bool(pause_after_line_descriptors),
     )
 
     # Model loading is owned by the timeline orchestrator now.
@@ -1519,7 +1487,6 @@ def start_pipeline_background(
             diagram_mode_by_base_context=diagram_mode_by_base_context,
             diagram_required_objects_by_base_context=diagram_required_objects_by_base_context,
             accepted_processed_ids_by_base_context=accepted_processed_ids_by_base_context,
-            pause_after_line_descriptors=bool(pause_after_line_descriptors),
         ),
     )
     handle.thread = t
@@ -1539,7 +1506,6 @@ def run_pipeline_blocking(
     diagram_mode_by_base_context: Optional[Dict[str, int]] = None,
     diagram_required_objects_by_base_context: Optional[Dict[str, List[str]]] = None,
     accepted_processed_ids_by_base_context: Optional[Dict[str, List[str]]] = None,
-    pause_after_line_descriptors: bool = False,
 ) -> PipelineHandle:
     if REMOTE_API:
         out = _http_post_json(
@@ -1554,7 +1520,6 @@ def run_pipeline_blocking(
                 "diagram_mode_by_base_context": diagram_mode_by_base_context or {},
                 "diagram_required_objects_by_base_context": diagram_required_objects_by_base_context or {},
                 "accepted_processed_ids_by_base_context": accepted_processed_ids_by_base_context or {},
-                "pause_after_line_descriptors": False,
             },
             timeout=3600,
         )
@@ -1565,10 +1530,8 @@ def run_pipeline_blocking(
             colours_done=threading.Event(),
             qwen_done=threading.Event(),
             pipeline_done=threading.Event(),
-            line_descriptors_done=threading.Event(),
             selection_done=threading.Event(),
             pinecone_done=threading.Event(),
-            continue_after_line_descriptors=threading.Event(),
             out_dir=out_dir,
             errors={},
             diagram_mode_by_base_context=out.get("diagram_mode_by_base_context") or {},
@@ -1576,8 +1539,6 @@ def run_pipeline_blocking(
         )
         h.colours_done.set()
         h.qwen_done.set()
-        h.line_descriptors_done.set()
-        h.continue_after_line_descriptors.set()
         h.selection_done.set()
         h.pinecone_done.set()
         h.pipeline_done.set()
@@ -1603,7 +1564,6 @@ def run_pipeline_blocking(
         diagram_mode_by_base_context=diagram_mode_by_base_context,
         diagram_required_objects_by_base_context=diagram_required_objects_by_base_context,
         accepted_processed_ids_by_base_context=accepted_processed_ids_by_base_context,
-        pause_after_line_descriptors=False,
     )
     h.pipeline_done.wait()
     return h
