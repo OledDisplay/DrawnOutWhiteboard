@@ -6350,6 +6350,8 @@ class LessonTimeline:
         prepared: Dict[str, Dict[str, Any]] = {}
         base_dir = Path(__file__).resolve().parent
         diagram_cluster_backend = str(os.getenv("DIAGRAM_CLUSTER_BACKEND", "stroke") or "stroke").strip().lower()
+        if diagram_cluster_backend == "sam2_dinov2":
+            diagram_cluster_backend = "sam3_dinov2"
         diagram_cluster_force_refresh = str(os.getenv("DIAGRAM_CLUSTER_FORCE_REFRESH", "0") or "0").strip().lower() in {"1", "true", "yes", "on"}
 
         for image_name, asset in (assets_by_name or {}).items():
@@ -6373,7 +6375,7 @@ class LessonTimeline:
                 processed_image_path = self._resolve_processed_png_path(pid)
                 cluster_map_path = base_dir / "ClusterMaps" / pid / "clusters.json"
                 render_dir = base_dir / "ClusterRenders" / pid
-                if diagram_cluster_backend == "sam2_dinov2":
+                if diagram_cluster_backend == "sam3_dinov2":
                     needs_refresh = bool(diagram_cluster_force_refresh)
                     if not cluster_map_path.is_file() or not render_dir.is_dir():
                         needs_refresh = True
@@ -7261,6 +7263,8 @@ class LessonTimeline:
         cluster_maps_root = base_dir / "ClusterMaps"
         cluster_renders_root = base_dir / "ClusterRenders"
         diagram_cluster_backend = str(os.getenv("DIAGRAM_CLUSTER_BACKEND", "stroke") or "stroke").strip().lower()
+        if diagram_cluster_backend == "sam2_dinov2":
+            diagram_cluster_backend = "sam3_dinov2"
         diagram_cluster_force_refresh = str(os.getenv("DIAGRAM_CLUSTER_FORCE_REFRESH", "0") or "0").strip().lower() in {"1", "true", "yes", "on"}
 
         summary: Dict[str, Any] = {
@@ -7297,7 +7301,7 @@ class LessonTimeline:
             renders_dir = cluster_renders_root / f"processed_{idx}"
             img_path = self._resolve_processed_png_path(pid)
 
-            if diagram_cluster_backend == "sam2_dinov2" and img_path:
+            if diagram_cluster_backend == "sam3_dinov2" and img_path:
                 needs_refresh = bool(diagram_cluster_force_refresh)
                 if not cmap_path.is_file() or not renders_dir.is_dir():
                     needs_refresh = True

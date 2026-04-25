@@ -53,6 +53,7 @@ huggingface_hub==1.2.4
 idna==3.11
 ImageIO==2.37.2
 imagesize==1.4.1
+iopath==0.1.10
 Jinja2==3.1.6
 joblib==1.5.2
 lazy_loader==0.4
@@ -65,6 +66,7 @@ networkx==3.6.1
 nltk==3.9.2
 num2words==0.5.14
 numpy==2.2.6
+omegaconf==2.3.0
 
 opencv-contrib-python==4.10.0.84
 

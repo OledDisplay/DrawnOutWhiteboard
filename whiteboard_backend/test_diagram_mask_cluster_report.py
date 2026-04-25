@@ -64,6 +64,12 @@ def _build_config(args: argparse.Namespace) -> DiagramMaskClusters.DiagramMaskCl
         annotation_overlap_drop_ratio=args.annotation_overlap_drop_ratio,
         proposal_nms_iou_thresh=args.proposal_nms_iou_thresh,
         proposal_containment_thresh=args.proposal_containment_thresh,
+        proposal_canvas_max_mask_area_ratio=args.proposal_canvas_max_mask_area_ratio,
+        proposal_canvas_min_border_touches=args.proposal_canvas_min_border_touches,
+        proposal_border_touch_margin_px=args.proposal_border_touch_margin_px,
+        proposal_background_prompt_max_mask_area_ratio=args.proposal_background_prompt_max_mask_area_ratio,
+        proposal_background_prompt_rgb_floor=args.proposal_background_prompt_rgb_floor,
+        proposal_large_mask_near_white_drop_ratio=args.proposal_large_mask_near_white_drop_ratio,
         merge_min_dino_cosine=args.merge_min_dino_cosine,
         merge_min_color_similarity=args.merge_min_color_similarity,
         merge_min_shape_similarity=args.merge_min_shape_similarity,
@@ -80,24 +86,7 @@ def _build_config(args: argparse.Namespace) -> DiagramMaskClusters.DiagramMaskCl
         merge_containment_thresh=args.merge_containment_thresh,
         merge_bbox_gap_px=args.merge_bbox_gap_px,
         merge_bbox_growth_max=args.merge_bbox_growth_max,
-        refiner_enabled=args.refiner_enabled,
-        refiner_model_id=args.refiner_model_id,
-        refiner_prompt_pad_px=args.refiner_prompt_pad_px,
-        refiner_positive_points=args.refiner_positive_points,
-        refiner_negative_points=args.refiner_negative_points,
-        refiner_candidate_bbox_gap_px=args.refiner_candidate_bbox_gap_px,
-        refiner_candidate_min_dino_cosine=args.refiner_candidate_min_dino_cosine,
-        refiner_candidate_min_color_similarity=args.refiner_candidate_min_color_similarity,
-        refiner_candidate_min_shape_similarity=args.refiner_candidate_min_shape_similarity,
-        refiner_candidate_min_combined_score=args.refiner_candidate_min_combined_score,
-        refiner_min_member_coverage=args.refiner_min_member_coverage,
-        refiner_min_coarse_coverage=args.refiner_min_coarse_coverage,
-        refiner_max_extra_area_ratio=args.refiner_max_extra_area_ratio,
-        refiner_max_annotation_overlap=args.refiner_max_annotation_overlap,
-        refiner_duplicate_iou_thresh=args.refiner_duplicate_iou_thresh,
-        refiner_duplicate_containment_thresh=args.refiner_duplicate_containment_thresh,
         clear_existing_outputs=True,
-        log_progress=True,
     )
 
 
@@ -121,7 +110,6 @@ def _write_report(
 
     cards: List[str] = []
     clusters = result.get("cluster_entries") or []
-    coarse_clusters = result.get("coarse_merged_clusters") or []
     merged_clusters = result.get("merged_clusters") or []
     by_feature = {str(row.get("feature_cluster_id")): row for row in merged_clusters if isinstance(row, dict)}
     render_dir = Path(result.get("render_dir")) if result.get("render_dir") else None
@@ -149,9 +137,6 @@ def _write_report(
         rich = by_feature.get(feature_id, {})
         bbox = row.get("bbox_xyxy") if isinstance(row.get("bbox_xyxy"), list) else []
         bbox_text = ", ".join(str(int(v)) for v in bbox) if bbox else "(none)"
-        refined_from = ", ".join(str(x) for x in (rich.get("refined_from_cluster_ids") or []) if str(x)) or "(none)"
-        refine_stage = str(rich.get("refine_stage", "") or "(coarse merge)")
-        refine_score = rich.get("refine_score")
         cards.append(
             "<section class=\"cluster-card\">"
             f"<div class=\"cluster-image\"><img src=\"{_image_data_uri(rgba)}\" alt=\"cluster {pos}\"></div>"
@@ -163,9 +148,6 @@ def _write_report(
             f"<p><strong>SAM stability:</strong> {float(row.get('sam_stability_score', 0.0) or 0.0):.3f}</p>"
             f"<p><strong>Merged from:</strong> {html_lib.escape(', '.join(rich.get('merged_from_mask_ids', []) or [])) or '(none)'}</p>"
             f"<p><strong>Merge count:</strong> {int(rich.get('merge_count', 1) or 1)}</p>"
-            f"<p><strong>Refine stage:</strong> {html_lib.escape(refine_stage)}</p>"
-            f"<p><strong>Refined from clusters:</strong> {html_lib.escape(refined_from)}</p>"
-            f"<p><strong>Refine score:</strong> {float(refine_score or 0.0):.3f}</p>"
             "</div>"
             "</section>"
         )
@@ -185,7 +167,7 @@ def _write_report(
         "pre{white-space:pre-wrap;background:#0f172a;border-radius:8px;padding:12px;overflow:auto;}"
         "</style></head><body>"
         f"<h1>{html_lib.escape(title)}</h1>"
-        f"<p class=\"muted\">Final clusters: {len(clusters)} | Coarse merged clusters: {len(coarse_clusters)} | Raw proposals: {len(result.get('proposals') or [])} | Debug bundle: {debug_dir}</p>"
+        f"<p class=\"muted\">Clusters: {len(clusters)} | Raw proposals: {len(result.get('proposals') or [])} | Debug bundle: {debug_dir}</p>"
         "<div class=\"band\">"
         f"<section class=\"panel\"><h2>Original</h2><img src=\"{_image_data_uri(source_rgb)}\"></section>"
         f"<section class=\"panel\"><h2>Cleaned</h2><img src=\"{_image_data_uri(cleaned_rgb)}\"></section>"
@@ -202,7 +184,7 @@ def _write_report(
 
 
 def main() -> int:
-    parser = argparse.ArgumentParser(description="Run the SAM2 + DINOv2 diagram clustering backend and write an HTML split report.")
+    parser = argparse.ArgumentParser(description="Run the SAM3 + DINOv2 diagram clustering backend and write an HTML split report.")
     parser.add_argument("--processed-id", default="", help="processed_N or N")
     parser.add_argument("--image-path", default="", help="Optional arbitrary image path instead of processed_N.")
     parser.add_argument("--sam-model-id", default=None)
@@ -223,6 +205,12 @@ def main() -> int:
     parser.add_argument("--annotation-overlap-drop-ratio", type=float, default=None)
     parser.add_argument("--proposal-nms-iou-thresh", type=float, default=None)
     parser.add_argument("--proposal-containment-thresh", type=float, default=None)
+    parser.add_argument("--proposal-canvas-max-mask-area-ratio", type=float, default=None)
+    parser.add_argument("--proposal-canvas-min-border-touches", type=int, default=None)
+    parser.add_argument("--proposal-border-touch-margin-px", type=int, default=None)
+    parser.add_argument("--proposal-background-prompt-max-mask-area-ratio", type=float, default=None)
+    parser.add_argument("--proposal-background-prompt-rgb-floor", type=int, default=None)
+    parser.add_argument("--proposal-large-mask-near-white-drop-ratio", type=float, default=None)
     parser.add_argument("--merge-min-dino-cosine", type=float, default=None)
     parser.add_argument("--merge-min-color-similarity", type=float, default=None)
     parser.add_argument("--merge-min-shape-similarity", type=float, default=None)
@@ -239,22 +227,6 @@ def main() -> int:
     parser.add_argument("--merge-containment-thresh", type=float, default=None)
     parser.add_argument("--merge-bbox-gap-px", type=float, default=None)
     parser.add_argument("--merge-bbox-growth-max", type=float, default=None)
-    parser.add_argument("--refiner-enabled", action="store_true")
-    parser.add_argument("--refiner-model-id", default=None)
-    parser.add_argument("--refiner-prompt-pad-px", type=int, default=None)
-    parser.add_argument("--refiner-positive-points", type=int, default=None)
-    parser.add_argument("--refiner-negative-points", type=int, default=None)
-    parser.add_argument("--refiner-candidate-bbox-gap-px", type=float, default=None)
-    parser.add_argument("--refiner-candidate-min-dino-cosine", type=float, default=None)
-    parser.add_argument("--refiner-candidate-min-color-similarity", type=float, default=None)
-    parser.add_argument("--refiner-candidate-min-shape-similarity", type=float, default=None)
-    parser.add_argument("--refiner-candidate-min-combined-score", type=float, default=None)
-    parser.add_argument("--refiner-min-member-coverage", type=float, default=None)
-    parser.add_argument("--refiner-min-coarse-coverage", type=float, default=None)
-    parser.add_argument("--refiner-max-extra-area-ratio", type=float, default=None)
-    parser.add_argument("--refiner-max-annotation-overlap", type=float, default=None)
-    parser.add_argument("--refiner-duplicate-iou-thresh", type=float, default=None)
-    parser.add_argument("--refiner-duplicate-containment-thresh", type=float, default=None)
     parser.add_argument("--open", action="store_true", help="Open the HTML report when done.")
     args = parser.parse_args()
 

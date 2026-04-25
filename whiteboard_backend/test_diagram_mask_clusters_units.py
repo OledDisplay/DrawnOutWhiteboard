@@ -78,6 +78,8 @@ class ProposalSuppressionTests(unittest.TestCase):
         mask_b = np.zeros((80, 80), dtype=bool)
         mask_b[12:48, 12:48] = True
 
+        img = np.full((80, 80, 3), 255, dtype=np.uint8)
+        img[mask_a] = np.array([200, 80, 80], dtype=np.uint8)
         removed_mask = np.zeros((80, 80), dtype=np.uint8)
         cfg = dmc.build_config(
             min_region_area_px=20,
@@ -86,14 +88,95 @@ class ProposalSuppressionTests(unittest.TestCase):
         )
         kept = dmc._suppress_redundant_proposals(
             [
-                {"proposal_id": "a", "mask": mask_a, "bbox_xyxy": [10, 10, 50, 50], "mask_area_px": int(mask_a.sum()), "sam_pred_iou": 0.95, "sam_stability_score": 0.94},
-                {"proposal_id": "b", "mask": mask_b, "bbox_xyxy": [12, 12, 48, 48], "mask_area_px": int(mask_b.sum()), "sam_pred_iou": 0.91, "sam_stability_score": 0.90},
+                {"proposal_id": "a", "prompt_point": [20.0, 20.0], "mask": mask_a, "bbox_xyxy": [10, 10, 50, 50], "mask_area_px": int(mask_a.sum()), "sam_pred_iou": 0.95, "sam_stability_score": 0.94},
+                {"proposal_id": "b", "prompt_point": [20.0, 20.0], "mask": mask_b, "bbox_xyxy": [12, 12, 48, 48], "mask_area_px": int(mask_b.sum()), "sam_pred_iou": 0.91, "sam_stability_score": 0.90},
             ],
             removed_mask,
+            img,
             cfg,
         )
         self.assertEqual(len(kept), 1)
         self.assertEqual(kept[0]["proposal_id"], "a")
+
+    def test_canvas_sized_border_hugging_proposal_is_dropped(self) -> None:
+        giant = np.zeros((100, 100), dtype=bool)
+        giant[0:96, 0:96] = True
+        focused = np.zeros((100, 100), dtype=bool)
+        focused[25:75, 25:75] = True
+
+        img = np.full((100, 100, 3), 255, dtype=np.uint8)
+        img[focused] = np.array([210, 120, 90], dtype=np.uint8)
+        removed_mask = np.zeros((100, 100), dtype=np.uint8)
+        cfg = dmc.build_config(
+            min_region_area_px=20,
+            proposal_canvas_max_mask_area_ratio=0.78,
+            proposal_canvas_min_border_touches=3,
+            proposal_border_touch_margin_px=4,
+        )
+        kept = dmc._suppress_redundant_proposals(
+            [
+                {"proposal_id": "giant", "prompt_point": [2.0, 2.0], "mask": giant, "bbox_xyxy": [0, 0, 96, 96], "mask_area_px": int(giant.sum()), "sam_pred_iou": 0.99, "sam_stability_score": 0.99},
+                {"proposal_id": "focused", "prompt_point": [50.0, 50.0], "mask": focused, "bbox_xyxy": [25, 25, 75, 75], "mask_area_px": int(focused.sum()), "sam_pred_iou": 0.90, "sam_stability_score": 0.90},
+            ],
+            removed_mask,
+            img,
+            cfg,
+        )
+        self.assertEqual([row["proposal_id"] for row in kept], ["focused"])
+
+    def test_large_mask_from_white_background_prompt_is_dropped(self) -> None:
+        giant = np.zeros((100, 100), dtype=bool)
+        giant[8:92, 8:92] = True
+        focused = np.zeros((100, 100), dtype=bool)
+        focused[30:70, 30:70] = True
+
+        img = np.full((100, 100, 3), 255, dtype=np.uint8)
+        img[focused] = np.array([180, 110, 90], dtype=np.uint8)
+        removed_mask = np.zeros((100, 100), dtype=np.uint8)
+        cfg = dmc.build_config(
+            min_region_area_px=20,
+            proposal_canvas_max_mask_area_ratio=0.95,
+            proposal_background_prompt_max_mask_area_ratio=0.45,
+            proposal_background_prompt_rgb_floor=245,
+        )
+        kept = dmc._suppress_redundant_proposals(
+            [
+                {"proposal_id": "giant", "prompt_point": [2.0, 2.0], "mask": giant, "bbox_xyxy": [8, 8, 92, 92], "mask_area_px": int(giant.sum()), "sam_pred_iou": 0.98, "sam_stability_score": 0.98},
+                {"proposal_id": "focused", "prompt_point": [50.0, 50.0], "mask": focused, "bbox_xyxy": [30, 30, 70, 70], "mask_area_px": int(focused.sum()), "sam_pred_iou": 0.90, "sam_stability_score": 0.90},
+            ],
+            removed_mask,
+            img,
+            cfg,
+        )
+        self.assertEqual([row["proposal_id"] for row in kept], ["focused"])
+
+    def test_large_white_heavy_mask_is_dropped_even_without_white_prompt(self) -> None:
+        giant = np.zeros((100, 100), dtype=bool)
+        giant[5:95, 5:95] = True
+        focused = np.zeros((100, 100), dtype=bool)
+        focused[28:72, 28:72] = True
+
+        img = np.full((100, 100, 3), 255, dtype=np.uint8)
+        img[40:60, 40:60] = np.array([180, 120, 90], dtype=np.uint8)
+        img[focused] = np.array([180, 120, 90], dtype=np.uint8)
+        removed_mask = np.zeros((100, 100), dtype=np.uint8)
+        cfg = dmc.build_config(
+            min_region_area_px=20,
+            proposal_canvas_max_mask_area_ratio=0.95,
+            proposal_background_prompt_max_mask_area_ratio=0.45,
+            proposal_background_prompt_rgb_floor=245,
+            proposal_large_mask_near_white_drop_ratio=0.18,
+        )
+        kept = dmc._suppress_redundant_proposals(
+            [
+                {"proposal_id": "giant", "prompt_point": [50.0, 50.0], "mask": giant, "bbox_xyxy": [5, 5, 95, 95], "mask_area_px": int(giant.sum()), "sam_pred_iou": 0.98, "sam_stability_score": 0.98},
+                {"proposal_id": "focused", "prompt_point": [50.0, 50.0], "mask": focused, "bbox_xyxy": [28, 28, 72, 72], "mask_area_px": int(focused.sum()), "sam_pred_iou": 0.90, "sam_stability_score": 0.90},
+            ],
+            removed_mask,
+            img,
+            cfg,
+        )
+        self.assertEqual([row["proposal_id"] for row in kept], ["focused"])
 
 
 class MergeTests(unittest.TestCase):
@@ -329,174 +412,55 @@ class MergeTests(unittest.TestCase):
         self.assertFalse(ok)
         self.assertGreater(metrics["bbox_gap_px"], cfg.merge_similarity_only_bbox_gap_px)
 
-
-class RefinerTests(unittest.TestCase):
-    def _make_cluster_row(
-        self,
-        img: np.ndarray,
-        mask: np.ndarray,
-        *,
-        feature_id: str,
-        dino_embedding: list[float],
-        color_histogram: list[float],
-        contrast_color_histogram: list[float],
-        shape_features: dict[str, float],
-    ) -> dict:
-        row = dmc._build_cluster_row_from_mask(
-            img,
-            mask,
-            [
-                {
-                    "proposal_id": feature_id,
-                    "feature_cluster_id": feature_id,
-                    "sam_pred_iou": 0.95,
-                    "sam_stability_score": 0.93,
-                    "stroke_indexes": [],
-                    "merged_from_mask_ids": [feature_id],
-                    "dino_embedding": dino_embedding,
-                }
-            ],
-            dmc.build_config(crop_pad_px=4),
-            proposal_id=feature_id,
-            feature_cluster_id=feature_id,
-        )
-        assert row is not None
-        row["dino_embedding"] = list(dino_embedding)
-        row["color_histogram"] = list(color_histogram)
-        row["contrast_color_histogram"] = list(contrast_color_histogram)
-        row["shape_features"] = dict(shape_features)
-        row["feature_cluster_id"] = feature_id
-        row["proposal_id"] = feature_id
-        row["merged_from_mask_ids"] = [feature_id]
-        return row
-
-    def test_refiner_dedupes_duplicate_clusters(self) -> None:
-        img = np.full((80, 80, 3), 255, dtype=np.uint8)
-        mask = np.zeros((80, 80), dtype=bool)
-        mask[18:48, 12:42] = True
-        img[mask] = np.array([210, 120, 90], dtype=np.uint8)
-        shape = {"aspect_ratio": 1.0, "solidity": 0.95, "fill_ratio": 0.90, "eccentricity": 0.08}
-        row_a = self._make_cluster_row(
-            img,
-            mask,
-            feature_id="fc_a",
-            dino_embedding=[1.0, 0.0, 0.0],
-            color_histogram=[0.4, 0.6, 0.0, 0.0],
-            contrast_color_histogram=[0.42, 0.58, 0.0, 0.0],
-            shape_features=shape,
-        )
-        row_b = dict(row_a)
-        row_b["feature_cluster_id"] = "fc_b"
-        row_b["proposal_id"] = "fc_b"
-        row_b["merged_from_mask_ids"] = ["fc_b"]
-        row_b["sam_pred_iou"] = 0.90
-
-        cfg = dmc.build_config(
-            refiner_enabled=True,
-            refiner_duplicate_iou_thresh=0.5,
-            refiner_duplicate_containment_thresh=0.8,
-        )
-
-        def _unused_runner(*_args, **_kwargs):
-            raise AssertionError("runner should not be called for pure dedupe")
-
-        final_rows, refine_debug = dmc._refine_merged_clusters_samrefiner_style(
-            img,
-            img,
-            np.zeros(mask.shape, dtype=np.uint8),
-            [row_a, row_b],
-            cfg,
-            refinement_runner=_unused_runner,
-        )
-        self.assertEqual(len(final_rows), 1)
-        self.assertTrue(any(str(x.get("dropped_feature_cluster_id", "")) == "fc_b" for x in refine_debug))
-
-    def test_refiner_groups_similar_clusters_into_one_final_cluster(self) -> None:
-        img = np.full((120, 120, 3), 255, dtype=np.uint8)
+    def test_should_merge_pair_rejects_containment_bridge_when_bbox_growth_is_huge(self) -> None:
         mask_a = np.zeros((120, 120), dtype=bool)
-        mask_a[18:48, 12:42] = True
+        mask_a[35:85, 35:85] = True
         mask_b = np.zeros((120, 120), dtype=bool)
-        mask_b[18:48, 54:84] = True
-        img[mask_a | mask_b] = np.array([210, 120, 90], dtype=np.uint8)
+        mask_b[5:115, 5:115] = True
 
-        shape = {"aspect_ratio": 1.0, "solidity": 0.95, "fill_ratio": 0.90, "eccentricity": 0.08}
-        row_a = self._make_cluster_row(
-            img,
-            mask_a,
-            feature_id="fc_a",
-            dino_embedding=[1.0, 0.0, 0.0],
-            color_histogram=[0.4, 0.6, 0.0, 0.0],
-            contrast_color_histogram=[0.42, 0.58, 0.0, 0.0],
-            shape_features=shape,
-        )
-        row_b = self._make_cluster_row(
-            img,
-            mask_b,
-            feature_id="fc_b",
-            dino_embedding=[0.99, 0.01, 0.0],
-            color_histogram=[0.39, 0.61, 0.0, 0.0],
-            contrast_color_histogram=[0.41, 0.59, 0.0, 0.0],
-            shape_features=shape,
-        )
-
+        base_shape = {"aspect_ratio": 1.0, "solidity": 0.95, "fill_ratio": 0.88, "eccentricity": 0.10}
         cfg = dmc.build_config(
-            refiner_enabled=True,
-            refiner_candidate_bbox_gap_px=24.0,
-            refiner_candidate_min_dino_cosine=0.90,
-            refiner_candidate_min_color_similarity=0.85,
-            refiner_candidate_min_shape_similarity=0.80,
-            refiner_candidate_min_combined_score=0.85,
+            merge_min_dino_cosine=0.90,
+            merge_min_color_similarity=0.90,
+            merge_min_shape_similarity=0.85,
+            merge_min_contrast_color_similarity=0.90,
+            merge_combined_feature_score=0.90,
+            merge_soft_min_dino_cosine=0.90,
+            merge_soft_min_shape_similarity=0.85,
+            merge_iou_thresh=0.30,
+            merge_containment_thresh=0.50,
+            merge_bbox_gap_px=10.0,
+            merge_bbox_growth_max=0.50,
+            merge_similarity_only_min_dino_cosine=0.999,
+            merge_similarity_only_min_color_similarity=0.999,
+            merge_similarity_only_min_shape_similarity=0.999,
+            merge_similarity_only_min_score=0.999,
+            merge_similarity_only_bbox_gap_px=5.0,
         )
-
-        def _runner(image_rgb, _cleaned_rgb, _removed_mask, members, cfg_obj):
-            union_mask = np.logical_or.reduce([np.asarray(m["mask"], dtype=bool) for m in members])
-            return dmc._build_cluster_row_from_mask(
-                image_rgb,
-                union_mask,
-                members,
-                cfg_obj,
-                proposal_id="tmp_refined",
-                feature_cluster_id="tmp_refined",
-                refine_meta={"refine_stage": "samrefiner_style", "refine_score": 0.91},
-            )
-
-        final_rows, _ = dmc._refine_merged_clusters_samrefiner_style(
-            img,
-            img,
-            np.zeros(mask_a.shape, dtype=np.uint8),
-            [row_a, row_b],
+        ok, metrics = dmc._should_merge_pair(
+            {
+                "proposal_id": "small",
+                "mask": mask_a,
+                "bbox_xyxy": [35, 35, 85, 85],
+                "dino_embedding": [1.0, 0.0, 0.0],
+                "color_histogram": [0.4, 0.6, 0.0, 0.0],
+                "contrast_color_histogram": [0.42, 0.58, 0.0, 0.0],
+                "shape_features": dict(base_shape),
+            },
+            {
+                "proposal_id": "large",
+                "mask": mask_b,
+                "bbox_xyxy": [5, 5, 115, 115],
+                "dino_embedding": [0.995, 0.005, 0.0],
+                "color_histogram": [0.39, 0.61, 0.0, 0.0],
+                "contrast_color_histogram": [0.41, 0.59, 0.0, 0.0],
+                "shape_features": dict(base_shape),
+            },
             cfg,
-            refinement_runner=_runner,
         )
-        self.assertEqual(len(final_rows), 1)
-        self.assertEqual(set(final_rows[0]["refined_from_cluster_ids"]), {"fc_a", "fc_b"})
-
-    def test_refiner_preserves_cluster_entry_contract(self) -> None:
-        img = np.full((120, 120, 3), 255, dtype=np.uint8)
-        mask = np.zeros((120, 120), dtype=bool)
-        mask[20:60, 18:62] = True
-        img[mask] = np.array([220, 110, 90], dtype=np.uint8)
-        shape = {"aspect_ratio": 1.1, "solidity": 0.95, "fill_ratio": 0.88, "eccentricity": 0.12}
-        row = self._make_cluster_row(
-            img,
-            mask,
-            feature_id="fc_contract",
-            dino_embedding=[1.0, 0.0, 0.0],
-            color_histogram=[0.4, 0.6, 0.0, 0.0],
-            contrast_color_histogram=[0.42, 0.58, 0.0, 0.0],
-            shape_features=shape,
-        )
-        row["refined_from_cluster_ids"] = ["fc_contract"]
-        row["refine_stage"] = "samrefiner_style"
-        row["refine_score"] = 0.88
-
-        contract = dmc._build_in_memory_cluster_contract([row])
-        self.assertEqual(len(contract["cluster_entries"]), 1)
-        entry = contract["cluster_entries"][0]
-        self.assertEqual(entry["crop_file_mask"], "mask_0000.png")
-        self.assertEqual(entry["bbox_xyxy"], [int(v) for v in row["crop_bbox_xyxy"]])
-        self.assertEqual(entry["refined_from_cluster_ids"], ["fc_contract"])
-        self.assertEqual(entry["refine_stage"], "samrefiner_style")
+        self.assertFalse(ok)
+        self.assertGreaterEqual(metrics["containment"], cfg.merge_containment_thresh)
+        self.assertGreater(metrics["bbox_growth"], cfg.merge_bbox_growth_max)
 
 
 if __name__ == "__main__":

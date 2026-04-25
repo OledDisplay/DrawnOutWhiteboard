@@ -1365,7 +1365,9 @@ def _pipeline_worker(
         except Exception:
             pass
         diagram_cluster_backend = str(os.getenv("DIAGRAM_CLUSTER_BACKEND", "stroke") or "stroke").strip().lower()
-        needs_vectors = diagram_cluster_backend != "sam2_dinov2"
+        if diagram_cluster_backend == "sam2_dinov2":
+            diagram_cluster_backend = "sam3_dinov2"
+        needs_vectors = diagram_cluster_backend != "sam3_dinov2"
 
         if not diagram_text_items or not diagram_preproc_by_idx or (needs_vectors and not diagram_vectors_by_idx):
             try:
@@ -1383,10 +1385,10 @@ def _pipeline_worker(
             print("[done] no diagram items available for clusters -> finished after colours.")
             return
 
-        if diagram_cluster_backend == "sam2_dinov2":
+        if diagram_cluster_backend == "sam3_dinov2":
             import DiagramMaskClusters
 
-            print("[11/11] DiagramMaskClusters (SAM2 + DINOv2, all diagrams, in-memory)...")
+            print("[11/11] DiagramMaskClusters (SAM3 + DINOv2, all diagrams, in-memory)...")
             with stage("DiagramMaskClusters.cluster_diagrams_in_memory"):
                 DiagramMaskClusters.cluster_diagrams_in_memory(
                     preproc_by_idx=diagram_preproc_by_idx,
